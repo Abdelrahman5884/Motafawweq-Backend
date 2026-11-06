@@ -110,3 +110,4 @@ class AuthController extends BaseApiController
         return $this->successResponse(null, 'تم تسجيل الخروج من جميع الأجهزة بنجاح');
     }
 }
+

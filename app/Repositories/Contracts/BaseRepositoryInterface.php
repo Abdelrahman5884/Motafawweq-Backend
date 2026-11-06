@@ -82,3 +82,4 @@ interface BaseRepositoryInterface
      */
     public function delete(int|string $id): bool;
 }
+

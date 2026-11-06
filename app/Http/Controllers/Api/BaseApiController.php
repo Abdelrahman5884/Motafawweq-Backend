@@ -20,3 +20,4 @@ abstract class BaseApiController extends Controller
         return request()->user();
     }
 }
+

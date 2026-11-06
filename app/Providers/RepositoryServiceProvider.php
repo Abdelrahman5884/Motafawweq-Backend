@@ -33,3 +33,4 @@ class RepositoryServiceProvider extends ServiceProvider
         //
     }
 }
+

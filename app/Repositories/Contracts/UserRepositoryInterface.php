@@ -22,3 +22,4 @@ interface UserRepositoryInterface extends BaseRepositoryInterface
      */
     public function search(?string $keyword = null, ?string $role = null, int $perPage = 15): LengthAwarePaginator;
 }
+

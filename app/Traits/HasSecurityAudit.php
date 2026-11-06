@@ -26,3 +26,4 @@ trait HasSecurityAudit
         Log::channel('single')->$level("[SECURITY-AUDIT] {$event}", $payload);
     }
 }
+

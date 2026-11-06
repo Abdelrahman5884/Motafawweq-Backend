@@ -49,3 +49,4 @@ class SecurityHeaders
         return $response;
     }
 }
+

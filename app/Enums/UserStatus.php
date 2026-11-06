@@ -30,3 +30,4 @@ enum UserStatus: string
         };
     }
 }
+

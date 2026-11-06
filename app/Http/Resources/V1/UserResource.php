@@ -29,3 +29,4 @@ class UserResource extends BaseJsonResource
         ];
     }
 }
+

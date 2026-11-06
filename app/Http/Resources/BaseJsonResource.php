@@ -33,3 +33,4 @@ abstract class BaseJsonResource extends JsonResource
         return $date->toIso8601String();
     }
 }
+

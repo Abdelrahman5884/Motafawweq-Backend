@@ -45,3 +45,4 @@ class UserRepository extends BaseRepository implements UserRepositoryInterface
         return $query->latest()->paginate($perPage);
     }
 }
+

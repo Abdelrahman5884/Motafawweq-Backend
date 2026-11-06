@@ -179,3 +179,4 @@ class AuthService extends BaseService
         return $this->userRepository->update($user->id, $allowed);
     }
 }
+

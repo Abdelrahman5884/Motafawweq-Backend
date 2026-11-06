@@ -46,3 +46,4 @@ class UserService extends BaseService
         return $this->userRepository->delete($id);
     }
 }
+
