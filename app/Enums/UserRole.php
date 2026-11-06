@@ -8,6 +8,7 @@ enum UserRole: string
     case TEACHER = 'teacher';
     case STUDENT = 'student';
     case PARENT = 'parent';
+    case CENTER = 'center';
 
     /**
      * Get all role values as an array.
@@ -25,11 +26,11 @@ enum UserRole: string
     public function label(): string
     {
         return match ($this) {
-            self::ADMIN => 'مدير النظام',
+            self::ADMIN   => 'مدير النظام',
             self::TEACHER => 'معلم',
             self::STUDENT => 'طالب',
-            self::PARENT => 'ولي أمر',
+            self::PARENT  => 'ولي أمر',
+            self::CENTER  => 'إدارة سنتر تعليمي',
         };
     }
 }
-
