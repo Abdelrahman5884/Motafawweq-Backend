@@ -66,6 +66,16 @@ interface BaseRepositoryInterface
     public function create(array $attributes): Model;
 
     /**
+     * Create a record bypassing $fillable (service-layer use only, for guarded columns).
+     */
+    public function forceCreate(array $attributes): Model;
+
+    /**
+     * Update a model bypassing $fillable (service-layer use only, for guarded columns).
+     */
+    public function forceUpdate(Model $model, array $attributes): Model;
+
+    /**
      * Update an existing record.
      *
      * @param  int|string  $id

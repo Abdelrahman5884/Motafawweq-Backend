@@ -13,13 +13,18 @@ interface UserRepositoryInterface extends BaseRepositoryInterface
     public function findByEmail(string $email): ?User;
 
     /**
-     * Update user's last login timestamp and IP.
+     * Record a successful login: stamp time/IP and clear the lockout counters.
      */
-    public function updateLastLogin(int $userId, string $ip): bool;
+    public function recordSuccessfulLogin(User $user, string $ip): void;
+
+    /**
+     * Increment failed attempts and lock the account when the threshold is reached.
+     * Returns true when this failure caused the account to become locked.
+     */
+    public function registerFailedAttempt(User $user, int $maxAttempts, int $lockMinutes): bool;
 
     /**
      * Search users by role and keyword.
      */
     public function search(?string $keyword = null, ?string $role = null, int $perPage = 15): LengthAwarePaginator;
 }
-

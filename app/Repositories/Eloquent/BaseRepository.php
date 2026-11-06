@@ -49,6 +49,17 @@ abstract class BaseRepository implements BaseRepositoryInterface
         return $this->model->create($attributes);
     }
 
+    public function forceCreate(array $attributes): Model
+    {
+        return $this->model->forceCreate($attributes);
+    }
+
+    public function forceUpdate(Model $model, array $attributes): Model
+    {
+        $model->forceFill($attributes)->save();
+        return $model;
+    }
+
     public function update(int|string $id, array $attributes): Model
     {
         $record = $this->findOrFail($id);

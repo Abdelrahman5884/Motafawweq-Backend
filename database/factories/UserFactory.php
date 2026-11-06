@@ -30,7 +30,24 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            'role' => \App\Enums\UserRole::STUDENT,
+            'status' => \App\Enums\UserStatus::ACTIVE,
         ];
+    }
+
+    public function admin(): static
+    {
+        return $this->state(fn () => ['role' => \App\Enums\UserRole::ADMIN]);
+    }
+
+    public function suspended(): static
+    {
+        return $this->state(fn () => ['status' => \App\Enums\UserStatus::SUSPENDED]);
+    }
+
+    public function pending(): static
+    {
+        return $this->state(fn () => ['status' => \App\Enums\UserStatus::PENDING]);
     }
 
     /**

@@ -5,11 +5,20 @@ namespace Tests\Feature;
 use App\Enums\UserRole;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class ArchitectureAndSecurityTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Notification::fake();
+    }
 
     /**
      * Test security headers are present on API responses.
@@ -31,7 +40,7 @@ class ArchitectureAndSecurityTest extends TestCase
     public function test_input_sanitization_removes_harmful_tags(): void
     {
         $response = $this->postJson('/api/v1/auth/register', [
-            'name'                  => '<script>alert("hacked")</script>أحمد علي',
+            'name'                  => '<b>أحمد</b> <script></script>علي',
             'email'                 => 'ahmed@motafawweq.test',
             'password'              => 'Password123!',
             'password_confirmation' => 'Password123!',
@@ -40,7 +49,7 @@ class ArchitectureAndSecurityTest extends TestCase
         $response->assertStatus(201);
         $this->assertDatabaseHas('users', [
             'email' => 'ahmed@motafawweq.test',
-            'name'  => 'alert("hacked")أحمد علي', // tags stripped
+            'name'  => 'أحمد علي', // tags stripped
         ]);
     }
 
@@ -55,9 +64,7 @@ class ArchitectureAndSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422)
-                 ->assertJson([
-                     'success' => false,
-                 ])
+                 ->assertJson(['success' => false])
                  ->assertJsonStructure([
                      'success',
                      'message',
@@ -66,13 +73,13 @@ class ArchitectureAndSecurityTest extends TestCase
     }
 
     /**
-     * Test successful login issues a Sanctum token.
+     * Test successful login issues an access/refresh token pair.
      */
     public function test_user_can_login_and_receive_token(): void
     {
-        $user = User::factory()->create([
+        User::factory()->create([
             'email'    => 'student@motafawweq.test',
-            'password' => bcrypt('StrongPass123!'),
+            'password' => 'StrongPass123!',
             'role'     => UserRole::STUDENT,
         ]);
 
@@ -82,13 +89,11 @@ class ArchitectureAndSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(200)
-                 ->assertJson([
-                     'success' => true,
-                 ])
+                 ->assertJson(['success' => true])
                  ->assertJsonStructure([
                      'data' => [
-                         'user' => ['id', 'name', 'email', 'role', 'role_label'],
-                         'token',
+                         'user'   => ['id', 'name', 'email', 'role', 'role_label'],
+                         'tokens' => ['access_token', 'refresh_token'],
                      ],
                  ]);
     }
@@ -98,12 +103,9 @@ class ArchitectureAndSecurityTest extends TestCase
      */
     public function test_unauthenticated_request_returns_401(): void
     {
-        $response = $this->getJson('/api/v1/auth/me');
-
-        $response->assertStatus(401)
-                 ->assertJson([
-                     'success' => false,
-                 ]);
+        $this->getJson('/api/v1/auth/me')
+             ->assertStatus(401)
+             ->assertJson(['success' => false]);
     }
 
     /**
@@ -111,16 +113,11 @@ class ArchitectureAndSecurityTest extends TestCase
      */
     public function test_student_cannot_access_admin_routes(): void
     {
-        $student = User::factory()->create([
-            'role' => UserRole::STUDENT,
-        ]);
+        Sanctum::actingAs(User::factory()->create(['role' => UserRole::STUDENT]), ['access']);
 
-        $response = $this->actingAs($student, 'sanctum')->getJson('/api/v1/admin/users');
-
-        $response->assertStatus(403)
-                 ->assertJson([
-                     'success' => false,
-                 ]);
+        $this->getJson('/api/v1/admin/users')
+             ->assertStatus(403)
+             ->assertJson(['success' => false]);
     }
 
     /**
@@ -128,16 +125,11 @@ class ArchitectureAndSecurityTest extends TestCase
      */
     public function test_admin_can_access_admin_routes(): void
     {
-        $admin = User::factory()->create([
-            'role' => UserRole::ADMIN,
-        ]);
+        Sanctum::actingAs(User::factory()->admin()->create(), ['access']);
 
-        $response = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/admin/users');
-
-        $response->assertStatus(200)
-                 ->assertJson([
-                     'success' => true,
-                 ]);
+        $this->getJson('/api/v1/admin/users')
+             ->assertStatus(200)
+             ->assertJson(['success' => true]);
     }
 
     /**
@@ -146,13 +138,12 @@ class ArchitectureAndSecurityTest extends TestCase
     public function test_user_can_logout_and_revoke_token(): void
     {
         $user = User::factory()->create();
-        $token = $user->createToken('test-token')->plainTextToken;
+        $token = $user->createToken('test-token', ['access'])->plainTextToken;
 
-        $response = $this->withHeader('Authorization', "Bearer $token")
-                         ->postJson('/api/v1/auth/logout');
-
-        $response->assertStatus(200)
-                 ->assertJson(['success' => true]);
+        $this->withHeader('Authorization', "Bearer $token")
+             ->postJson('/api/v1/auth/logout')
+             ->assertStatus(200)
+             ->assertJson(['success' => true]);
 
         $this->assertDatabaseCount('personal_access_tokens', 0);
     }
@@ -162,17 +153,15 @@ class ArchitectureAndSecurityTest extends TestCase
      */
     public function test_user_can_change_password(): void
     {
-        $user = User::factory()->create([
-            'password' => bcrypt('OldPassword123!'),
-        ]);
+        $user = User::factory()->create(['password' => 'OldPassword123!']);
+        Sanctum::actingAs($user, ['access']);
 
-        $response = $this->actingAs($user, 'sanctum')->postJson('/api/v1/auth/change-password', [
-            'current_password'      => 'OldPassword123!',
-            'new_password'          => 'NewStrongPass123!',
+        $this->postJson('/api/v1/auth/change-password', [
+            'current_password'          => 'OldPassword123!',
+            'new_password'              => 'NewStrongPass123!',
             'new_password_confirmation' => 'NewStrongPass123!',
-        ]);
+        ])->assertStatus(200);
 
-        $response->assertStatus(200);
-        $this->assertTrue(\Illuminate\Support\Facades\Hash::check('NewStrongPass123!', $user->fresh()->password));
+        $this->assertTrue(Hash::check('NewStrongPass123!', $user->fresh()->password));
     }
 }

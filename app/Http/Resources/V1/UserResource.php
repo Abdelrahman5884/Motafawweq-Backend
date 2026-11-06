@@ -15,18 +15,19 @@ class UserResource extends BaseJsonResource
     public function toArray(Request $request): array
     {
         return [
-            'id'            => $this->id,
-            'name'          => $this->name,
-            'email'         => $this->email,
-            'role'          => $this->role?->value,
-            'role_label'    => $this->role?->label(),
-            'status'        => $this->status?->value,
-            'status_label'  => $this->status?->label(),
-            'phone'         => $this->phone,
-            'avatar'        => $this->avatar,
-            'last_login_at' => $this->formatDate($this->last_login_at),
-            'created_at'    => $this->formatDate($this->created_at),
+            'id'                => $this->id,
+            'name'              => $this->name,
+            'email'             => $this->email,
+            'email_verified'    => $this->email_verified_at !== null,
+            'email_verified_at' => $this->formatDate($this->email_verified_at),
+            'role'              => $this->role?->value,
+            'role_label'        => $this->role?->label(),
+            'status'            => $this->status?->value,
+            'status_label'      => $this->status?->label(),
+            'phone'             => $this->phone,
+            'avatar'            => $this->avatar,
+            'last_login_at'     => $this->formatDate($this->last_login_at),
+            'created_at'        => $this->formatDate($this->created_at),
         ];
     }
 }
-

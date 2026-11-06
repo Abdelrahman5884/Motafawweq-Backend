@@ -26,8 +26,9 @@ abstract class BaseApiRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
-        $sanitized = $this->sanitizeInput($this->all());
-        $this->replace($sanitized);
+        $secrets = $this->only(\App\Http\Middleware\SanitizeInput::EXCEPT);
+        $sanitized = $this->sanitizeInput($this->except(\App\Http\Middleware\SanitizeInput::EXCEPT));
+        $this->replace(array_merge($sanitized, $secrets));
     }
 
     /**

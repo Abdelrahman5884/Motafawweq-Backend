@@ -2,181 +2,237 @@
 
 namespace App\Services\V1\Auth;
 
+use App\Enums\LoginStatus;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
+use App\Enums\VerificationCodeType;
+use App\Exceptions\AuthSecurityException;
+use App\Models\PersonalAccessToken;
 use App\Models\User;
+use App\Notifications\Auth\NewDeviceLoginNotification;
+use App\Notifications\Auth\PasswordChangedNotification;
+use App\Notifications\Auth\VerifyEmailOtpNotification;
+use App\Repositories\Contracts\LoginHistoryRepositoryInterface;
 use App\Repositories\Contracts\UserRepositoryInterface;
 use App\Services\BaseService;
-use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class AuthService extends BaseService
 {
+    /** Lazily computed bcrypt hash used to equalise timing when a user does not exist. */
+    private static ?string $dummyHash = null;
+
     public function __construct(
-        protected UserRepositoryInterface $userRepository
+        protected UserRepositoryInterface $userRepository,
+        protected LoginHistoryRepositoryInterface $loginHistory,
+        protected TokenService $tokenService,
+        protected OtpService $otpService
     ) {}
 
     /**
-     * Register a new user in the platform.
+     * Register a new user, send an email-verification OTP and open a session.
      *
-     * @param  array  $data
-     * @return array{user: User, token: string}
+     * @return array{user: User, tokens: array}
      */
-    public function register(array $data): array
+    public function register(array $data, ?string $ip, ?string $userAgent): array
     {
-        return $this->transaction(function () use ($data) {
-            $user = $this->userRepository->create([
-                'name'     => $data['name'],
-                'email'    => strtolower($data['email']),
-                'password' => Hash::make($data['password']),
-                'role'     => $data['role'] ?? UserRole::STUDENT->value,
-                'status'   => UserStatus::ACTIVE->value,
-                'phone'    => $data['phone'] ?? null,
+        $role = UserRole::from($data['role'] ?? UserRole::STUDENT->value);
+
+        // Defence in depth: request validation already restricts roles, re-check here
+        if (!in_array($role->value, config('auth_security.self_registration_roles'), true)) {
+            throw ValidationException::withMessages(['role' => ['الدور المختار غير متاح للتسجيل.']]);
+        }
+
+        $status = in_array($role->value, config('auth_security.roles_requiring_approval'), true)
+            ? UserStatus::PENDING
+            : UserStatus::ACTIVE;
+
+        [$user, $tokens] = $this->transaction(function () use ($data, $role, $status, $ip, $userAgent) {
+            /** @var User $user */
+            $user = $this->userRepository->forceCreate([
+                'name'                => $data['name'],
+                'email'               => strtolower(trim($data['email'])),
+                'password'            => $data['password'], // hashed by the model cast
+                'phone'               => $data['phone'] ?? null,
+                'role'                => $role->value,
+                'status'              => $status->value,
+                'password_changed_at' => now(),
             ]);
 
-            $this->logSecurityEvent('USER_REGISTERED', [
-                'user_id' => $user->id,
-                'role'    => $user->role->value,
-                'email'   => $user->email,
-            ]);
+            $tokens = $this->tokenService->issuePair($user, $ip, $userAgent);
+            $this->loginHistory->record($user, $user->email, LoginStatus::SUCCESS, $ip, $userAgent);
 
-            // Issue token with role capability
-            $token = $user->createToken('auth-token', ["role:{$user->role->value}"])->plainTextToken;
-
-            return [
-                'user'  => $user,
-                'token' => $token,
-            ];
+            return [$user, $tokens];
         });
-    }
 
-    /**
-     * Authenticate user credentials and issue a secure bearer token.
-     *
-     * @param  string  $email
-     * @param  string  $password
-     * @param  string  $ip
-     * @param  string  $userAgent
-     * @return array{user: User, token: string}
-     * @throws ValidationException
-     */
-    public function login(string $email, string $password, string $ip, string $userAgent): array
-    {
-        $normalizedEmail = strtolower(trim($email));
-        $user = $this->userRepository->findByEmail($normalizedEmail);
+        // Outside the transaction: a mail failure must never roll back the account
+        $code = $this->otpService->generate($user, VerificationCodeType::EMAIL_VERIFICATION, $ip);
+        $this->safeNotify($user, new VerifyEmailOtpNotification($code, (int) config('auth_security.otp.ttl_minutes')));
 
-        // Security: timing-attack mitigation by hashing dummy password if user not found
-        if (!$user || !Hash::check($password, $user->password)) {
-            $this->logSecurityEvent('FAILED_LOGIN_ATTEMPT', [
-                'email' => $normalizedEmail,
-                'ip'    => $ip,
-            ], 'warning');
-
-            throw ValidationException::withMessages([
-                'email' => ['البريد الإلكتروني أو كلمة المرور غير صحيحة.'],
-            ]);
-        }
-
-        // Account status check (suspended / deactivated)
-        if ($user->status === UserStatus::SUSPENDED) {
-            $this->logSecurityEvent('BLOCKED_LOGIN_SUSPENDED_ACCOUNT', [
-                'user_id' => $user->id,
-                'email'   => $user->email,
-            ], 'warning');
-
-            throw ValidationException::withMessages([
-                'email' => ['تم تعليق هذا الحساب. يرجى التواصل مع إدارة المنصة.'],
-            ]);
-        }
-
-        // Update login audit trail
-        $this->userRepository->updateLastLogin($user->id, $ip);
-
-        // Log successful authentication
-        $this->logSecurityEvent('SUCCESSFUL_LOGIN', [
+        $this->logSecurityEvent('USER_REGISTERED', [
             'user_id' => $user->id,
-            'role'    => $user->role->value,
-            'ip'      => $ip,
+            'role'    => $role->value,
+            'status'  => $status->value,
         ]);
 
-        // Generate token with role ability
-        $token = $user->createToken(
-            name: 'auth-token-' . substr(md5($userAgent . time()), 0, 8),
-            abilities: ["role:{$user->role->value}"]
-        )->plainTextToken;
-
-        return [
-            'user'  => $user,
-            'token' => $token,
-        ];
+        return ['user' => $user->fresh(), 'tokens' => $tokens];
     }
 
     /**
-     * Revoke current access token.
+     * Authenticate credentials with lockout, timing-attack mitigation and audit trail.
+     *
+     * @return array{user: User, tokens: array}
+     * @throws AuthSecurityException
+     */
+    public function login(string $email, string $password, ?string $ip, ?string $userAgent): array
+    {
+        $email = strtolower(trim($email));
+        $user = $this->userRepository->findByEmail($email);
+
+        // 1) Unknown email: burn the same CPU time as a real check, answer generically
+        if (!$user) {
+            Hash::check($password, self::dummyHash());
+            $this->loginHistory->record(null, $email, LoginStatus::FAILED, $ip, $userAgent);
+            $this->logSecurityEvent('FAILED_LOGIN_UNKNOWN_EMAIL', ['email' => $email], 'warning');
+
+            throw AuthSecurityException::invalidCredentials();
+        }
+
+        // 2) Temporarily locked account
+        if ($user->isLocked()) {
+            $this->loginHistory->record($user, $email, LoginStatus::LOCKED, $ip, $userAgent);
+            throw AuthSecurityException::accountLocked((int) now()->diffInSeconds($user->locked_until));
+        }
+
+        // 3) Wrong password -> count it, lock on threshold
+        if (!Hash::check($password, $user->password)) {
+            $lockedNow = $this->userRepository->registerFailedAttempt(
+                $user,
+                (int) config('auth_security.lockout.max_attempts'),
+                (int) config('auth_security.lockout.decay_minutes')
+            );
+
+            $this->loginHistory->record($user, $email, LoginStatus::FAILED, $ip, $userAgent);
+            $this->logSecurityEvent($lockedNow ? 'ACCOUNT_LOCKED' : 'FAILED_LOGIN_ATTEMPT', [
+                'user_id' => $user->id,
+            ], 'warning');
+
+            if ($lockedNow) {
+                throw AuthSecurityException::accountLocked((int) config('auth_security.lockout.decay_minutes') * 60);
+            }
+
+            throw AuthSecurityException::invalidCredentials();
+        }
+
+        // 4) Correct password but account suspended (checked AFTER password to avoid enumeration)
+        if ($user->status === UserStatus::SUSPENDED) {
+            $this->loginHistory->record($user, $email, LoginStatus::BLOCKED, $ip, $userAgent);
+            $this->logSecurityEvent('BLOCKED_LOGIN_SUSPENDED_ACCOUNT', ['user_id' => $user->id], 'warning');
+
+            throw AuthSecurityException::accountSuspended();
+        }
+
+        // 5) Upgrade hash transparently if the hashing cost/algorithm changed
+        if (Hash::needsRehash($user->password)) {
+            $this->userRepository->forceUpdate($user, ['password' => $password]);
+        }
+
+        // 6) New-device alert (only if the user has logged in before)
+        $hadPreviousLogins = $user->last_login_at !== null;
+        $knownDevice = $this->loginHistory->isKnownDevice($user, $ip, $userAgent);
+
+        $this->userRepository->recordSuccessfulLogin($user, (string) $ip);
+        $this->loginHistory->record($user, $email, LoginStatus::SUCCESS, $ip, $userAgent);
+        $tokens = $this->tokenService->issuePair($user, $ip, $userAgent);
+
+        if ($hadPreviousLogins && !$knownDevice) {
+            $this->safeNotify($user, new NewDeviceLoginNotification($ip, $userAgent));
+        }
+
+        $this->logSecurityEvent('SUCCESSFUL_LOGIN', ['user_id' => $user->id, 'new_device' => !$knownDevice]);
+
+        return ['user' => $user->fresh(), 'tokens' => $tokens];
+    }
+
+    /**
+     * Exchange a valid refresh token for a new token pair (rotation).
+     */
+    public function refresh(User $user, PersonalAccessToken $refreshToken, ?string $ip, ?string $userAgent): array
+    {
+        if ($user->status === UserStatus::SUSPENDED) {
+            $this->tokenService->revokeAll($user);
+            throw AuthSecurityException::accountSuspended();
+        }
+
+        $tokens = $this->tokenService->rotate($user, $refreshToken, $ip, $userAgent);
+        $this->logSecurityEvent('TOKEN_REFRESHED', ['user_id' => $user->id, 'session_id' => $tokens['session_id']]);
+
+        return $tokens;
+    }
+
+    /**
+     * Logout the current device (destroys both access & refresh tokens of the session).
      */
     public function logout(User $user): void
     {
-        $user->currentAccessToken()?->delete();
+        /** @var PersonalAccessToken|null $current */
+        $current = $user->currentAccessToken();
 
-        $this->logSecurityEvent('USER_LOGOUT', [
-            'user_id' => $user->id,
-        ]);
+        if ($current?->session_id) {
+            $this->tokenService->revokeSession($user, $current->session_id);
+        } else {
+            $current?->delete();
+        }
+
+        $this->logSecurityEvent('USER_LOGOUT', ['user_id' => $user->id]);
     }
 
-    /**
-     * Revoke all access tokens across all devices.
-     */
     public function logoutAllDevices(User $user): void
     {
-        $user->tokens()->delete();
-
-        $this->logSecurityEvent('USER_LOGOUT_ALL_DEVICES', [
-            'user_id' => $user->id,
-        ]);
+        $this->tokenService->revokeAll($user);
+        $this->logSecurityEvent('USER_LOGOUT_ALL_DEVICES', ['user_id' => $user->id]);
     }
 
     /**
-     * Change user password securely.
+     * Change password (requires current password) and kill every other session.
      *
-     * @param  User  $user
-     * @param  string  $currentPassword
-     * @param  string  $newPassword
-     * @return void
      * @throws ValidationException
      */
-    public function changePassword(User $user, string $currentPassword, string $newPassword): void
+    public function changePassword(User $user, string $currentPassword, string $newPassword, ?string $ip): void
     {
         if (!Hash::check($currentPassword, $user->password)) {
-            $this->logSecurityEvent('FAILED_PASSWORD_CHANGE_ATTEMPT', [
-                'user_id' => $user->id,
-            ], 'warning');
+            $this->logSecurityEvent('FAILED_PASSWORD_CHANGE_ATTEMPT', ['user_id' => $user->id], 'warning');
 
             throw ValidationException::withMessages([
                 'current_password' => ['كلمة المرور الحالية غير صحيحة.'],
             ]);
         }
 
-        $this->userRepository->update($user->id, [
-            'password' => Hash::make($newPassword),
+        $this->userRepository->forceUpdate($user, [
+            'password'            => $newPassword,
+            'password_changed_at' => now(),
         ]);
 
-        // Revoke other sessions/tokens for security
-        $currentTokenId = $user->currentAccessToken()?->id;
-        $user->tokens()->where('id', '!=', $currentTokenId)->delete();
+        /** @var PersonalAccessToken|null $current */
+        $current = $user->currentAccessToken();
+        $this->tokenService->revokeAllExcept($user, $current?->session_id);
 
-        $this->logSecurityEvent('PASSWORD_CHANGED_SUCCESSFULLY', [
-            'user_id' => $user->id,
-        ]);
+        $this->safeNotify($user, new PasswordChangedNotification($ip));
+        $this->logSecurityEvent('PASSWORD_CHANGED_SUCCESSFULLY', ['user_id' => $user->id]);
     }
 
     /**
-     * Update user profile information.
+     * Update allowed profile fields only.
      */
     public function updateProfile(User $user, array $data): User
     {
         $allowed = array_intersect_key($data, array_flip(['name', 'phone', 'avatar']));
         return $this->userRepository->update($user->id, $allowed);
     }
-}
 
+    private static function dummyHash(): string
+    {
+        return self::$dummyHash ??= Hash::make('motafawweq-timing-equaliser');
+    }
+}

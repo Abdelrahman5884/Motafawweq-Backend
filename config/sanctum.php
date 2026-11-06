@@ -50,7 +50,9 @@ return [
     |
     */
 
-    'expiration' => env('SANCTUM_EXPIRATION', 10080),
+    // Per-token expiry is set explicitly (access: short, refresh: long) - see config/auth_security.php.
+    // Keep this null so the global value does not cut refresh tokens short.
+    'expiration' => env('SANCTUM_EXPIRATION'),
 
     /*
     |--------------------------------------------------------------------------
