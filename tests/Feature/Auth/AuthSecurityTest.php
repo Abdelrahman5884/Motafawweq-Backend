@@ -3,13 +3,16 @@
 namespace Tests\Feature\Auth;
 
 use App\Enums\UserStatus;
+use App\Mail\Transports\BrevoApiTransport;
 use App\Models\User;
 use App\Notifications\Auth\PasswordChangedNotification;
 use App\Notifications\Auth\ResetPasswordOtpNotification;
 use App\Notifications\Auth\VerifyEmailOtpNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
+use Symfony\Component\Mime\Email;
 use Tests\TestCase;
 
 class AuthSecurityTest extends TestCase
@@ -470,6 +473,118 @@ class AuthSecurityTest extends TestCase
         $this->bearer($access)->getJson('/api/v1/auth/me')->assertOk();
         $this->bearer($access)->getJson('/api/v1/auth/sessions')
             ->assertStatus(403)->assertJsonPath('error_code', 'ACCOUNT_PENDING');
+    }
+
+    /* ----------------------------------------------------------------- */
+    /* Student Code & Parent-Student Linking                              */
+    /* ----------------------------------------------------------------- */
+
+    public function test_student_registration_generates_unique_student_code(): void
+    {
+        $res = $this->postJson('/api/v1/auth/register', [
+            'name'                  => 'عمر طارق',
+            'email'                 => 'omar.student@motafawweq.test',
+            'password'              => self::STRONG_PASSWORD,
+            'password_confirmation' => self::STRONG_PASSWORD,
+            'role'                  => 'student',
+        ])->assertCreated();
+
+        $code = $res->json('data.user.student_code');
+        $this->assertNotEmpty($code);
+        $this->assertMatchesRegularExpression('/^STD-[A-Z0-9]{6}$/', $code);
+    }
+
+    public function test_parent_registration_requires_valid_student_code_and_links_student(): void
+    {
+        $studentRes = $this->postJson('/api/v1/auth/register', [
+            'name'                  => 'عمر طارق',
+            'email'                 => 'omar.child@motafawweq.test',
+            'password'              => self::STRONG_PASSWORD,
+            'password_confirmation' => self::STRONG_PASSWORD,
+            'role'                  => 'student',
+        ])->assertCreated();
+
+        $studentCode = $studentRes->json('data.user.student_code');
+
+        // 1) Missing student_code fails
+        $this->postJson('/api/v1/auth/register', [
+            'name'                  => 'طارق القاضي',
+            'email'                 => 'parent1@motafawweq.test',
+            'password'              => self::STRONG_PASSWORD,
+            'password_confirmation' => self::STRONG_PASSWORD,
+            'role'                  => 'parent',
+        ])->assertStatus(422)->assertJsonValidationErrors('student_code');
+
+        // 2) Invalid student_code fails
+        $this->postJson('/api/v1/auth/register', [
+            'name'                  => 'طارق القاضي',
+            'email'                 => 'parent2@motafawweq.test',
+            'password'              => self::STRONG_PASSWORD,
+            'password_confirmation' => self::STRONG_PASSWORD,
+            'role'                  => 'parent',
+            'student_code'          => 'WRONG-9999',
+        ])->assertStatus(422)->assertJsonValidationErrors('student_code');
+
+        // 3) Valid student_code succeeds and links the child
+        $parentRes = $this->postJson('/api/v1/auth/register', [
+            'name'                  => 'طارق القاضي',
+            'email'                 => 'parent3@motafawweq.test',
+            'password'              => self::STRONG_PASSWORD,
+            'password_confirmation' => self::STRONG_PASSWORD,
+            'role'                  => 'parent',
+            'student_code'          => strtolower($studentCode),
+        ])->assertCreated();
+
+        $this->assertSame('parent', $parentRes->json('data.user.role'));
+        $linkedChildren = $parentRes->json('data.user.linked_children');
+        $this->assertCount(1, $linkedChildren);
+        $this->assertSame($studentCode, $linkedChildren[0]['student_code']);
+    }
+
+    /* ----------------------------------------------------------------- */
+    /* Bilingual Localization (ar / en) & Brevo API Transport             */
+    /* ----------------------------------------------------------------- */
+
+    public function test_validation_and_error_messages_respect_accept_language_header(): void
+    {
+        $arResponse = $this->withHeader('Accept-Language', 'ar')
+            ->postJson('/api/v1/auth/login', ['email' => 'not-an-email', 'password' => '']);
+
+        $arResponse->assertStatus(422);
+        $this->assertStringContainsString('بيانات الإدخال غير صالحة', $arResponse->json('message'));
+        $this->assertStringContainsString('البريد الإلكتروني', $arResponse->json('errors.email.0'));
+
+        $enResponse = $this->withHeader('Accept-Language', 'en')
+            ->postJson('/api/v1/auth/login', ['email' => 'not-an-email', 'password' => '']);
+
+        $enResponse->assertStatus(422);
+        $this->assertStringContainsString('invalid', strtolower($enResponse->json('message')));
+        $this->assertStringContainsString('email', strtolower($enResponse->json('errors.email.0')));
+    }
+
+    public function test_brevo_api_transport_sends_http_request_to_brevo_endpoint(): void
+    {
+        Http::fake([
+            'https://api.brevo.com/v3/smtp/email' => Http::response(['messageId' => '<2026@brevo.com>'], 201),
+        ]);
+
+        $transport = new BrevoApiTransport('xkeysib-test-api-key');
+
+        $email = (new Email())
+            ->from('noreply@motafawweq.me')
+            ->to('student@motafawweq.me')
+            ->subject('Verify Email')
+            ->html('<p>Your OTP is 123456</p>')
+            ->text('Your OTP is 123456');
+
+        $transport->send($email);
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://api.brevo.com/v3/smtp/email'
+                && $request->hasHeader('api-key', 'xkeysib-test-api-key')
+                && $request['subject'] === 'Verify Email'
+                && $request['to'][0]['email'] === 'student@motafawweq.me';
+        });
     }
 }
 

@@ -12,13 +12,4 @@ class VerifyEmailRequest extends BaseApiRequest
             'code' => ['required', 'string', 'digits:' . config('auth_security.otp.length')],
         ];
     }
-
-    public function messages(): array
-    {
-        return [
-            'code.required' => 'رمز التحقق مطلوب.',
-            'code.digits'   => 'رمز التحقق يجب أن يتكون من ' . config('auth_security.otp.length') . ' أرقام.',
-        ];
-    }
 }
-

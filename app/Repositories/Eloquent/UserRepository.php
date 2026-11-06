@@ -2,9 +2,11 @@
 
 namespace App\Repositories\Eloquent;
 
+use App\Enums\UserRole;
 use App\Models\User;
 use App\Repositories\Contracts\UserRepositoryInterface;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Str;
 
 class UserRepository extends BaseRepository implements UserRepositoryInterface
 {
@@ -16,6 +18,28 @@ class UserRepository extends BaseRepository implements UserRepositoryInterface
     public function findByEmail(string $email): ?User
     {
         return $this->model->where('email', strtolower(trim($email)))->first();
+    }
+
+    public function findStudentByCode(string $code): ?User
+    {
+        $normalized = strtoupper(trim($code));
+        if ($normalized === '') {
+            return null;
+        }
+
+        return $this->model
+            ->where('role', UserRole::STUDENT->value)
+            ->where('student_code', $normalized)
+            ->first();
+    }
+
+    public function generateUniqueStudentCode(): string
+    {
+        do {
+            $code = 'STD-' . strtoupper(Str::random(6));
+        } while ($this->model->where('student_code', $code)->exists());
+
+        return $code;
     }
 
     public function recordSuccessfulLogin(User $user, string $ip): void

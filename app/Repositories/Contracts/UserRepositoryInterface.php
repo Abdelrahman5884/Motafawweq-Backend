@@ -13,6 +13,16 @@ interface UserRepositoryInterface extends BaseRepositoryInterface
     public function findByEmail(string $email): ?User;
 
     /**
+     * Find a student user by their unique student code.
+     */
+    public function findStudentByCode(string $code): ?User;
+
+    /**
+     * Generate a unique student code (e.g. STD-XXXXXX).
+     */
+    public function generateUniqueStudentCode(): string;
+
+    /**
      * Record a successful login: stamp time/IP and clear the lockout counters.
      */
     public function recordSuccessfulLogin(User $user, string $ip): void;

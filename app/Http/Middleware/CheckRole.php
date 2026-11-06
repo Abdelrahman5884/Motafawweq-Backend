@@ -34,7 +34,7 @@ class CheckRole
         }
 
         if (!in_array($userRole, $allowedRoles, true)) {
-            return $this->forbiddenResponse('ليس لديك الصلاحية الكافية للوصول إلى هذا القسم.');
+            return $this->forbiddenResponse(__('messages.forbidden'));
         }
 
         return $next($request);

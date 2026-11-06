@@ -34,7 +34,7 @@ class OtpService extends BaseService
 
         if ($latest && $latest->created_at->diffInSeconds(now()) < $cooldown) {
             $wait = $cooldown - (int) $latest->created_at->diffInSeconds(now());
-            throw new ThrottleRequestsException("يرجى الانتظار {$wait} ثانية قبل طلب رمز جديد.", null, ['Retry-After' => $wait]);
+            throw new ThrottleRequestsException(__('messages.otp_cooldown', ['seconds' => $wait]), null, ['Retry-After' => $wait]);
         }
 
         $this->codes->invalidateAll($user, $type);
@@ -64,12 +64,12 @@ class OtpService extends BaseService
         $maxAttempts = (int) config('auth_security.otp.max_attempts');
 
         if (!$record) {
-            $this->fail('الرمز غير صالح أو منتهي الصلاحية. اطلب رمزاً جديداً.');
+            $this->fail(__('messages.otp_invalid'));
         }
 
         if ($record->attempts >= $maxAttempts) {
             $record->forceFill(['used_at' => now()])->save();
-            $this->fail('تم تجاوز عدد المحاولات المسموح بها لهذا الرمز. اطلب رمزاً جديداً.');
+            $this->fail(__('messages.otp_max_attempts'));
         }
 
         if (!hash_equals($record->code_hash, $this->hash($user, $type, $code))) {
@@ -84,10 +84,10 @@ class OtpService extends BaseService
 
             if ($remaining === 0) {
                 $record->forceFill(['used_at' => now()])->save();
-                $this->fail('تم تجاوز عدد المحاولات المسموح بها لهذا الرمز. اطلب رمزاً جديداً.');
+                $this->fail(__('messages.otp_max_attempts'));
             }
 
-            $this->fail("الرمز غير صحيح. المحاولات المتبقية: {$remaining}.");
+            $this->fail(__('messages.otp_wrong', ['remaining' => $remaining]));
         }
 
         $record->forceFill(['used_at' => now()])->save();

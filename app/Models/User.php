@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -80,6 +81,24 @@ class User extends Authenticatable
     public function verificationCodes(): HasMany
     {
         return $this->hasMany(VerificationCode::class);
+    }
+
+    /**
+     * Students linked to this parent account.
+     */
+    public function children(): BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'parent_student', 'parent_id', 'student_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Parents linked to this student account.
+     */
+    public function parents(): BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'parent_student', 'student_id', 'parent_id')
+            ->withTimestamps();
     }
 
     /* ----------------------------------------------------------------- */

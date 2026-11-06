@@ -41,7 +41,7 @@ class EmailVerificationService extends BaseService
     protected function ensureNotVerified(User $user): void
     {
         if ($user->hasVerifiedEmail()) {
-            throw ValidationException::withMessages(['email' => ['البريد الإلكتروني مؤكد بالفعل.']]);
+            throw ValidationException::withMessages(['email' => [__('messages.email_already_verified')]]);
         }
     }
 }

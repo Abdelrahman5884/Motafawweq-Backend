@@ -16,11 +16,12 @@ class DatabaseSeeder extends Seeder
     {
         $accounts = [
             [
-                'name'   => 'عمر طارق القاضي',
-                'email'  => 'omar.tarek@motafawweq.me',
-                'phone'  => '01123456789',
-                'role'   => UserRole::STUDENT->value,
-                'avatar' => 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80',
+                'name'         => 'عمر طارق القاضي',
+                'email'        => 'omar.tarek@motafawweq.me',
+                'phone'        => '01123456789',
+                'role'         => UserRole::STUDENT->value,
+                'student_code' => 'OMAR-2026',
+                'avatar'       => 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80',
             ],
             [
                 'name'   => 'د. سلمى السيد',
@@ -62,11 +63,18 @@ class DatabaseSeeder extends Seeder
                         'avatar'              => $account['avatar'],
                         'password'            => 'Motafawweq@2026',
                         'role'                => $account['role'],
+                        'student_code'        => $account['student_code'] ?? null,
                         'status'              => UserStatus::ACTIVE->value,
                         'email_verified_at'   => now(),
                         'password_changed_at' => now(),
                     ]
                 );
+            }
+
+            $omar = User::query()->where('email', 'omar.tarek@motafawweq.me')->first();
+            $tarek = User::query()->where('email', 'tarek.kady@gmail.com')->first();
+            if ($omar && $tarek) {
+                $tarek->children()->syncWithoutDetaching([$omar->id]);
             }
         });
     }

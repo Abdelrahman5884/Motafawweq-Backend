@@ -55,7 +55,7 @@ class PasswordResetService extends BaseService
         $user = $this->userRepository->findByEmail($email);
 
         if (!$user || $user->status === UserStatus::SUSPENDED) {
-            throw ValidationException::withMessages(['code' => ['الرمز غير صالح أو منتهي الصلاحية. اطلب رمزاً جديداً.']]);
+            throw ValidationException::withMessages(['code' => [__('messages.otp_invalid')]]);
         }
 
         $this->otpService->verify($user, VerificationCodeType::PASSWORD_RESET, $code);

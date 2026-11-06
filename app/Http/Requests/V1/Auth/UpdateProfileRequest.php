@@ -17,14 +17,4 @@ class UpdateProfileRequest extends BaseApiRequest
             'avatar' => ['nullable', 'string', 'max:255'],
         ];
     }
-
-    public function messages(): array
-    {
-        return [
-            'name.required' => 'حقل الاسم مطلوب.',
-            'name.min'      => 'يجب ألا يقل الاسم عن 3 أحرف.',
-            'phone.unique'  => 'رقم الهاتف مسجل مسبقاً لمستخدم آخر.',
-        ];
-    }
 }
-

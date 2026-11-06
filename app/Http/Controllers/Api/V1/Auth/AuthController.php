@@ -21,9 +21,6 @@ class AuthController extends BaseApiController
         protected AuthService $authService
     ) {}
 
-    /**
-     * POST /auth/register
-     */
     public function register(RegisterRequest $request): JsonResponse
     {
         $result = $this->authService->register(
@@ -35,12 +32,9 @@ class AuthController extends BaseApiController
         return $this->createdResponse([
             'user'   => new UserResource($result['user']),
             'tokens' => new AuthTokenResource($result['tokens']),
-        ], 'تم إنشاء الحساب بنجاح. تم إرسال رمز التأكيد إلى بريدك الإلكتروني.');
+        ], __('messages.register_success'));
     }
 
-    /**
-     * POST /auth/login
-     */
     public function login(LoginRequest $request): JsonResponse
     {
         $result = $this->authService->login(
@@ -53,12 +47,9 @@ class AuthController extends BaseApiController
         return $this->successResponse([
             'user'   => new UserResource($result['user']),
             'tokens' => new AuthTokenResource($result['tokens']),
-        ], 'تم تسجيل الدخول بنجاح');
+        ], __('messages.login_success'));
     }
 
-    /**
-     * POST /auth/refresh  (Authorization: Bearer <refresh_token>)
-     */
     public function refresh(Request $request): JsonResponse
     {
         $token = $request->user()->currentAccessToken();
@@ -69,33 +60,24 @@ class AuthController extends BaseApiController
 
         $tokens = $this->authService->refresh($request->user(), $token, $request->ip(), $request->userAgent());
 
-        return $this->successResponse(new AuthTokenResource($tokens), 'تم تجديد الجلسة بنجاح');
+        return $this->successResponse(new AuthTokenResource($tokens), __('messages.refresh_success'));
     }
 
-    /**
-     * GET /auth/me
-     */
     public function me(Request $request): JsonResponse
     {
         return $this->successResponse(
             new UserResource($request->user()),
-            'تم جلب بيانات الملف الشخصي بنجاح'
+            __('messages.profile_fetched')
         );
     }
 
-    /**
-     * PUT /auth/profile
-     */
     public function updateProfile(UpdateProfileRequest $request): JsonResponse
     {
         $updatedUser = $this->authService->updateProfile($request->user(), $request->validated());
 
-        return $this->successResponse(new UserResource($updatedUser), 'تم تحديث بيانات الملف الشخصي بنجاح');
+        return $this->successResponse(new UserResource($updatedUser), __('messages.profile_updated'));
     }
 
-    /**
-     * POST /auth/change-password
-     */
     public function changePassword(ChangePasswordRequest $request): JsonResponse
     {
         $this->authService->changePassword(
@@ -105,26 +87,20 @@ class AuthController extends BaseApiController
             ip: $request->ip()
         );
 
-        return $this->successResponse(null, 'تم تغيير كلمة المرور بنجاح وتم تسجيل الخروج من باقي الأجهزة');
+        return $this->successResponse(null, __('messages.password_changed'));
     }
 
-    /**
-     * POST /auth/logout
-     */
     public function logout(Request $request): JsonResponse
     {
         $this->authService->logout($request->user());
 
-        return $this->successResponse(null, 'تم تسجيل الخروج بنجاح');
+        return $this->successResponse(null, __('messages.logout_success'));
     }
 
-    /**
-     * POST /auth/logout-all
-     */
     public function logoutAll(Request $request): JsonResponse
     {
         $this->authService->logoutAllDevices($request->user());
 
-        return $this->successResponse(null, 'تم تسجيل الخروج من جميع الأجهزة بنجاح');
+        return $this->successResponse(null, __('messages.logout_all_success'));
     }
 }

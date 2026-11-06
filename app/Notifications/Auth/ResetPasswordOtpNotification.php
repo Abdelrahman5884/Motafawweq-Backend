@@ -22,6 +22,16 @@ class ResetPasswordOtpNotification extends Notification
 
     public function toMail(object $notifiable): MailMessage
     {
+        if (app()->getLocale() === 'en') {
+            return (new MailMessage)
+                ->subject('Password Reset Code - Motafawweq')
+                ->greeting("Hello {$notifiable->name},")
+                ->line('We received a request to reset your account password. Your verification code is:')
+                ->line("**{$this->code}**")
+                ->line("This code is valid for {$this->ttlMinutes} minutes.")
+                ->line('If you did not request a password reset, please ignore this message and secure your account.');
+        }
+
         return (new MailMessage)
             ->subject('رمز إعادة تعيين كلمة المرور - متفوق')
             ->greeting("مرحباً {$notifiable->name}،")

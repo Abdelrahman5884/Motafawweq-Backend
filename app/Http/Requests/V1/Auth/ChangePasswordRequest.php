@@ -21,14 +21,4 @@ class ChangePasswordRequest extends BaseApiRequest
             ],
         ];
     }
-
-    public function messages(): array
-    {
-        return [
-            'current_password.required' => 'كلمة المرور الحالية مطلوبة.',
-            'new_password.required'     => 'كلمة المرور الجديدة مطلوبة.',
-            'new_password.confirmed'    => 'تأكيد كلمة المرور الجديدة غير متطابق.',
-            'new_password.different'    => 'يجب أن تكون كلمة المرور الجديدة مختلفة عن الحالية.',
-        ];
-    }
 }

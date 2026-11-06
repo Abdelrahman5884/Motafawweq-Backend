@@ -8,7 +8,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Domain exception for authentication/security failures.
- * Renders itself as the platform's standard JSON error envelope.
+ * Renders itself as the platform's standard localized JSON error envelope.
  */
 class AuthSecurityException extends Exception
 {
@@ -23,7 +23,7 @@ class AuthSecurityException extends Exception
 
     public static function invalidCredentials(): self
     {
-        return new self('البريد الإلكتروني أو كلمة المرور غير صحيحة.', Response::HTTP_UNAUTHORIZED, 'INVALID_CREDENTIALS');
+        return new self(__('messages.invalid_credentials'), Response::HTTP_UNAUTHORIZED, 'INVALID_CREDENTIALS');
     }
 
     public static function accountLocked(int $secondsRemaining): self
@@ -31,7 +31,7 @@ class AuthSecurityException extends Exception
         $minutes = max(1, (int) ceil($secondsRemaining / 60));
 
         return new self(
-            "تم قفل الحساب مؤقتاً بسبب محاولات دخول فاشلة متكررة. حاول مرة أخرى بعد {$minutes} دقيقة.",
+            __('messages.account_locked', ['minutes' => $minutes]),
             Response::HTTP_LOCKED,
             'ACCOUNT_LOCKED',
             ['retry_after_seconds' => $secondsRemaining]
@@ -40,22 +40,22 @@ class AuthSecurityException extends Exception
 
     public static function accountSuspended(): self
     {
-        return new self('تم تعليق هذا الحساب. يرجى التواصل مع إدارة المنصة.', Response::HTTP_FORBIDDEN, 'ACCOUNT_SUSPENDED');
+        return new self(__('messages.account_suspended'), Response::HTTP_FORBIDDEN, 'ACCOUNT_SUSPENDED');
     }
 
     public static function accountPending(): self
     {
-        return new self('حسابك قيد المراجعة من إدارة المنصة. سيتم إشعارك عند التفعيل.', Response::HTTP_FORBIDDEN, 'ACCOUNT_PENDING');
+        return new self(__('messages.account_pending'), Response::HTTP_FORBIDDEN, 'ACCOUNT_PENDING');
     }
 
     public static function emailNotVerified(): self
     {
-        return new self('يجب تأكيد البريد الإلكتروني أولاً للوصول إلى هذا القسم.', Response::HTTP_FORBIDDEN, 'EMAIL_NOT_VERIFIED');
+        return new self(__('messages.email_not_verified'), Response::HTTP_FORBIDDEN, 'EMAIL_NOT_VERIFIED');
     }
 
     public static function invalidRefreshToken(): self
     {
-        return new self('جلسة الدخول غير صالحة أو منتهية. يرجى تسجيل الدخول مجدداً.', Response::HTTP_UNAUTHORIZED, 'INVALID_REFRESH_TOKEN');
+        return new self(__('messages.invalid_refresh_token'), Response::HTTP_UNAUTHORIZED, 'INVALID_REFRESH_TOKEN');
     }
 
     public function getStatusCode(): int
@@ -73,4 +73,3 @@ class AuthSecurityException extends Exception
         ], fn ($v) => $v !== null), $this->statusCode);
     }
 }
-

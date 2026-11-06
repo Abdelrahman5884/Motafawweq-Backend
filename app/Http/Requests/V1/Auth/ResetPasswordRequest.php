@@ -15,16 +15,4 @@ class ResetPasswordRequest extends BaseApiRequest
             'password' => ['required', 'string', 'max:128', 'confirmed', Password::defaults()],
         ];
     }
-
-    public function messages(): array
-    {
-        return [
-            'email.required'     => 'حقل البريد الإلكتروني مطلوب.',
-            'code.required'      => 'رمز التحقق مطلوب.',
-            'code.digits'        => 'رمز التحقق غير صالح.',
-            'password.required'  => 'كلمة المرور الجديدة مطلوبة.',
-            'password.confirmed' => 'تأكيد كلمة المرور غير متطابق.',
-        ];
-    }
 }
-

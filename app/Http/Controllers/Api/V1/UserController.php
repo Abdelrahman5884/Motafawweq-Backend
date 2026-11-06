@@ -43,7 +43,7 @@ class UserController extends BaseApiController
     public function destroy(int|string $id): JsonResponse
     {
         $this->userService->deleteUser($id);
-        return $this->successResponse(null, 'تم حذف المستخدم بنجاح');
+        return $this->successResponse(null, __('messages.user_deleted'));
     }
 }
 

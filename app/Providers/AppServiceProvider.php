@@ -2,9 +2,11 @@
 
 namespace App\Providers;
 
+use App\Mail\Transports\BrevoApiTransport;
 use App\Models\PersonalAccessToken;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -34,6 +36,11 @@ class AppServiceProvider extends ServiceProvider
         // Extended token model (access/refresh type, session pairing, device info)
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
 
+        // Register Brevo HTTP API mail transport
+        Mail::extend('brevo', function () {
+            return new BrevoApiTransport((string) config('services.brevo.key'));
+        });
+
         $this->configurePasswordPolicy();
         $this->configureRateLimiting();
     }
@@ -60,22 +67,22 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function configureRateLimiting(): void
     {
-        $tooMany = fn (string $message) => fn () => response()->json([
+        $tooMany = fn (string $translationKey) => fn () => response()->json([
             'success' => false,
-            'message' => $message,
+            'message' => __($translationKey),
         ], 429);
 
         // General API rate limiter (60 requests per minute per authenticated user / IP)
         RateLimiter::for('api', function (Request $request) use ($tooMany) {
             return Limit::perMinute(60)
                 ->by($request->user()?->id ?: $request->ip())
-                ->response($tooMany('تم تجاوز معدل الطلبات المسموح به. يرجى الانتظار قليلاً.'));
+                ->response($tooMany('messages.rate_limit_api'));
         });
 
         // Login / register: 5 per minute per (email + IP), and 20 per minute per IP overall
         RateLimiter::for('auth', function (Request $request) use ($tooMany) {
             $email = strtolower((string) $request->input('email'));
-            $response = $tooMany('محاولات كثيرة جداً. تم حظر الطلبات مؤقتاً لحماية الحساب. يرجى المحاولة بعد دقيقة.');
+            $response = $tooMany('messages.rate_limit_auth');
 
             return [
                 Limit::perMinute(5)->by('auth:' . $email . '|' . $request->ip())->response($response),
@@ -86,7 +93,7 @@ class AppServiceProvider extends ServiceProvider
         // OTP sending / verification: 5 per minute, 20 per hour per user (or IP)
         RateLimiter::for('otp', function (Request $request) use ($tooMany) {
             $key = $request->user()?->id ?: strtolower((string) $request->input('email')) . '|' . $request->ip();
-            $response = $tooMany('محاولات كثيرة جداً على رمز التحقق. يرجى الانتظار ثم المحاولة مجدداً.');
+            $response = $tooMany('messages.rate_limit_otp');
 
             return [
                 Limit::perMinute(5)->by('otp-m:' . $key)->response($response),
@@ -97,7 +104,7 @@ class AppServiceProvider extends ServiceProvider
         // Token refresh: 10 per minute per IP
         RateLimiter::for('refresh', function (Request $request) use ($tooMany) {
             return Limit::perMinute(10)->by('refresh:' . $request->ip())
-                ->response($tooMany('طلبات تجديد كثيرة جداً. يرجى المحاولة لاحقاً.'));
+                ->response($tooMany('messages.rate_limit_refresh'));
         });
 
         // Generic strict limiter for other sensitive operations

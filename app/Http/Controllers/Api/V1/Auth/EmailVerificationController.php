@@ -15,24 +15,17 @@ class EmailVerificationController extends BaseApiController
         protected EmailVerificationService $verificationService
     ) {}
 
-    /**
-     * POST /auth/email/verify
-     */
     public function verify(VerifyEmailRequest $request): JsonResponse
     {
         $user = $this->verificationService->verify($request->user(), $request->validated('code'));
 
-        return $this->successResponse(new UserResource($user), 'تم تأكيد البريد الإلكتروني بنجاح');
+        return $this->successResponse(new UserResource($user), __('messages.email_verified_success'));
     }
 
-    /**
-     * POST /auth/email/resend
-     */
     public function resend(Request $request): JsonResponse
     {
         $this->verificationService->resend($request->user(), $request->ip());
 
-        return $this->successResponse(null, 'تم إرسال رمز تأكيد جديد إلى بريدك الإلكتروني');
+        return $this->successResponse(null, __('messages.email_otp_resent'));
     }
 }
-

@@ -6,7 +6,6 @@ use App\Traits\ApiResponse;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
-use Symfony\Component\HttpFoundation\Response;
 
 abstract class BaseApiRequest extends FormRequest
 {
@@ -41,13 +40,8 @@ abstract class BaseApiRequest extends FormRequest
         }
 
         if (is_string($input)) {
-            // Trim whitespace
             $clean = trim($input);
-
-            // Strip potential null-bytes
             $clean = str_replace(chr(0), '', $clean);
-
-            // Strip dangerous tags while preserving plain text
             $clean = strip_tags($clean);
 
             return $clean;
@@ -57,31 +51,25 @@ abstract class BaseApiRequest extends FormRequest
     }
 
     /**
-     * Handle a failed validation attempt with standardized JSON.
-     *
-     * @param  Validator  $validator
-     * @throws HttpResponseException
+     * Handle a failed validation attempt with standardized localized JSON.
      */
     protected function failedValidation(Validator $validator): void
     {
         throw new HttpResponseException(
             $this->validationErrorResponse(
                 $validator->errors()->toArray(),
-                'بيانات الإدخال غير صالحة، يرجى مراجعة الأخطاء'
+                __('messages.validation_failed')
             )
         );
     }
 
     /**
-     * Handle a failed authorization attempt with standardized JSON.
-     *
-     * @throws HttpResponseException
+     * Handle a failed authorization attempt with standardized localized JSON.
      */
     protected function failedAuthorization(): void
     {
         throw new HttpResponseException(
-            $this->forbiddenResponse('غير مصرح لك بالقيام بهذا الإجراء')
+            $this->forbiddenResponse(__('messages.forbidden'))
         );
     }
 }
-

@@ -17,36 +17,26 @@ class SessionController extends BaseApiController
         protected LoginHistoryRepositoryInterface $loginHistory
     ) {}
 
-    /**
-     * GET /auth/sessions — active devices.
-     */
     public function index(Request $request): JsonResponse
     {
         $sessions = $this->tokenService->listSessions($request->user());
 
-        return $this->successResponse(SessionResource::collection($sessions), 'تم جلب الأجهزة النشطة');
+        return $this->successResponse(SessionResource::collection($sessions), __('messages.sessions_fetched'));
     }
 
-    /**
-     * DELETE /auth/sessions/{sessionId} — sign out a specific device.
-     * Scoped to the authenticated user's own tokens (no IDOR possible).
-     */
     public function destroy(Request $request, string $sessionId): JsonResponse
     {
         $deleted = $this->tokenService->revokeSession($request->user(), $sessionId);
 
         if ($deleted === 0) {
-            return $this->notFoundResponse('الجلسة غير موجودة.');
+            return $this->notFoundResponse(__('messages.session_not_found'));
         }
 
         $this->logSecurityEvent('SESSION_REVOKED', ['user_id' => $request->user()->id, 'session_id' => $sessionId]);
 
-        return $this->successResponse(null, 'تم تسجيل الخروج من الجهاز بنجاح');
+        return $this->successResponse(null, __('messages.session_revoked'));
     }
 
-    /**
-     * GET /auth/login-history
-     */
     public function history(Request $request): JsonResponse
     {
         $history = $this->loginHistory->forUser($request->user(), (int) $request->query('per_page', 20));
@@ -54,4 +44,3 @@ class SessionController extends BaseApiController
         return $this->paginatedResponse($history, LoginHistoryResource::class);
     }
 }
-

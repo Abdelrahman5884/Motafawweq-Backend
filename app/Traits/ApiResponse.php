@@ -8,24 +8,15 @@ use Symfony\Component\HttpFoundation\Response;
 
 trait ApiResponse
 {
-    /**
-     * Send a standardized success JSON response.
-     *
-     * @param  mixed  $data
-     * @param  string  $message
-     * @param  int  $statusCode
-     * @param  array  $meta
-     * @return JsonResponse
-     */
     public function successResponse(
         mixed $data = null,
-        string $message = 'تمت العملية بنجاح',
+        ?string $message = null,
         int $statusCode = Response::HTTP_OK,
         array $meta = []
     ): JsonResponse {
         $response = [
             'success' => true,
-            'message' => $message,
+            'message' => $message ?? __('messages.operation_success'),
             'data'    => $data,
         ];
 
@@ -36,36 +27,21 @@ trait ApiResponse
         return response()->json($response, $statusCode);
     }
 
-    /**
-     * Send a standardized created JSON response (201).
-     *
-     * @param  mixed  $data
-     * @param  string  $message
-     * @return JsonResponse
-     */
     public function createdResponse(
         mixed $data = null,
-        string $message = 'تم إنشاء العنصر بنجاح'
+        ?string $message = null
     ): JsonResponse {
-        return $this->successResponse($data, $message, Response::HTTP_CREATED);
+        return $this->successResponse($data, $message ?? __('messages.resource_created'), Response::HTTP_CREATED);
     }
 
-    /**
-     * Send a standardized error JSON response.
-     *
-     * @param  string  $message
-     * @param  int  $statusCode
-     * @param  mixed  $errors
-     * @return JsonResponse
-     */
     public function errorResponse(
-        string $message = 'حدث خطأ ما',
+        ?string $message = null,
         int $statusCode = Response::HTTP_BAD_REQUEST,
         mixed $errors = null
     ): JsonResponse {
         $response = [
             'success' => false,
-            'message' => $message,
+            'message' => $message ?? __('messages.general_error'),
         ];
 
         if ($errors !== null) {
@@ -75,56 +51,41 @@ trait ApiResponse
         return response()->json($response, $statusCode);
     }
 
-    /**
-     * Validation error response (422).
-     */
     public function validationErrorResponse(
         mixed $errors,
-        string $message = 'بيانات الإدخال غير صالحة'
+        ?string $message = null
     ): JsonResponse {
-        return $this->errorResponse($message, Response::HTTP_UNPROCESSABLE_ENTITY, $errors);
+        return $this->errorResponse($message ?? __('messages.validation_failed'), Response::HTTP_UNPROCESSABLE_ENTITY, $errors);
     }
 
-    /**
-     * Unauthorized response (401).
-     */
     public function unauthorizedResponse(
-        string $message = 'غير مصرح لك، يرجى تسجيل الدخول أولاً'
+        ?string $message = null
     ): JsonResponse {
-        return $this->errorResponse($message, Response::HTTP_UNAUTHORIZED);
+        return $this->errorResponse($message ?? __('messages.unauthenticated'), Response::HTTP_UNAUTHORIZED);
     }
 
-    /**
-     * Forbidden response (403).
-     */
     public function forbiddenResponse(
-        string $message = 'ليس لديك الصلاحيات الكافية للوصول إلى هذا المورد'
+        ?string $message = null
     ): JsonResponse {
-        return $this->errorResponse($message, Response::HTTP_FORBIDDEN);
+        return $this->errorResponse($message ?? __('messages.forbidden'), Response::HTTP_FORBIDDEN);
     }
 
-    /**
-     * Not found response (404).
-     */
     public function notFoundResponse(
-        string $message = 'المورد المطلوب غير موجود'
+        ?string $message = null
     ): JsonResponse {
-        return $this->errorResponse($message, Response::HTTP_NOT_FOUND);
+        return $this->errorResponse($message ?? __('messages.not_found'), Response::HTTP_NOT_FOUND);
     }
 
-    /**
-     * Standardized Paginated JSON response.
-     */
     public function paginatedResponse(
         LengthAwarePaginator $paginator,
         ?string $resourceClass = null,
-        string $message = 'تم استرجاع البيانات بنجاح'
+        ?string $message = null
     ): JsonResponse {
         $items = $resourceClass ? $resourceClass::collection($paginator->items()) : $paginator->items();
 
         return response()->json([
             'success' => true,
-            'message' => $message,
+            'message' => $message ?? __('messages.data_retrieved'),
             'data'    => $items,
             'meta'    => [
                 'current_page' => $paginator->currentPage(),
@@ -136,4 +97,3 @@ trait ApiResponse
         ], Response::HTTP_OK);
     }
 }
-

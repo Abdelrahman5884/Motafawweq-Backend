@@ -41,14 +41,29 @@ class AuthService extends BaseService
 
         // Defence in depth: request validation already restricts roles, re-check here
         if (!in_array($role->value, config('auth_security.self_registration_roles'), true)) {
-            throw ValidationException::withMessages(['role' => ['الدور المختار غير متاح للتسجيل.']]);
+            throw ValidationException::withMessages(['role' => [__('messages.role_not_allowed')]]);
         }
 
         $status = in_array($role->value, config('auth_security.roles_requiring_approval'), true)
             ? UserStatus::PENDING
             : UserStatus::ACTIVE;
 
-        [$user, $tokens] = $this->transaction(function () use ($data, $role, $status, $ip, $userAgent) {
+        $linkedStudent = null;
+        if ($role === UserRole::PARENT) {
+            $linkedStudent = $this->userRepository->findStudentByCode((string) ($data['student_code'] ?? ''));
+
+            if (!$linkedStudent) {
+                throw ValidationException::withMessages([
+                    'student_code' => [__('messages.invalid_student_code')],
+                ]);
+            }
+        }
+
+        [$user, $tokens] = $this->transaction(function () use ($data, $role, $status, $linkedStudent, $ip, $userAgent) {
+            $studentCode = $role === UserRole::STUDENT
+                ? $this->userRepository->generateUniqueStudentCode()
+                : null;
+
             /** @var User $user */
             $user = $this->userRepository->forceCreate([
                 'name'                => $data['name'],
@@ -56,9 +71,14 @@ class AuthService extends BaseService
                 'password'            => $data['password'], // hashed by the model cast
                 'phone'               => $data['phone'] ?? null,
                 'role'                => $role->value,
+                'student_code'        => $studentCode,
                 'status'              => $status->value,
                 'password_changed_at' => now(),
             ]);
+
+            if ($linkedStudent) {
+                $user->children()->syncWithoutDetaching([$linkedStudent->id]);
+            }
 
             $tokens = $this->tokenService->issuePair($user, $ip, $userAgent);
             $this->loginHistory->record($user, $user->email, LoginStatus::SUCCESS, $ip, $userAgent);
@@ -205,7 +225,7 @@ class AuthService extends BaseService
             $this->logSecurityEvent('FAILED_PASSWORD_CHANGE_ATTEMPT', ['user_id' => $user->id], 'warning');
 
             throw ValidationException::withMessages([
-                'current_password' => ['كلمة المرور الحالية غير صحيحة.'],
+                'current_password' => [__('messages.current_password_wrong')],
             ]);
         }
 

@@ -22,6 +22,16 @@ class VerifyEmailOtpNotification extends Notification
 
     public function toMail(object $notifiable): MailMessage
     {
+        if (app()->getLocale() === 'en') {
+            return (new MailMessage)
+                ->subject('Email Verification Code - Motafawweq')
+                ->greeting("Hello {$notifiable->name},")
+                ->line('Your email verification code is:')
+                ->line("**{$this->code}**")
+                ->line("This code is valid for {$this->ttlMinutes} minutes.")
+                ->line('If you did not create an account on Motafawweq, please ignore this email.');
+        }
+
         return (new MailMessage)
             ->subject('رمز تأكيد البريد الإلكتروني - متفوق')
             ->greeting("مرحباً {$notifiable->name}،")

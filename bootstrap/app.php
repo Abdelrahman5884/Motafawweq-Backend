@@ -6,6 +6,7 @@ use App\Http\Middleware\EnsureEmailIsVerified;
 use App\Http\Middleware\ForceJsonResponse;
 use App\Http\Middleware\SanitizeInput;
 use App\Http\Middleware\SecurityHeaders;
+use App\Http\Middleware\SetLocale;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -33,8 +34,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Enforce JSON & Security Headers on all API requests
+        // Enforce Locale, JSON & Security Headers on all API requests
         $middleware->api(prepend: [
+            SetLocale::class,
             ForceJsonResponse::class,
             SecurityHeaders::class,
             SanitizeInput::class,
@@ -52,12 +54,12 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         $isApi = fn (Request $request) => $request->is('api/*') || $request->expectsJson();
 
-        // Uniform API Exception Handling
+        // Uniform Localized API Exception Handling
         $exceptions->render(function (ValidationException $e, Request $request) use ($isApi) {
             if ($isApi($request)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'بيانات الإدخال غير صالحة، يرجى مراجعة الأخطاء',
+                    'message' => __('messages.validation_failed'),
                     'errors'  => $e->errors(),
                 ], 422);
             }
@@ -67,7 +69,7 @@ return Application::configure(basePath: dirname(__DIR__))
             if ($isApi($request)) {
                 return response()->json([
                     'success'    => false,
-                    'message'    => 'غير مصرح لك، يرجى تسجيل الدخول أولاً للوصول إلى هذا المورد.',
+                    'message'    => __('messages.unauthenticated'),
                     'error_code' => 'UNAUTHENTICATED',
                 ], 401);
             }
@@ -78,14 +80,14 @@ return Application::configure(basePath: dirname(__DIR__))
                 if ($e instanceof MissingAbilityException || $e->getPrevious() instanceof MissingAbilityException) {
                     return response()->json([
                         'success'    => false,
-                        'message'    => 'نوع رمز الدخول غير صالح لهذا الطلب.',
+                        'message'    => __('messages.invalid_token_type'),
                         'error_code' => 'INVALID_TOKEN_TYPE',
                     ], 401);
                 }
 
                 return response()->json([
                     'success' => false,
-                    'message' => 'ليس لديك الصلاحيات الكافية للقيام بهذا الإجراء.',
+                    'message' => __('messages.forbidden'),
                 ], 403);
             }
         });
@@ -94,7 +96,7 @@ return Application::configure(basePath: dirname(__DIR__))
             if ($isApi($request)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'المورد المطلوب غير موجود.',
+                    'message' => __('messages.not_found'),
                 ], 404);
             }
         });
@@ -103,7 +105,7 @@ return Application::configure(basePath: dirname(__DIR__))
             if ($isApi($request)) {
                 $message = $e->getMessage() && $e->getMessage() !== 'Too Many Attempts.'
                     ? $e->getMessage()
-                    : 'تم تجاوز الحد المسموح به من الطلبات. يرجى الانتظار قليلاً ثم المحاولة مجدداً.';
+                    : __('messages.too_many_requests');
 
                 return response()->json([
                     'success' => false,
@@ -118,16 +120,14 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null;
             }
 
-            // Pre-built responses (e.g. FormRequest failures) pass through untouched
             if ($e instanceof HttpResponseException) {
                 return $e->getResponse();
             }
 
-            // Known HTTP errors (405, 413, 419...) keep their real status code
             if ($e instanceof HttpExceptionInterface) {
                 return response()->json([
                     'success' => false,
-                    'message' => $e->getMessage() ?: 'تعذر معالجة الطلب.',
+                    'message' => $e->getMessage() ?: __('messages.general_error'),
                 ], $e->getStatusCode(), $e->getHeaders());
             }
 
@@ -139,7 +139,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
             return response()->json(array_filter([
                 'success' => false,
-                'message' => config('app.debug') ? $e->getMessage() : 'حدث خطأ غير متوقع في الخادم. يرجى المحاولة لاحقاً.',
+                'message' => config('app.debug') ? $e->getMessage() : __('messages.server_error'),
                 'debug'   => config('app.debug') ? [
                     'exception' => get_class($e),
                     'file'      => $e->getFile(),

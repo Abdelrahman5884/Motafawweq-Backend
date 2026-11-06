@@ -14,23 +14,13 @@ class PasswordResetController extends BaseApiController
         protected PasswordResetService $passwordResetService
     ) {}
 
-    /**
-     * POST /auth/password/forgot
-     * Always returns the same response whether the email exists or not.
-     */
     public function forgot(ForgotPasswordRequest $request): JsonResponse
     {
         $this->passwordResetService->requestReset($request->validated('email'), $request->ip());
 
-        return $this->successResponse(
-            null,
-            'إذا كان البريد الإلكتروني مسجلاً لدينا، فسيصلك رمز إعادة تعيين كلمة المرور خلال لحظات.'
-        );
+        return $this->successResponse(null, __('messages.password_forgot_sent'));
     }
 
-    /**
-     * POST /auth/password/reset
-     */
     public function reset(ResetPasswordRequest $request): JsonResponse
     {
         $this->passwordResetService->reset(
@@ -40,7 +30,6 @@ class PasswordResetController extends BaseApiController
             ip: $request->ip()
         );
 
-        return $this->successResponse(null, 'تم تعيين كلمة المرور الجديدة بنجاح. يرجى تسجيل الدخول.');
+        return $this->successResponse(null, __('messages.password_reset_success'));
     }
 }
-

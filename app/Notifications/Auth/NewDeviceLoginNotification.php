@@ -22,6 +22,17 @@ class NewDeviceLoginNotification extends Notification
 
     public function toMail(object $notifiable): MailMessage
     {
+        if (app()->getLocale() === 'en') {
+            return (new MailMessage)
+                ->subject('New Device Sign-in - Motafawweq')
+                ->greeting("Hello {$notifiable->name},")
+                ->line('Your account was signed into from a new device or location:')
+                ->line('IP Address: ' . ($this->ip ?? 'Unknown'))
+                ->line('Device: ' . ($this->userAgent ?? 'Unknown'))
+                ->line('Time: ' . now()->format('Y-m-d H:i'))
+                ->line('If this was not you, please change your password immediately and sign out from all devices.');
+        }
+
         return (new MailMessage)
             ->subject('تسجيل دخول من جهاز جديد - متفوق')
             ->greeting("مرحباً {$notifiable->name}،")
