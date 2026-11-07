@@ -30,7 +30,7 @@ class PasswordChangedNotification extends Notification
                     'locale'   => 'en',
                     'title'    => 'Password Changed',
                     'badge'    => 'ACCOUNT SECURITY',
-                    'greeting' => "Dear {$notifiable->name},",
+                    'greeting' => "Hello {$notifiable->name},",
                     'intro'    => 'The password for your Motafawweq account was recently changed, and all other active sessions have been signed out.',
                     'details'  => [
                         'IP Address' => $this->ip ?? 'Unknown',
@@ -46,7 +46,7 @@ class PasswordChangedNotification extends Notification
                 'locale'   => 'ar',
                 'title'    => 'تم تغيير كلمة المرور',
                 'badge'    => 'أمان الحساب',
-                'greeting' => "عزيزي {$notifiable->name}،",
+                'greeting' => "مرحباً {$notifiable->name}،",
                 'intro'    => 'تم تغيير كلمة المرور الخاصة بحسابك في متفوّق بنجاح، وتم تسجيل الخروج من جميع الأجهزة الأخرى لحماية حسابك.',
                 'details'  => [
                     'عنوان الـ IP' => $this->ip ?? 'غير معروف',

@@ -71,14 +71,19 @@
                                         <td align="center" style="text-align: center;">
                                             <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin: 0 auto;">
                                                 <tr>
-                                                    <td align="center" style="background-color: #0b2c58; border: 1px solid #1588c7; border-radius: 4px; padding: 15px 40px;">
-                                                        <span dir="ltr" style="font-family: 'Courier New', Consolas, monospace; font-size: 26px; font-weight: 700; letter-spacing: 4px; color: #ffffff; user-select: all; -webkit-user-select: all; -moz-user-select: all; cursor: text;">{{ trim($code) }}</span>
+                                                    <td align="center" dir="ltr" style="background-color: #0b2c58; border: 1px solid #1588c7; border-radius: 6px; padding: 14px 24px 14px 28px;">
+                                                        <span dir="ltr" title="{{ $isRtl ? 'اضغط لتحديد الرمز' : 'Click to select code' }}" style="font-family: 'Courier New', Consolas, monospace; font-size: 26px; font-weight: 700; letter-spacing: 5px; color: #ffffff; vertical-align: middle; user-select: all; -webkit-user-select: all; -moz-user-select: all; cursor: text;">{{ trim($code) }}</span>
+                                                        @if(!empty($copyUrl))
+                                                            <a href="{{ $copyUrl }}" target="_blank" title="{{ $isRtl ? 'نسخ واستخدام الرمز تلقائياً' : 'Copy & auto-fill code' }}" style="display: inline-block; vertical-align: middle; margin-left: 14px; padding: 5px 8px; background-color: rgba(56, 189, 248, 0.14); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 5px; text-decoration: none;">
+                                                                <img src="https://img.icons8.com/fluency-systems-regular/48/38bdf8/copy.png" alt="Copy" width="18" height="18" style="display: block; width: 18px; height: 18px; border: 0;">
+                                                            </a>
+                                                        @endif
                                                     </td>
                                                 </tr>
                                             </table>
 
                                             <div style="margin-top: 10px; font-family: {{ $fontFamily }}; font-size: 12px; color: #1588c7; font-weight: 600;">
-                                                {{ $isRtl ? 'اضغط مرتين على الرمز لتحديده ونسخه' : 'Double-click the code to select and copy' }}
+                                                {{ $isRtl ? 'اضغط على أيقونة النسخ لملء الرمز تلقائياً، أو حدد الرقم لنسخه' : 'Click the copy icon to auto-fill, or select the code to copy' }}
                                             </div>
 
                                             @if(!empty($ttlMinutes))
