@@ -26,7 +26,7 @@ class ResetPasswordOtpNotification extends Notification
 
         if ($locale === 'en') {
             return (new MailMessage)
-                ->subject("Reset Your Password ({$this->code}) - Motafawweq")
+                ->subject('Reset Your Password - Motafawweq')
                 ->view('emails.auth-notification', [
                     'locale'       => 'en',
                     'title'        => 'Reset Your Password',
@@ -40,7 +40,7 @@ class ResetPasswordOtpNotification extends Notification
         }
 
         return (new MailMessage)
-            ->subject("إعادة تعيين كلمة المرور ({$this->code}) - Motafawweq")
+            ->subject('إعادة تعيين كلمة المرور - Motafawweq')
             ->view('emails.auth-notification', [
                 'locale'       => 'ar',
                 'title'        => 'إعادة تعيين كلمة المرور',

@@ -4,6 +4,7 @@ namespace App\Mail\Transports;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Stringable;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\SentMessage;
@@ -38,6 +39,12 @@ class BrevoApiTransport extends AbstractTransport implements Stringable
             'name'  => $addr->getName() ?: null,
         ]), $email->getTo());
 
+        $htmlBody = (string) $email->getHtmlBody();
+        $textBody = (string) $email->getTextBody();
+        if ($textBody === '' && $htmlBody !== '') {
+            $textBody = trim(preg_replace('/\s+/', ' ', strip_tags($htmlBody)));
+        }
+
         $payload = array_filter([
             'sender' => array_filter([
                 'email' => $from->getAddress(),
@@ -45,8 +52,11 @@ class BrevoApiTransport extends AbstractTransport implements Stringable
             ]),
             'to'          => array_values($to),
             'subject'     => $email->getSubject(),
-            'htmlContent' => $email->getHtmlBody() ?: nl2br((string) $email->getTextBody()),
-            'textContent' => $email->getTextBody() ?: strip_tags((string) $email->getHtmlBody()),
+            'htmlContent' => $htmlBody !== '' ? $htmlBody : nl2br($textBody),
+            'textContent' => $textBody,
+            'headers'     => [
+                'X-Entity-Ref-ID' => (string) Str::uuid(),
+            ],
         ]);
 
         $response = Http::withHeaders([

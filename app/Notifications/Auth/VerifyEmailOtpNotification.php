@@ -26,7 +26,7 @@ class VerifyEmailOtpNotification extends Notification
 
         if ($locale === 'en') {
             return (new MailMessage)
-                ->subject("Verify Your Email ({$this->code}) - Motafawweq")
+                ->subject('Verify Your Email Address - Motafawweq')
                 ->view('emails.auth-notification', [
                     'locale'       => 'en',
                     'title'        => 'Verify Your Email Address',
@@ -40,7 +40,7 @@ class VerifyEmailOtpNotification extends Notification
         }
 
         return (new MailMessage)
-            ->subject("تأكيد البريد الإلكتروني ({$this->code}) - Motafawweq")
+            ->subject('تأكيد البريد الإلكتروني - Motafawweq')
             ->view('emails.auth-notification', [
                 'locale'       => 'ar',
                 'title'        => 'تأكيد البريد الإلكتروني',

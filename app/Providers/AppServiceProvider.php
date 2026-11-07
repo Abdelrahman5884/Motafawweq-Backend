@@ -90,14 +90,14 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
-        // OTP sending / verification: 5 per minute, 20 per hour per user (or IP)
+        // OTP sending / verification: 15 per minute, 100 per hour per user (or IP)
         RateLimiter::for('otp', function (Request $request) use ($tooMany) {
             $key = $request->user()?->id ?: strtolower((string) $request->input('email')) . '|' . $request->ip();
             $response = $tooMany('messages.rate_limit_otp');
 
             return [
-                Limit::perMinute(5)->by('otp-m:' . $key)->response($response),
-                Limit::perHour(20)->by('otp-h:' . $key)->response($response),
+                Limit::perMinute(15)->by('otp-m:' . $key)->response($response),
+                Limit::perHour(100)->by('otp-h:' . $key)->response($response),
             ];
         });
 
