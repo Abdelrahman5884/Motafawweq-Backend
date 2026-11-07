@@ -54,11 +54,11 @@ class OtpService extends BaseService
     }
 
     /**
-     * Verify and consume a code.
+     * Validate a code (checking expiry & attempts) without consuming it yet.
      *
      * @throws ValidationException
      */
-    public function verify(User $user, VerificationCodeType $type, string $code): void
+    public function check(User $user, VerificationCodeType $type, string $code): \App\Models\VerificationCode
     {
         $record = $this->codes->findActive($user, $type);
         $maxAttempts = (int) config('auth_security.otp.max_attempts');
@@ -90,6 +90,17 @@ class OtpService extends BaseService
             $this->fail(__('messages.otp_wrong', ['remaining' => $remaining]));
         }
 
+        return $record;
+    }
+
+    /**
+     * Verify and consume a code.
+     *
+     * @throws ValidationException
+     */
+    public function verify(User $user, VerificationCodeType $type, string $code): void
+    {
+        $record = $this->check($user, $type, $code);
         $record->forceFill(['used_at' => now()])->save();
     }
 

@@ -19,6 +19,8 @@ class BrevoApiTransport extends AbstractTransport implements Stringable
 {
     public const ENDPOINT = 'https://api.brevo.com/v3/smtp/email';
 
+    public static ?string $lastError = null;
+
     public function __construct(
         protected string $apiKey
     ) {
@@ -27,8 +29,11 @@ class BrevoApiTransport extends AbstractTransport implements Stringable
 
     protected function doSend(SentMessage $message): void
     {
+        self::$lastError = null;
+
         if (empty($this->apiKey)) {
-            throw new TransportException('BREVO_API_KEY is not configured.');
+            self::$lastError = 'BREVO_API_KEY is not configured.';
+            throw new TransportException(self::$lastError);
         }
 
         $email = MessageConverter::toEmail($message->getOriginalMessage());
@@ -66,14 +71,15 @@ class BrevoApiTransport extends AbstractTransport implements Stringable
         ])->timeout(15)->post(self::ENDPOINT, $payload);
 
         if ($response->failed()) {
+            $errMsg = 'Brevo API error (' . $response->status() . '): ' . ($response->json('message') ?? $response->body());
+            self::$lastError = $errMsg;
+
             Log::warning('[BREVO-API-MAIL-FAILED]', [
                 'status' => $response->status(),
                 'body'   => $response->json() ?? $response->body(),
             ]);
 
-            throw new TransportException(
-                'Brevo API error (' . $response->status() . '): ' . ($response->json('message') ?? $response->body())
-            );
+            throw new TransportException($errMsg);
         }
     }
 

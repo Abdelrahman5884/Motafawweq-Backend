@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Auth;
 use App\Http\Controllers\Api\BaseApiController;
 use App\Http\Requests\V1\Auth\ForgotPasswordRequest;
 use App\Http\Requests\V1\Auth\ResetPasswordRequest;
+use App\Http\Requests\V1\Auth\VerifyResetOtpRequest;
 use App\Services\V1\Auth\PasswordResetService;
 use Illuminate\Http\JsonResponse;
 
@@ -19,6 +20,16 @@ class PasswordResetController extends BaseApiController
         $this->passwordResetService->requestReset($request->validated('email'), $request->ip());
 
         return $this->successResponse(null, __('messages.password_forgot_sent'));
+    }
+
+    public function verifyOtp(VerifyResetOtpRequest $request): JsonResponse
+    {
+        $this->passwordResetService->verifyResetOtp(
+            email: $request->validated('email'),
+            code: $request->validated('code')
+        );
+
+        return $this->successResponse(null, __('messages.otp_verified_success'));
     }
 
     public function reset(ResetPasswordRequest $request): JsonResponse

@@ -47,6 +47,7 @@ Route::prefix('v1')->group(function () {
 
         Route::middleware('throttle:otp')->prefix('password')->group(function () {
             Route::post('/forgot', [PasswordResetController::class, 'forgot']);
+            Route::post('/verify-otp', [PasswordResetController::class, 'verifyOtp']);
             Route::post('/reset', [PasswordResetController::class, 'reset']);
         });
 

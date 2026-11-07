@@ -377,14 +377,32 @@ class AuthSecurityTest extends TestCase
     /* Password reset & change                                            */
     /* ----------------------------------------------------------------- */
 
-    public function test_forgot_password_does_not_reveal_whether_email_exists(): void
+    public function test_forgot_password_rejects_unregistered_email_and_verifies_otp_step(): void
     {
-        $this->makeUser();
+        $user = $this->makeUser();
 
-        $existing = $this->postJson('/api/v1/auth/password/forgot', ['email' => 'user@motafawweq.test'])->assertOk();
-        $missing = $this->postJson('/api/v1/auth/password/forgot', ['email' => 'ghost@motafawweq.test'])->assertOk();
+        $this->postJson('/api/v1/auth/password/forgot', ['email' => 'ghost@motafawweq.test'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('email');
 
-        $this->assertSame($existing->json(), $missing->json());
+        $this->postJson('/api/v1/auth/password/forgot', ['email' => 'user@motafawweq.test'])
+            ->assertOk()
+            ->assertJsonPath('data', null);
+
+        $code = $this->sentCode($user, ResetPasswordOtpNotification::class);
+        $wrongCode = $code === '000000' ? '111111' : '000000';
+
+        // Step 2: wrong OTP is rejected immediately
+        $this->postJson('/api/v1/auth/password/verify-otp', [
+            'email' => $user->email,
+            'code'  => $wrongCode,
+        ])->assertStatus(422)->assertJsonValidationErrors('code');
+
+        // Step 2: valid OTP is accepted without consuming it yet
+        $this->postJson('/api/v1/auth/password/verify-otp', [
+            'email' => $user->email,
+            'code'  => $code,
+        ])->assertOk();
     }
 
     public function test_full_password_reset_flow_revokes_sessions_and_unlocks_account(): void
