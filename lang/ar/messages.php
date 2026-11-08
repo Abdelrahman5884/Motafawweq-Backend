@@ -190,4 +190,19 @@ return [
     'exam_closed_for_submission'   => 'عفواً، هذا الامتحان غير متاح للتسليم حالياً.',
     'exam_already_submitted'       => 'لقد قمت بتسليم هذا الامتحان مسبقاً ولا يسمح بإعادة التسليم.',
     'rate_limit_exam_submit'       => 'تجاوزت الحد المسموح لتسليم إجابات الامتحانات، يرجى الانتظار قليلاً.',
+
+    // Stage 12: Homework Management & Grading Workflow
+    'homeworks_fetched'                => 'تم جلب قائمة الواجبات بنجاح',
+    'homework_fetched'                 => 'تم جلب تفاصيل الواجب بنجاح',
+    'homework_created'                 => 'تم إنشاء الواجب وتعيينه للطلاب بنجاح',
+    'homework_updated'                 => 'تم تحديث بيانات الواجب بنجاح',
+    'homework_deleted'                 => 'تم حذف الواجب بنجاح',
+    'homework_submissions_fetched'     => 'تم جلب قائمة تسليمات الطلاب للواجب بنجاح',
+    'homework_submission_fetched'      => 'تم جلب تفاصيل حل الطالب للواجب بنجاح',
+    'homework_submission_graded'       => 'تم رصد درجة الواجب والتعليق بنجاح',
+    'homework_submitted_successfully'  => 'تم تسليم حل الواجب بنجاح',
+    'homework_solution_required'       => 'يجب تقديم ملف الحل أو كتابة الإجابة النصية لتسليم الواجب.',
+    'homework_already_graded'          => 'تم تصحيح هذا الواجب بالفعل ولا يمكن التعديل عليه.',
+    'invalid_file_type'                => 'نوع الملف غير مدعوم، يسمح فقط بملفات PDF والصور JPG/PNG.',
+    'file_not_found'                   => 'الملف المطلوب غير موجود أو تم حذفه.',
 ];

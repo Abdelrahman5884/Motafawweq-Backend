@@ -5,11 +5,13 @@ use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\Student\StudentExamTakingController;
+use App\Http\Controllers\Api\V1\Student\StudentHomeworkController;
 use App\Http\Controllers\Api\V1\Teacher\LessonWorkspaceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherAttendanceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherCourseController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherExamController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherExamGradingController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherHomeworkController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherPayoutAccountController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherRosterController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherScheduleController;
@@ -111,6 +113,13 @@ Route::prefix('v1')->group(function () {
             Route::post('/exams/{uuid}/submit', [StudentExamTakingController::class, 'submit'])
                 ->whereUuid('uuid')
                 ->middleware('throttle:exam-submit');
+
+            // Stage 12: Student homework submission
+            Route::post('/homeworks/{uuid}/submit', [StudentHomeworkController::class, 'submit'])
+                ->whereUuid('uuid')
+                ->middleware('throttle:teacher-uploads');
+            Route::get('/homeworks/submissions/{submissionUuid}/attachment', [StudentHomeworkController::class, 'downloadSubmissionAttachment'])
+                ->whereUuid('submissionUuid');
 
             // Admin area
             Route::prefix('admin')->middleware('role:admin')->group(function () {
@@ -279,6 +288,31 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('submissionUuid');
                     Route::patch('/{uuid}/submissions/{submissionUuid}/grade-essay', [TeacherExamGradingController::class, 'gradeEssay'])
                         ->whereUuid('uuid')
+                        ->whereUuid('submissionUuid');
+                });
+
+                // Stage 12: Homework Management & Grading Workflow
+                Route::prefix('homeworks')->group(function () {
+                    Route::get('/', [TeacherHomeworkController::class, 'index']);
+                    Route::post('/', [TeacherHomeworkController::class, 'store'])
+                        ->middleware('throttle:teacher-uploads');
+                    Route::get('/{uuid}', [TeacherHomeworkController::class, 'show'])
+                        ->whereUuid('uuid');
+                    Route::put('/{uuid}', [TeacherHomeworkController::class, 'update'])
+                        ->whereUuid('uuid');
+                    Route::delete('/{uuid}', [TeacherHomeworkController::class, 'destroy'])
+                        ->whereUuid('uuid');
+                    Route::get('/{uuid}/submissions', [TeacherHomeworkController::class, 'submissions'])
+                        ->whereUuid('uuid');
+                    Route::get('/{uuid}/submissions/{submissionUuid}', [TeacherHomeworkController::class, 'submission'])
+                        ->whereUuid('uuid')
+                        ->whereUuid('submissionUuid');
+                    Route::patch('/{uuid}/submissions/{submissionUuid}/grade', [TeacherHomeworkController::class, 'gradeSubmission'])
+                        ->whereUuid('uuid')
+                        ->whereUuid('submissionUuid');
+                    Route::get('/{uuid}/attachment', [TeacherHomeworkController::class, 'downloadAttachment'])
+                        ->whereUuid('uuid');
+                    Route::get('/submissions/{submissionUuid}/attachment', [TeacherHomeworkController::class, 'downloadSubmissionAttachment'])
                         ->whereUuid('submissionUuid');
                 });
             });

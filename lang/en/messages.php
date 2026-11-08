@@ -190,4 +190,19 @@ return [
     'exam_closed_for_submission'   => 'This exam is currently closed for student submissions.',
     'exam_already_submitted'       => 'You have already submitted this exam.',
     'rate_limit_exam_submit'       => 'Too many exam submission attempts. Please wait a moment.',
+
+    // Stage 12: Homework Management & Grading Workflow
+    'homeworks_fetched'                => 'Homework assignments retrieved successfully.',
+    'homework_fetched'                 => 'Homework details retrieved successfully.',
+    'homework_created'                 => 'Homework assignment created and assigned successfully.',
+    'homework_updated'                 => 'Homework assignment updated successfully.',
+    'homework_deleted'                 => 'Homework assignment deleted successfully.',
+    'homework_submissions_fetched'     => 'Homework submissions retrieved successfully.',
+    'homework_submission_fetched'      => 'Homework submission details retrieved successfully.',
+    'homework_submission_graded'       => 'Homework submission evaluated and score updated successfully.',
+    'homework_submitted_successfully'  => 'Homework solution submitted successfully.',
+    'homework_solution_required'       => 'Please provide a solution file or text answer to submit the homework.',
+    'homework_already_graded'          => 'This homework submission has already been graded and cannot be modified.',
+    'invalid_file_type'                => 'Unsupported file type. Only PDF and JPG/PNG images are allowed.',
+    'file_not_found'                   => 'Requested file not found or has been deleted.',
 ];

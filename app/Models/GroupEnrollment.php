@@ -68,6 +68,11 @@ class GroupEnrollment extends Model
         return $this->belongsTo(StudyGroup::class, 'study_group_id');
     }
 
+    public function studyGroup(): BelongsTo
+    {
+        return $this->group();
+    }
+
     public function student(): BelongsTo
     {
         return $this->belongsTo(User::class, 'student_id');

@@ -6,6 +6,8 @@ use App\Repositories\Contracts\CourseRepositoryInterface;
 use App\Repositories\Contracts\ExamRepositoryInterface;
 use App\Repositories\Contracts\ExamSubmissionRepositoryInterface;
 use App\Repositories\Contracts\GroupEnrollmentRepositoryInterface;
+use App\Repositories\Contracts\HomeworkRepositoryInterface;
+use App\Repositories\Contracts\HomeworkSubmissionRepositoryInterface;
 use App\Repositories\Contracts\LessonRepositoryInterface;
 use App\Repositories\Contracts\LoginHistoryRepositoryInterface;
 use App\Repositories\Contracts\StudyGroupRepositoryInterface;
@@ -17,6 +19,8 @@ use App\Repositories\Eloquent\CourseRepository;
 use App\Repositories\Eloquent\ExamRepository;
 use App\Repositories\Eloquent\ExamSubmissionRepository;
 use App\Repositories\Eloquent\GroupEnrollmentRepository;
+use App\Repositories\Eloquent\HomeworkRepository;
+use App\Repositories\Eloquent\HomeworkSubmissionRepository;
 use App\Repositories\Eloquent\LessonRepository;
 use App\Repositories\Eloquent\LoginHistoryRepository;
 use App\Repositories\Eloquent\StudyGroupRepository;
@@ -45,6 +49,8 @@ class RepositoryServiceProvider extends ServiceProvider
         GroupEnrollmentRepositoryInterface::class      => GroupEnrollmentRepository::class,
         ExamRepositoryInterface::class                 => ExamRepository::class,
         ExamSubmissionRepositoryInterface::class       => ExamSubmissionRepository::class,
+        HomeworkRepositoryInterface::class             => HomeworkRepository::class,
+        HomeworkSubmissionRepositoryInterface::class   => HomeworkSubmissionRepository::class,
     ];
 
     /**
