@@ -114,6 +114,16 @@ class User extends Authenticatable
         return $this->hasMany(TeacherScheduleNote::class, 'teacher_id');
     }
 
+    public function exams(): HasMany
+    {
+        return $this->hasMany(Exam::class, 'teacher_id');
+    }
+
+    public function examSubmissions(): HasMany
+    {
+        return $this->hasMany(ExamSubmission::class, 'student_id');
+    }
+
     /**
      * Students linked to this parent account.
      */
