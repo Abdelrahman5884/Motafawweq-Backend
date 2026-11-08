@@ -95,3 +95,4 @@ class ExamSubmission extends Model
         return $this;
     }
 }
+

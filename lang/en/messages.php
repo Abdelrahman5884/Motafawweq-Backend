@@ -181,4 +181,13 @@ return [
     'exam_duplicated'              => 'Exam cloned as a fresh copy successfully.',
     'exam_questions_required'      => 'At least one question is required to create an exam.',
     'quota_question_bank_exceeded' => 'You have exceeded the maximum question bank capacity for your plan (:max questions).',
+
+    // Stage 11: Exam Submissions, Student Answers & Grading Workflow
+    'exam_submissions_fetched'     => 'Exam submissions and student answers retrieved successfully.',
+    'exam_submission_fetched'      => 'Student submission details retrieved successfully.',
+    'exam_submitted_successfully'  => 'Exam submitted and objective questions graded successfully.',
+    'exam_submission_graded'       => 'Essay questions graded and total score updated successfully.',
+    'exam_closed_for_submission'   => 'This exam is currently closed for student submissions.',
+    'exam_already_submitted'       => 'You have already submitted this exam.',
+    'rate_limit_exam_submit'       => 'Too many exam submission attempts. Please wait a moment.',
 ];

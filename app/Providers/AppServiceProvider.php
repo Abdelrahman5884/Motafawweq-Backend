@@ -139,5 +139,12 @@ class AppServiceProvider extends ServiceProvider
                 ->by('join-code:' . ($request->user()?->id ?: $request->ip()))
                 ->response($tooMany('messages.rate_limit_join_code'));
         });
+
+        // Exam submission attempts: 10 per minute per student/IP
+        RateLimiter::for('exam-submit', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(10)
+                ->by('exam-sub:' . ($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_exam_submit'));
+        });
     }
 }

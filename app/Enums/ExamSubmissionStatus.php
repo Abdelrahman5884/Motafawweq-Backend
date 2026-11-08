@@ -22,3 +22,4 @@ enum ExamSubmissionStatus: string
         return array_column(self::cases(), 'value');
     }
 }
+

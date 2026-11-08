@@ -181,4 +181,13 @@ return [
     'exam_duplicated'              => 'تم تكرار الامتحان وأسئلته بنجاح كنسخة جديدة',
     'exam_questions_required'      => 'يجب إضافة سؤال واحد على الأقل داخل الامتحان.',
     'quota_question_bank_exceeded' => 'تجاوزت الحد المسموح به لعدد الأسئلة في باقتك الحالية (:max سؤال).',
+
+    // Stage 11: Exam Submissions, Student Answers & Grading Workflow
+    'exam_submissions_fetched'     => 'تم جلب قائمة إجابات وتسليمات الطلاب بنجاح',
+    'exam_submission_fetched'      => 'تم جلب تفاصيل إجابة الطالب والأسئلة بنجاح',
+    'exam_submitted_successfully'  => 'تم تسليم الامتحان وتصحيح الأسئلة الموضوعية بنجاح',
+    'exam_submission_graded'       => 'تم رصد وتصحيح الإجابات المقالية وتحديث الدرجة النهائية بنجاح',
+    'exam_closed_for_submission'   => 'عفواً، هذا الامتحان غير متاح للتسليم حالياً.',
+    'exam_already_submitted'       => 'لقد قمت بتسليم هذا الامتحان مسبقاً ولا يسمح بإعادة التسليم.',
+    'rate_limit_exam_submit'       => 'تجاوزت الحد المسموح لتسليم إجابات الامتحانات، يرجى الانتظار قليلاً.',
 ];

@@ -4,10 +4,12 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
+use App\Http\Controllers\Api\V1\Student\StudentExamTakingController;
 use App\Http\Controllers\Api\V1\Teacher\LessonWorkspaceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherAttendanceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherCourseController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherExamController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherExamGradingController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherPayoutAccountController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherRosterController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherScheduleController;
@@ -104,6 +106,11 @@ Route::prefix('v1')->group(function () {
             // Student: join study group by join code or QR scan
             Route::post('/groups/join', [TeacherRosterController::class, 'studentJoin'])
                 ->middleware('throttle:join-code');
+
+            // Stage 11: Student exam taking & submission
+            Route::post('/exams/{uuid}/submit', [StudentExamTakingController::class, 'submit'])
+                ->whereUuid('uuid')
+                ->middleware('throttle:exam-submit');
 
             // Admin area
             Route::prefix('admin')->middleware('role:admin')->group(function () {
@@ -263,6 +270,16 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('uuid');
                     Route::delete('/{uuid}', [TeacherExamController::class, 'destroy'])
                         ->whereUuid('uuid');
+
+                    // Stage 11: Exam Submissions, Student Answers & Grading Workflow
+                    Route::get('/{uuid}/submissions', [TeacherExamGradingController::class, 'index'])
+                        ->whereUuid('uuid');
+                    Route::get('/{uuid}/submissions/{submissionUuid}', [TeacherExamGradingController::class, 'show'])
+                        ->whereUuid('uuid')
+                        ->whereUuid('submissionUuid');
+                    Route::patch('/{uuid}/submissions/{submissionUuid}/grade-essay', [TeacherExamGradingController::class, 'gradeEssay'])
+                        ->whereUuid('uuid')
+                        ->whereUuid('submissionUuid');
                 });
             });
         });

@@ -52,3 +52,4 @@ class ExamSubmissionAnswer extends Model
         return $this->belongsTo(ExamQuestion::class, 'exam_question_id');
     }
 }
+
