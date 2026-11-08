@@ -35,7 +35,7 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->unique(['attendance_session_id', 'group_enrollment_id']);
+            $table->unique(['attendance_session_id', 'group_enrollment_id'], 'grp_att_sess_enroll_unique');
             $table->index(['study_group_id', 'student_id']);
             $table->index(['group_enrollment_id', 'status']);
         });

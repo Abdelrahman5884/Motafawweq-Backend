@@ -78,3 +78,4 @@ class GroupAttendanceSession extends Model
         return $this;
     }
 }
+

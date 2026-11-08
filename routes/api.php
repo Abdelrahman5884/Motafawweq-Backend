@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\Teacher\LessonWorkspaceController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherAttendanceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherCourseController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherPayoutAccountController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherRosterController;
@@ -222,6 +223,16 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid(['uuid', 'enrollmentUuid']);
                     Route::delete('/{uuid}/enrollments/{enrollmentUuid}', [TeacherRosterController::class, 'destroy'])
                         ->whereUuid(['uuid', 'enrollmentUuid']);
+
+                    // Stage 9: Smart QR/Barcode Attendance
+                    Route::prefix('/{uuid}/attendance')->group(function () {
+                        Route::post('/scan', [TeacherAttendanceController::class, 'scan'])
+                            ->middleware('throttle:qr-scan');
+                        Route::post('/toggle', [TeacherAttendanceController::class, 'toggle']);
+                        Route::get('/sessions', [TeacherAttendanceController::class, 'index']);
+                        Route::get('/sessions/{sessionUuid}', [TeacherAttendanceController::class, 'show'])
+                            ->whereUuid('sessionUuid');
+                    })->whereUuid('uuid');
                 });
 
                 Route::get('/students/search', [TeacherRosterController::class, 'search']);

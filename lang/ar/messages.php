@@ -161,4 +161,12 @@ return [
     'student_already_pending'  => 'يوجد طلب انضمام معلق بالفعل لهذا الطالب.',
     'group_capacity_reached'   => 'اكتملت سعة المجموعة الدراسية (:max طالب). لا يمكن إضافة طلاب جدد.',
     'invalid_join_code'        => 'كود الانضمام غير صحيح أو أن المجموعة غير نشطة.',
+
+    // Stage 9: Smart QR/Barcode Attendance
+    'attendance_recorded_success' => 'تم تسجيل حضور الطالب بنجاح وتحديث نسبة الالتزام',
+    'attendance_already_recorded' => 'تم تسجيل حضور هذا الطالب مسبقاً في هذه الحصة',
+    'attendance_toggled_success'  => 'تم تحديث حالة حضور الطالب بنجاح',
+    'attendance_sessions_fetched' => 'تم جلب سجل جلسات الحضور والغياب بنجاح',
+    'attendance_session_fetched'  => 'تم جلب تفاصيل جلسة الحضور وقائمة الطلاب بنجاح',
+    'attendance_student_not_found'=> 'لم يتم العثور على طالب مقيد في هذه المجموعة يطابق الباركود أو الكود المدخل.',
 ];

@@ -161,4 +161,12 @@ return [
     'student_already_pending'  => 'A join request is already pending for this student.',
     'group_capacity_reached'   => 'Study group capacity of :max students has been reached.',
     'invalid_join_code'        => 'The provided join code is invalid or the group is inactive.',
+
+    // Stage 9: Smart QR/Barcode Attendance
+    'attendance_recorded_success' => 'Student attendance recorded and streak updated successfully.',
+    'attendance_already_recorded' => 'Student attendance has already been recorded for this session.',
+    'attendance_toggled_success'  => 'Student attendance status toggled successfully.',
+    'attendance_sessions_fetched' => 'Attendance sessions history retrieved successfully.',
+    'attendance_session_fetched'  => 'Attendance session details and roster retrieved successfully.',
+    'attendance_student_not_found'=> 'No enrolled student found in this group matching the provided barcode or code.',
 ];
