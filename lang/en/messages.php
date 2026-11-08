@@ -72,4 +72,93 @@ return [
         'suspended' => 'Suspended',
         'pending'   => 'Pending Approval',
     ],
+
+    // Teacher Security & Plan Quotas
+    'forbidden_resource_owner'       => 'You do not have permission to access this resource as it belongs to another educator.',
+    'rate_limit_teacher_uploads'     => 'Upload rate limit exceeded. Please wait a moment before uploading more files.',
+    'rate_limit_qr_scan'             => 'QR scan rate exceeded. Please wait a few seconds.',
+    'rate_limit_financial'           => 'Too many financial operations in a short period. Please wait a minute to protect your account.',
+    'rate_limit_join_code'           => 'Too many group join code attempts. Please wait a minute before trying again.',
+    'quota_courses_exceeded'         => 'You have reached the maximum active courses limit (:max) on your :plan. Please upgrade your plan to create more courses.',
+    'quota_students_exceeded'        => 'You have reached the maximum student enrollment capacity (:max) on your :plan. Please upgrade your plan to add more students.',
+    'quota_certificates_not_allowed' => 'Issuing QR-verified certificates is not available on the :plan. Please upgrade to Teacher Plus or Pro.',
+    'quota_leagues_not_allowed'      => 'Launching competitive course leagues is not available on the :plan. Please upgrade to Teacher Plus or Pro.',
+    'quota_whatsapp_not_allowed'     => 'Automated WhatsApp parent reports are exclusively available on the Teacher Pro plan.',
+    'teacher_plans' => [
+        'free' => 'Free Plan',
+        'plus' => 'Teacher Plus',
+        'pro'  => 'Teacher Pro',
+    ],
+
+    // Stage 2: Teacher Profile, Stages & Preferences
+    'teacher_settings_fetched'     => 'Teacher profile and settings retrieved successfully.',
+    'teacher_settings_updated'     => 'All teacher profile changes and settings updated successfully.',
+    'teacher_stages_updated'       => 'Curriculum stages and grades updated successfully.',
+    'teacher_preferences_updated'  => 'Appearance, language, and alert preferences updated successfully.',
+    'teacher_avatar_updated'       => 'Verified educator portrait updated successfully.',
+    'invalid_image_signature'      => 'The uploaded file is not a valid image or its signature is unsupported.',
+
+    // Stage 3: Encrypted Payout Accounts
+    'payout_accounts_fetched'        => 'Payout receiving accounts retrieved successfully.',
+    'payout_account_created'         => 'Payout receiving account added and encrypted successfully.',
+    'payout_account_updated'         => 'Payout account active status updated successfully.',
+    'payout_account_default_updated' => 'Default payout receiving account updated successfully.',
+    'payout_account_deleted'         => 'Payout receiving account deleted successfully.',
+
+    // Stage 4: Courses & Curriculum Management
+    'courses_fetched' => 'Courses retrieved successfully.',
+    'course_fetched'  => 'Course details retrieved successfully.',
+    'course_created'  => 'Course created and published successfully.',
+    'course_updated'  => 'Course details updated successfully.',
+    'course_deleted'  => 'Course deleted successfully.',
+
+    // Stage 5: Recording Studio & Secure Media / Attachments
+    'lessons_fetched'              => 'Recorded lessons retrieved successfully.',
+    'lesson_fetched'               => 'Lesson details and attachments retrieved successfully.',
+    'lesson_created'               => 'Studio lesson created successfully.',
+    'lesson_updated'               => 'Lesson details updated successfully.',
+    'lesson_deleted'               => 'Lesson deleted successfully.',
+    'lesson_media_uploaded'        => 'Lesson audio/video media uploaded and secured successfully.',
+    'lesson_pdf_uploaded'          => 'PDF booklet attached and secured successfully.',
+    'lesson_image_uploaded'        => 'Whiteboard photo attached and ordered successfully.',
+    'lesson_attachments_reordered' => 'Attachments sequential order updated successfully.',
+    'lesson_attachment_deleted'    => 'Attachment deleted and remaining items re-indexed successfully.',
+    'invalid_pdf_signature'        => 'The uploaded file is not a valid PDF document or its binary signature is invalid.',
+    'invalid_media_signature'      => 'The uploaded file is not a supported audio or video stream.',
+    'invalid_embed_url'            => 'External video embed URL must use a secure HTTPS connection.',
+    'invalid_signed_url'           => 'The media stream or download link is invalid or has expired.',
+
+    // Stage 6: Lesson Workspace, Chapters, Transcripts & Concept Graphs
+    'workspace_overview_fetched'   => 'Lesson workspace overview and statistics retrieved successfully.',
+    'lesson_workspace_fetched'     => 'Lesson workspace, chapters, transcript, and concept graph retrieved successfully.',
+    'lesson_chapters_updated'      => 'Lesson timestamped chapters updated successfully.',
+    'lesson_transcript_updated'    => 'Lesson synchronized transcript updated successfully.',
+    'lesson_concept_graph_updated' => 'Interactive NotebookLM concept graph saved successfully.',
+    'concept_graph_depth_exceeded' => 'The concept graph exceeded the maximum allowed tree nesting depth.',
+    'concept_graph_nodes_exceeded' => 'The concept graph exceeded the maximum allowed total nodes.',
+
+    // Stage 7: Study Groups, Centers & Weekly Schedule
+    'groups_fetched'         => 'Study groups and halls retrieved successfully.',
+    'group_fetched'          => 'Study group details retrieved successfully.',
+    'group_created'          => 'Study group created with schedule slots and join code successfully.',
+    'group_updated'          => 'Study group details and schedule slots updated successfully.',
+    'group_deleted'          => 'Study group deleted successfully.',
+    'group_code_regenerated' => 'Previous join code invalidated and new code generated successfully.',
+    'schedule_fetched'       => 'Weekly timetable, sessions, and daily notes retrieved successfully.',
+    'schedule_note_created'  => 'Daily schedule note added successfully.',
+    'schedule_note_toggled'  => 'Schedule note completion status toggled successfully.',
+    'schedule_note_deleted'  => 'Schedule note deleted successfully.',
+
+    // Stage 8: Student Roster, Pending Requests & Direct Invitations
+    'roster_fetched'           => 'Student roster and pending requests retrieved successfully.',
+    'students_searched'        => 'Platform students searched successfully.',
+    'student_invited'          => 'Student invitation sent successfully.',
+    'student_accepted'         => 'Student accepted and barcode/passcode generated successfully.',
+    'student_rejected'         => 'Join request rejected successfully.',
+    'student_removed'          => 'Student removed from study group successfully.',
+    'join_request_submitted'   => 'Join request submitted and awaiting teacher approval.',
+    'student_already_enrolled' => 'This student is already enrolled in this study group.',
+    'student_already_pending'  => 'A join request is already pending for this student.',
+    'group_capacity_reached'   => 'Study group capacity of :max students has been reached.',
+    'invalid_join_code'        => 'The provided join code is invalid or the group is inactive.',
 ];

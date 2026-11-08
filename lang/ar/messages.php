@@ -72,4 +72,93 @@ return [
         'suspended' => 'معلق / محظور',
         'pending'   => 'قيد المراجعة',
     ],
+
+    // Teacher Security & Plan Quotas
+    'forbidden_resource_owner'       => 'غير مصرح لك بالوصول إلى هذا السجل لأنه يخص معلماً آخر.',
+    'rate_limit_teacher_uploads'     => 'تم تجاوز الحد المسموح به لرفع الملفات في الدقيقة. يرجى الانتظار قليلاً.',
+    'rate_limit_qr_scan'             => 'معدل مسح الباركود سريع جداً. يرجى الانتظار ثوانٍ قليلة.',
+    'rate_limit_financial'           => 'تم إجراء عمليات مالية كثيرة في وقت قصير. يرجى الانتظار دقيقة لحماية حسابك.',
+    'rate_limit_join_code'           => 'محاولات كثيرة لإدخال كود المجموعة. يرجى الانتظار دقيقة قبل المحاولة مجدداً.',
+    'quota_courses_exceeded'         => 'لقد وصلت للحد الأقصى لعدد الكورسات النشطة (:max كورس) في :plan. يرجى ترقية باقتك لإضافة المزيد.',
+    'quota_students_exceeded'        => 'لقد وصلت للحد الأقصى لسعة الطلاب (:max طالب) في :plan. يرجى ترقية باقتك لاستيعاب طلاب إضافيين.',
+    'quota_certificates_not_allowed' => 'ميزة إصدار الشهادات المعتمدة برمز QR غير متاحة في :plan. يرجى الترقية إلى باقة بلس أو برو.',
+    'quota_leagues_not_allowed'      => 'ميزة إطلاق دوري الكورس والتحديات التنافسية غير متاحة في :plan. يرجى الترقية إلى باقة بلس أو برو.',
+    'quota_whatsapp_not_allowed'     => 'ميزة إرسال تقارير واتساب الفورية لأولياء الأمور متاحة حصرياً في باقة المعلم برو (Pro).',
+    'teacher_plans' => [
+        'free' => 'الباقة المجانية',
+        'plus' => 'باقة المعلم بلس',
+        'pro'  => 'باقة المعلم برو',
+    ],
+
+    // Stage 2: Teacher Profile, Stages & Preferences
+    'teacher_settings_fetched'     => 'تم جلب إعدادات وملف المعلم بنجاح',
+    'teacher_settings_updated'     => 'تم حفظ كافة تعديلات ملف المعلم وتحديث الإعدادات بنجاح',
+    'teacher_stages_updated'       => 'تم تحديث المراحل والصفوف الدراسية المعتمدة بنجاح',
+    'teacher_preferences_updated'  => 'تم تحديث تفضيلات المظهر واللغة والتنبيهات بنجاح',
+    'teacher_avatar_updated'       => 'تم تحديث الصورة الشخصية المعتمدة بنجاح',
+    'invalid_image_signature'      => 'الملف المرفوع ليس صورة صالحة أو أن صيغته غير مدعومة.',
+
+    // Stage 3: Encrypted Payout Accounts
+    'payout_accounts_fetched'        => 'تم جلب حسابات استلام المدفوعات بنجاح',
+    'payout_account_created'         => 'تمت إضافة وسيلة استلام المدفوعات وتشفير بياناتها بنجاح',
+    'payout_account_updated'         => 'تم تحديث حالة تفعيل حساب الاستلام بنجاح',
+    'payout_account_default_updated' => 'تم تعيين حساب الاستلام الافتراضي بنجاح',
+    'payout_account_deleted'         => 'تم حذف وسيلة استلام المدفوعات بنجاح',
+
+    // Stage 4: Courses & Curriculum Management
+    'courses_fetched' => 'تم جلب قائمة الكورسات والمقررات الدراسية بنجاح',
+    'course_fetched'  => 'تم جلب بيانات المقرر الدراسي بنجاح',
+    'course_created'  => 'تم إنشاء ونشر المقرر الدراسي بنجاح',
+    'course_updated'  => 'تم حفظ تعديلات المقرر الدراسي بنجاح',
+    'course_deleted'  => 'تم حذف المقرر الدراسي بنجاح',
+
+    // Stage 5: Recording Studio & Secure Media / Attachments
+    'lessons_fetched'              => 'تم جلب قائمة الحصص المسجلة بنجاح',
+    'lesson_fetched'               => 'تم جلب بيانات الحصة والمرفقات بنجاح',
+    'lesson_created'               => 'تم إنشاء الحصة وإعداد استوديو التسجيل بنجاح',
+    'lesson_updated'               => 'تم تحديث بيانات الحصة بنجاح',
+    'lesson_deleted'               => 'تم حذف الحصة بنجاح',
+    'lesson_media_uploaded'        => 'تم رفع ملف الصوت أو الفيديو للحصة وتأمينه بنجاح',
+    'lesson_pdf_uploaded'          => 'تم إرفاق مذكرة الـ PDF وتأمينها بنجاح',
+    'lesson_image_uploaded'        => 'تم إرفاق صورة السبورة وحفظ ترتيبها بنجاح',
+    'lesson_attachments_reordered' => 'تم تحديث الترتيب التسلسلي للمرفقات بنجاح',
+    'lesson_attachment_deleted'    => 'تم حذف المرفق وإعادة ترتيب العناصر المتبقية بنجاح',
+    'invalid_pdf_signature'        => 'الملف المرفوع ليس ملف PDF صالحاً أو أن بصمته الرقمية غير مطابقة.',
+    'invalid_media_signature'      => 'الملف المرفوع ليس ملف صوت أو فيديو مدعوماً.',
+    'invalid_embed_url'            => 'رابط الفيديو الخارجي يجب أن يبدأ ببروتوكول آمن (https://).',
+    'invalid_signed_url'           => 'رابط التحميل أو المشاهدة غير صالح أو منتهي الصلاحية.',
+
+    // Stage 6: Lesson Workspace, Chapters, Transcripts & Concept Graphs
+    'workspace_overview_fetched'   => 'تم جلب نظرة عامة على مساحة الحصص والإحصائيات بنجاح',
+    'lesson_workspace_fetched'     => 'تم جلب بيانات مساحة الحصة والفصول والتفريغ النصي وخريطة المفاهيم بنجاح',
+    'lesson_chapters_updated'      => 'تم حفظ وتحديث فصول الحصة والتوقيتات الزمنية بنجاح',
+    'lesson_transcript_updated'    => 'تم حفظ وتحديث التفريغ النصي المتزامن للحصة بنجاح',
+    'lesson_concept_graph_updated' => 'تم حفظ وتحديث خريطة المفاهيم التفاعلية (NotebookLM) بنجاح',
+    'concept_graph_depth_exceeded' => 'تجاوزت خريطة المفاهيم الحد الأقصى لعمق التفرع الشجري المسموح به.',
+    'concept_graph_nodes_exceeded' => 'تجاوزت خريطة المفاهيم الحد الأقصى لعدد العقد المفاهيمية المسموح به.',
+
+    // Stage 7: Study Groups, Centers & Weekly Schedule
+    'groups_fetched'         => 'تم جلب قائمة المجموعات والقاعات الدراسية بنجاح',
+    'group_fetched'          => 'تم جلب بيانات المجموعة الدراسية بنجاح',
+    'group_created'          => 'تم إنشاء المجموعة وتوليد كود الانضمام والمواعيد بنجاح',
+    'group_updated'          => 'تم حفظ تعديلات المجموعة والمواعيد بنجاح',
+    'group_deleted'          => 'تم حذف المجموعة الدراسية بنجاح',
+    'group_code_regenerated' => 'تم إبطال الكود القديم وتوليد كود انضمام جديد بنجاح',
+    'schedule_fetched'       => 'تم جلب الجدول الأسبوعي والمواعيد والملاحظات بنجاح',
+    'schedule_note_created'  => 'تمت إضافة الملاحظة بنجاح إلى جدول المواعيد',
+    'schedule_note_toggled'  => 'تم تغيير حالة إنجاز الملاحظة بنجاح',
+    'schedule_note_deleted'  => 'تم حذف الملاحظة بنجاح',
+
+    // Stage 8: Student Roster, Pending Requests & Direct Invitations
+    'roster_fetched'           => 'تم جلب سجل طلاب المجموعة وقوائم الانتظار بنجاح',
+    'students_searched'        => 'تم البحث في قاعدة بيانات الطلاب بنجاح',
+    'student_invited'          => 'تم إرسال دعوة الانضمام للطالب بنجاح',
+    'student_accepted'         => 'تم قبول الطالب وتوليد الباركود وكود المرور بنجاح',
+    'student_rejected'         => 'تم رفض طلب الانضمام بنجاح',
+    'student_removed'          => 'تم إلغاء قيد الطالب من المجموعة بنجاح',
+    'join_request_submitted'   => 'تم إرسال طلب انضمامك للمجموعة بنجاح وبانتظار موافقة المعلم',
+    'student_already_enrolled' => 'هذا الطالب مقيد بالفعل في هذه المجموعة.',
+    'student_already_pending'  => 'يوجد طلب انضمام معلق بالفعل لهذا الطالب.',
+    'group_capacity_reached'   => 'اكتملت سعة المجموعة الدراسية (:max طالب). لا يمكن إضافة طلاب جدد.',
+    'invalid_join_code'        => 'كود الانضمام غير صحيح أو أن المجموعة غير نشطة.',
 ];

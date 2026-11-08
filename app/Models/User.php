@@ -8,6 +8,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -81,6 +82,36 @@ class User extends Authenticatable
     public function verificationCodes(): HasMany
     {
         return $this->hasMany(VerificationCode::class);
+    }
+
+    public function teacherProfile(): HasOne
+    {
+        return $this->hasOne(TeacherProfile::class);
+    }
+
+    public function teacherPayoutAccounts(): HasMany
+    {
+        return $this->hasMany(TeacherPayoutAccount::class, 'teacher_id');
+    }
+
+    public function courses(): HasMany
+    {
+        return $this->hasMany(Course::class, 'teacher_id');
+    }
+
+    public function lessons(): HasMany
+    {
+        return $this->hasMany(Lesson::class, 'teacher_id');
+    }
+
+    public function studyGroups(): HasMany
+    {
+        return $this->hasMany(StudyGroup::class, 'teacher_id');
+    }
+
+    public function scheduleNotes(): HasMany
+    {
+        return $this->hasMany(TeacherScheduleNote::class, 'teacher_id');
     }
 
     /**

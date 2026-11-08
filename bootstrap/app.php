@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\CheckRole;
+use App\Http\Middleware\CheckTeacherPlanQuota;
 use App\Http\Middleware\EnsureAccountIsActive;
 use App\Http\Middleware\EnsureEmailIsVerified;
 use App\Http\Middleware\ForceJsonResponse;
@@ -49,6 +50,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'ability'        => CheckForAnyAbility::class,
             'email.verified' => EnsureEmailIsVerified::class,
             'account.active' => EnsureAccountIsActive::class,
+            'teacher.quota'  => CheckTeacherPlanQuota::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

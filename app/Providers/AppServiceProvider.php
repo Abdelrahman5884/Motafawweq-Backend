@@ -111,5 +111,33 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('strict', function (Request $request) {
             return Limit::perMinute(5)->by($request->user()?->id ?: $request->ip());
         });
+
+        // Teacher media & file uploads: 15 uploads per minute per teacher
+        RateLimiter::for('teacher-uploads', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(15)
+                ->by('teacher-upload:' . ($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_teacher_uploads'));
+        });
+
+        // Classroom QR / Barcode attendance scanning: 45 scans per minute per teacher
+        RateLimiter::for('qr-scan', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(45)
+                ->by('qr-scan:' . ($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_qr_scan'));
+        });
+
+        // Sensitive financial & payout mutations: 10 per minute per teacher
+        RateLimiter::for('financial-mutation', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(10)
+                ->by('fin-mut:' . ($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_financial'));
+        });
+
+        // Group join code attempts: 8 per minute per user/IP (anti-brute-force)
+        RateLimiter::for('join-code', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(8)
+                ->by('join-code:' . ($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_join_code'));
+        });
     }
 }
