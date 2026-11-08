@@ -169,4 +169,16 @@ return [
     'attendance_sessions_fetched' => 'Attendance sessions history retrieved successfully.',
     'attendance_session_fetched'  => 'Attendance session details and roster retrieved successfully.',
     'attendance_student_not_found'=> 'No enrolled student found in this group matching the provided barcode or code.',
+
+    // Stage 10: Question Bank & Bubble Sheet Exams
+    'exams_fetched'                => 'Exams and question bank retrieved successfully.',
+    'exam_fetched'                 => 'Exam details and questions retrieved successfully.',
+    'exam_created'                 => 'Exam created with questions matrix successfully.',
+    'exam_updated'                 => 'Exam details and questions updated successfully.',
+    'exam_deleted'                 => 'Exam deleted successfully.',
+    'exam_status_toggled'          => 'Exam availability status toggled successfully.',
+    'exam_results_toggled'         => 'Exam results publication status toggled successfully.',
+    'exam_duplicated'              => 'Exam cloned as a fresh copy successfully.',
+    'exam_questions_required'      => 'At least one question is required to create an exam.',
+    'quota_question_bank_exceeded' => 'You have exceeded the maximum question bank capacity for your plan (:max questions).',
 ];

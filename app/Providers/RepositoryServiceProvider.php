@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Repositories\Contracts\CourseRepositoryInterface;
+use App\Repositories\Contracts\ExamRepositoryInterface;
 use App\Repositories\Contracts\GroupEnrollmentRepositoryInterface;
 use App\Repositories\Contracts\LessonRepositoryInterface;
 use App\Repositories\Contracts\LoginHistoryRepositoryInterface;
@@ -12,6 +13,7 @@ use App\Repositories\Contracts\TeacherProfileRepositoryInterface;
 use App\Repositories\Contracts\UserRepositoryInterface;
 use App\Repositories\Contracts\VerificationCodeRepositoryInterface;
 use App\Repositories\Eloquent\CourseRepository;
+use App\Repositories\Eloquent\ExamRepository;
 use App\Repositories\Eloquent\GroupEnrollmentRepository;
 use App\Repositories\Eloquent\LessonRepository;
 use App\Repositories\Eloquent\LoginHistoryRepository;
@@ -39,6 +41,7 @@ class RepositoryServiceProvider extends ServiceProvider
         LessonRepositoryInterface::class               => LessonRepository::class,
         StudyGroupRepositoryInterface::class           => StudyGroupRepository::class,
         GroupEnrollmentRepositoryInterface::class      => GroupEnrollmentRepository::class,
+        ExamRepositoryInterface::class                 => ExamRepository::class,
     ];
 
     /**

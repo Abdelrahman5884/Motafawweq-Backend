@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\Teacher\LessonWorkspaceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherAttendanceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherCourseController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherExamController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherPayoutAccountController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherRosterController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherScheduleController;
@@ -243,6 +244,24 @@ Route::prefix('v1')->group(function () {
                     Route::patch('/notes/{uuid}/toggle', [TeacherScheduleController::class, 'toggleNote'])
                         ->whereUuid('uuid');
                     Route::delete('/notes/{uuid}', [TeacherScheduleController::class, 'destroyNote'])
+                        ->whereUuid('uuid');
+                });
+
+                // Stage 10: Question Bank & Bubble Sheet Exams
+                Route::prefix('exams')->group(function () {
+                    Route::get('/', [TeacherExamController::class, 'index']);
+                    Route::post('/', [TeacherExamController::class, 'store']);
+                    Route::get('/{uuid}', [TeacherExamController::class, 'show'])
+                        ->whereUuid('uuid');
+                    Route::put('/{uuid}', [TeacherExamController::class, 'update'])
+                        ->whereUuid('uuid');
+                    Route::patch('/{uuid}/toggle-status', [TeacherExamController::class, 'toggleStatus'])
+                        ->whereUuid('uuid');
+                    Route::patch('/{uuid}/toggle-results', [TeacherExamController::class, 'toggleResults'])
+                        ->whereUuid('uuid');
+                    Route::post('/{uuid}/duplicate', [TeacherExamController::class, 'duplicate'])
+                        ->whereUuid('uuid');
+                    Route::delete('/{uuid}', [TeacherExamController::class, 'destroy'])
                         ->whereUuid('uuid');
                 });
             });

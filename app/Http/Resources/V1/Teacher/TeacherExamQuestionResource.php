@@ -1,0 +1,48 @@
+<?php
+
+namespace App\Http\Resources\V1\Teacher;
+
+use App\Enums\ExamQuestionType;
+use App\Http\Resources\BaseJsonResource;
+use Illuminate\Http\Request;
+
+class TeacherExamQuestionResource extends BaseJsonResource
+{
+    /**
+     * Transform the question for teacher inspection (including correct answer keys & rubric).
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(Request $request): array
+    {
+        $type = $this->type instanceof ExamQuestionType
+            ? $this->type->value
+            : (string) ($this->type ?? 'mcq');
+
+        $typeNameAr = $this->type instanceof ExamQuestionType
+            ? $this->type->labelAr()
+            : match ($type) {
+                'true_false' => 'صح وخطأ',
+                'essay'      => 'مقالي',
+                default      => 'اختيار من متعدد',
+            };
+
+        return [
+            'id'             => $this->uuid,
+            'number'         => (int) $this->question_number,
+            'points'         => (int) $this->points,
+            'type'           => $type,
+            'typeNameAr'     => $typeNameAr,
+            'difficulty'     => $this->difficulty ?? 'متوسط',
+            'questionAr'     => $this->question_ar,
+            'questionEn'     => $this->question_en,
+            'optionsAr'      => $this->options_ar ?? [],
+            'correctIndex'   => $this->correct_index,
+            'correctBool'    => $this->correct_bool,
+            'modelAnswerAr'  => $this->model_answer_ar,
+            'rubricPointsAr' => $this->rubric_points_ar ?? [],
+            'explanationAr'  => $this->explanation_ar,
+        ];
+    }
+}
+
