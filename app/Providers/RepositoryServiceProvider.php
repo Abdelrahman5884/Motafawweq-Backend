@@ -54,6 +54,8 @@ class RepositoryServiceProvider extends ServiceProvider
         HomeworkRepositoryInterface::class             => HomeworkRepository::class,
         HomeworkSubmissionRepositoryInterface::class   => HomeworkSubmissionRepository::class,
         CourseLeagueRepositoryInterface::class         => CourseLeagueRepository::class,
+        \App\Repositories\Contracts\CourseCertificateRepositoryInterface::class => \App\Repositories\Eloquent\CourseCertificateRepository::class,
+        \App\Repositories\Contracts\StudentDirectPaymentRepositoryInterface::class => \App\Repositories\Eloquent\StudentDirectPaymentRepository::class,
     ];
 
     /**

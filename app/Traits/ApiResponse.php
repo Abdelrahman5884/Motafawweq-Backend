@@ -96,4 +96,29 @@ trait ApiResponse
             ],
         ], Response::HTTP_OK);
     }
+
+    public function success(mixed $data = null, ?string $message = null, int $statusCode = Response::HTTP_OK, array $meta = []): JsonResponse
+    {
+        return $this->successResponse($data, $message, $statusCode, $meta);
+    }
+
+    public function created(mixed $data = null, ?string $message = null): JsonResponse
+    {
+        return $this->createdResponse($data, $message);
+    }
+
+    public function notFound(?string $message = null): JsonResponse
+    {
+        return $this->notFoundResponse($message);
+    }
+
+    public function validationError(mixed $errors, ?string $message = null): JsonResponse
+    {
+        return $this->validationErrorResponse($errors, $message);
+    }
+
+    public function paginated(LengthAwarePaginator $paginator, ?string $resourceClass = null, ?string $message = null): JsonResponse
+    {
+        return $this->paginatedResponse($paginator, $resourceClass, $message);
+    }
 }

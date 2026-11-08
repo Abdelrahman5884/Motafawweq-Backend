@@ -144,6 +144,41 @@ class User extends Authenticatable
         return $this->hasMany(LeagueParticipant::class, 'student_id');
     }
 
+    public function analyticsSnapshots(): HasMany
+    {
+        return $this->hasMany(TeacherAnalyticsSnapshot::class, 'teacher_id');
+    }
+
+    public function studentRiskSignals(): HasMany
+    {
+        return $this->hasMany(StudentRiskSignal::class, 'teacher_id');
+    }
+
+    public function courseCertificates(): HasMany
+    {
+        return $this->hasMany(CourseCertificate::class, 'teacher_id');
+    }
+
+    public function studentDirectPayments(): HasMany
+    {
+        return $this->hasMany(StudentDirectPayment::class, 'teacher_id');
+    }
+
+    public function studentPurchases(): HasMany
+    {
+        return $this->hasMany(StudentDirectPayment::class, 'student_id');
+    }
+
+    public function teacherSubscriptions(): HasMany
+    {
+        return $this->hasMany(TeacherSubscription::class, 'teacher_id');
+    }
+
+    public function teacherInvoices(): HasMany
+    {
+        return $this->hasMany(TeacherInvoice::class, 'teacher_id');
+    }
+
     /**
      * Students linked to this parent account.
      */

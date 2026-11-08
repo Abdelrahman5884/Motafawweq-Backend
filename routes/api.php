@@ -4,13 +4,18 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
+use App\Http\Controllers\Api\V1\Public\CertificateVerificationController;
 use App\Http\Controllers\Api\V1\Student\StudentExamTakingController;
 use App\Http\Controllers\Api\V1\Student\StudentHomeworkController;
 use App\Http\Controllers\Api\V1\Teacher\LessonWorkspaceController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherAnalyticsController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherAttendanceController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherBillingController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherCertificateController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherCourseController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherExamController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherExamGradingController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherFinancialController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherHomeworkController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherLeagueController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherPayoutAccountController;
@@ -48,6 +53,10 @@ Route::get('/ping', function () {
 });
 
 Route::prefix('v1')->group(function () {
+
+    // Public Certificate Verification via QR Code
+    Route::get('/verify-certificate/{serialNumber}', [CertificateVerificationController::class, 'verify'])
+        ->middleware('throttle:api');
 
     /*
     |----------------------------------------------------------------------
@@ -329,6 +338,40 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('uuid');
                     Route::delete('/{uuid}', [TeacherLeagueController::class, 'destroy'])
                         ->whereUuid('uuid');
+                });
+
+                // Stage 14: Teacher Analytics, Weak Areas, At-Risk Radar & Dashboard
+                Route::get('/dashboard', [TeacherAnalyticsController::class, 'dashboard']);
+
+                Route::prefix('analytics')->group(function () {
+                    Route::get('/overview', [TeacherAnalyticsController::class, 'overview']);
+                    Route::get('/weak-areas', [TeacherAnalyticsController::class, 'weakAreas']);
+                    Route::get('/at-risk-radar', [TeacherAnalyticsController::class, 'atRiskRadar']);
+                    Route::post('/at-risk/{uuid}/resolve', [TeacherAnalyticsController::class, 'resolveRiskSignal'])
+                        ->whereUuid('uuid');
+                });
+
+                // Stage 15: Certificates, Direct Payments & Teacher Billing
+                Route::prefix('certificates')->group(function () {
+                    Route::get('/', [TeacherCertificateController::class, 'index']);
+                    Route::post('/', [TeacherCertificateController::class, 'store']);
+                    Route::post('/bulk-issue', [TeacherCertificateController::class, 'bulkStore']);
+                    Route::patch('/{uuid}/revoke', [TeacherCertificateController::class, 'revoke'])
+                        ->whereUuid('uuid');
+                });
+
+                Route::prefix('financials')->group(function () {
+                    Route::get('/', [TeacherFinancialController::class, 'index']);
+                    Route::post('/payments/{uuid}/confirm', [TeacherFinancialController::class, 'confirm'])
+                        ->whereUuid('uuid');
+                    Route::post('/payments/{uuid}/reject', [TeacherFinancialController::class, 'reject'])
+                        ->whereUuid('uuid');
+                });
+
+                Route::prefix('billing')->group(function () {
+                    Route::get('/', [TeacherBillingController::class, 'index']);
+                    Route::post('/validate-coupon', [TeacherBillingController::class, 'validateCoupon']);
+                    Route::post('/subscribe', [TeacherBillingController::class, 'subscribe']);
                 });
             });
         });

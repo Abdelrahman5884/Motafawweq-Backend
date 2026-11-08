@@ -32,5 +32,10 @@ class GroupScheduleSlot extends Model
     {
         return $this->belongsTo(StudyGroup::class, 'study_group_id');
     }
+
+    public function studyGroup(): BelongsTo
+    {
+        return $this->belongsTo(StudyGroup::class, 'study_group_id');
+    }
 }
 

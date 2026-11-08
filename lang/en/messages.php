@@ -214,4 +214,29 @@ return [
     'league_xp_awarded'                => 'Bonus XP awarded and leaderboard recalculated successfully.',
     'league_recalculated'              => 'Rankings, tiers, and movement indicators recalculated successfully.',
     'student_not_found'                => 'The specified student was not found.',
+
+    // Stage 14: Teacher Analytics, Weak Areas, At-Risk Radar & Dashboard
+    'analytics_overview_fetched'       => 'Cohort analytics and attendance overview retrieved successfully.',
+    'weak_areas_fetched'               => 'Weak topics and diagnostic question analysis retrieved successfully.',
+    'at_risk_radar_fetched'            => 'At-risk student radar retrieved successfully.',
+    'risk_signal_updated'              => 'Student intervention action recorded successfully.',
+    'dashboard_summary_fetched'        => 'Teacher executive dashboard summary retrieved successfully.',
+
+    // Stage 15: Certificates, Direct Payments & Teacher Billing
+    'certificates' => [
+        'retrieved'                 => 'Accredited certificates retrieved successfully.',
+        'issued_successfully'       => 'Academic certificate issued and digitally signed successfully.',
+        'bulk_issued_successfully'  => 'Certificates issued for the selected cohort successfully.',
+        'revoked_successfully'      => 'Certificate revoked successfully.',
+    ],
+    'financials' => [
+        'retrieved'                 => 'Financial summary and direct student payments retrieved successfully.',
+        'payment_confirmed'         => 'Direct student payment confirmed and enrollment activated successfully.',
+        'payment_rejected'          => 'Direct student payment rejected and reason recorded successfully.',
+    ],
+    'billing' => [
+        'retrieved'                 => 'Current subscription plan, pricing, and invoice history retrieved successfully.',
+        'coupon_applied'            => 'Discount coupon applied successfully.',
+        'subscribed_successfully'   => 'Plan subscribed/upgraded successfully and official invoice generated.',
+    ],
 ];

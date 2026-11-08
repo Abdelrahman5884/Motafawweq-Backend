@@ -214,4 +214,29 @@ return [
     'league_xp_awarded'                => 'تم منح نقاط XP الإضافية وإعادة ترتيب لوحة المتصدرين بنجاح',
     'league_recalculated'              => 'تمت إعادة حساب الترتيب ومؤشرات الصعود والهبوط بنجاح',
     'student_not_found'                => 'الطالب المحدد غير موجود.',
+
+    // Stage 14: Teacher Analytics, Weak Areas, At-Risk Radar & Dashboard
+    'analytics_overview_fetched'       => 'تم جلب الإحصائيات الشاملة ومعدلات الحضور بنجاح',
+    'weak_areas_fetched'               => 'تم تشخيص نقاط الضعف والمفاهيم المعقدة بنجاح',
+    'at_risk_radar_fetched'            => 'تم جلب رادار الطلاب المعرضين للتراجع الأكاديمي بنجاح',
+    'risk_signal_updated'              => 'تم تحديث إجراء التدخل للتعثر الأكاديمي بنجاح',
+    'dashboard_summary_fetched'        => 'تم جلب ملخص لوحة القيادة التنفيذية للمعلم بنجاح',
+
+    // Stage 15: Certificates, Direct Payments & Teacher Billing
+    'certificates' => [
+        'retrieved'                 => 'تم جلب سجل الشهادات المعتمدة بنجاح',
+        'issued_successfully'       => 'تم إصدار شهادة التقدير المعتمدة وتوقيعها رقمياً بنجاح',
+        'bulk_issued_successfully'  => 'تم إصدار الشهادات المعتمدة للدفعة المحددة بنجاح',
+        'revoked_successfully'      => 'تم سحب وإلغاء اعتماد الشهادة بنجاح',
+    ],
+    'financials' => [
+        'retrieved'                 => 'تم جلب ملخص الإيرادات وسجل مدفوعات الطلاب بنجاح',
+        'payment_confirmed'         => 'تم تأكيد استلام التحويل وتفعيل اشتراك الطالب بنجاح',
+        'payment_rejected'          => 'تم رفض التحويل وتسجيل السبب بنجاح',
+    ],
+    'billing' => [
+        'retrieved'                 => 'تم جلب تفاصيل الباقة الحالية والأسعار وسجل الفواتير بنجاح',
+        'coupon_applied'            => 'تم تطبيق كود الخصم بنجاح',
+        'subscribed_successfully'   => 'تم تفعيل وترقية الباقة بنجاح وإصدار الفاتورة الرسمية',
+    ],
 ];
