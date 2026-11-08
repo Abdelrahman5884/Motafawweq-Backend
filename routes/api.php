@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\V1\Teacher\TeacherCourseController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherExamController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherExamGradingController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherHomeworkController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherLeagueController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherPayoutAccountController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherRosterController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherScheduleController;
@@ -314,6 +315,20 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('uuid');
                     Route::get('/submissions/{submissionUuid}/attachment', [TeacherHomeworkController::class, 'downloadSubmissionAttachment'])
                         ->whereUuid('submissionUuid');
+                });
+
+                // Stage 13: Course Leagues, XP & Leaderboards
+                Route::prefix('leagues')->group(function () {
+                    Route::get('/', [TeacherLeagueController::class, 'index']);
+                    Route::post('/', [TeacherLeagueController::class, 'store']);
+                    Route::get('/{uuid}', [TeacherLeagueController::class, 'show'])
+                        ->whereUuid('uuid');
+                    Route::post('/{uuid}/award-xp', [TeacherLeagueController::class, 'awardXp'])
+                        ->whereUuid('uuid');
+                    Route::post('/{uuid}/recalculate', [TeacherLeagueController::class, 'recalculate'])
+                        ->whereUuid('uuid');
+                    Route::delete('/{uuid}', [TeacherLeagueController::class, 'destroy'])
+                        ->whereUuid('uuid');
                 });
             });
         });

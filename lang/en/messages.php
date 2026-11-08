@@ -205,4 +205,13 @@ return [
     'homework_already_graded'          => 'This homework submission has already been graded and cannot be modified.',
     'invalid_file_type'                => 'Unsupported file type. Only PDF and JPG/PNG images are allowed.',
     'file_not_found'                   => 'Requested file not found or has been deleted.',
+
+    // Stage 13: Course Leagues, XP & Leaderboards
+    'leagues_fetched'                  => 'Course leagues retrieved successfully.',
+    'league_fetched'                   => 'League leaderboard and details retrieved successfully.',
+    'league_created'                   => 'Course league created and season started successfully.',
+    'league_deleted'                   => 'Course league deleted successfully.',
+    'league_xp_awarded'                => 'Bonus XP awarded and leaderboard recalculated successfully.',
+    'league_recalculated'              => 'Rankings, tiers, and movement indicators recalculated successfully.',
+    'student_not_found'                => 'The specified student was not found.',
 ];

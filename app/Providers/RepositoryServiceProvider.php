@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Repositories\Contracts\CourseLeagueRepositoryInterface;
 use App\Repositories\Contracts\CourseRepositoryInterface;
 use App\Repositories\Contracts\ExamRepositoryInterface;
 use App\Repositories\Contracts\ExamSubmissionRepositoryInterface;
@@ -15,6 +16,7 @@ use App\Repositories\Contracts\TeacherPayoutAccountRepositoryInterface;
 use App\Repositories\Contracts\TeacherProfileRepositoryInterface;
 use App\Repositories\Contracts\UserRepositoryInterface;
 use App\Repositories\Contracts\VerificationCodeRepositoryInterface;
+use App\Repositories\Eloquent\CourseLeagueRepository;
 use App\Repositories\Eloquent\CourseRepository;
 use App\Repositories\Eloquent\ExamRepository;
 use App\Repositories\Eloquent\ExamSubmissionRepository;
@@ -51,6 +53,7 @@ class RepositoryServiceProvider extends ServiceProvider
         ExamSubmissionRepositoryInterface::class       => ExamSubmissionRepository::class,
         HomeworkRepositoryInterface::class             => HomeworkRepository::class,
         HomeworkSubmissionRepositoryInterface::class   => HomeworkSubmissionRepository::class,
+        CourseLeagueRepositoryInterface::class         => CourseLeagueRepository::class,
     ];
 
     /**

@@ -205,4 +205,13 @@ return [
     'homework_already_graded'          => 'تم تصحيح هذا الواجب بالفعل ولا يمكن التعديل عليه.',
     'invalid_file_type'                => 'نوع الملف غير مدعوم، يسمح فقط بملفات PDF والصور JPG/PNG.',
     'file_not_found'                   => 'الملف المطلوب غير موجود أو تم حذفه.',
+
+    // Stage 13: Course Leagues, XP & Leaderboards
+    'leagues_fetched'                  => 'تم جلب قائمة دوريات الكورسات بنجاح',
+    'league_fetched'                   => 'تم جلب تفاصيل الدوري وقائمة المتصدرين بنجاح',
+    'league_created'                   => 'تم إنشاء دوري الكورس وبدء الموسم بنجاح',
+    'league_deleted'                   => 'تم حذف الدوري بنجاح',
+    'league_xp_awarded'                => 'تم منح نقاط XP الإضافية وإعادة ترتيب لوحة المتصدرين بنجاح',
+    'league_recalculated'              => 'تمت إعادة حساب الترتيب ومؤشرات الصعود والهبوط بنجاح',
+    'student_not_found'                => 'الطالب المحدد غير موجود.',
 ];

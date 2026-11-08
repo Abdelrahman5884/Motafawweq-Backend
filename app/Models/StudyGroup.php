@@ -41,6 +41,18 @@ class StudyGroup extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::creating(function (self $model) {
+            if (empty($model->uuid)) {
+                $model->uuid = (string) \Illuminate\Support\Str::uuid();
+            }
+            if (empty($model->join_code)) {
+                $model->join_code = static::generateUniqueJoinCode();
+            }
+        });
+    }
+
     public function course(): BelongsTo
     {
         return $this->belongsTo(Course::class, 'course_id');
