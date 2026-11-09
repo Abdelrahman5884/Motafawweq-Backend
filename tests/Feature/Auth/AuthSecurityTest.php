@@ -5,6 +5,7 @@ namespace Tests\Feature\Auth;
 use App\Enums\UserStatus;
 use App\Mail\Transports\BrevoApiTransport;
 use App\Models\User;
+use App\Notifications\Auth\NewDeviceLoginNotification;
 use App\Notifications\Auth\PasswordChangedNotification;
 use App\Notifications\Auth\ResetPasswordOtpNotification;
 use App\Notifications\Auth\VerifyEmailOtpNotification;
@@ -112,12 +113,12 @@ class AuthSecurityTest extends TestCase
             'password'              => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
             'role'                  => 'teacher',
-            'status'                => 'active',
+            'status'                => 'suspended',
             'email_verified_at'     => now()->toDateTimeString(),
         ])->assertCreated();
 
         $user = User::where('email', 'sneaky@motafawweq.test')->first();
-        $this->assertSame(UserStatus::PENDING, $user->status);   // teachers need approval
+        $this->assertSame(UserStatus::ACTIVE, $user->status);
         $this->assertNull($user->email_verified_at);
     }
 
@@ -491,6 +492,44 @@ class AuthSecurityTest extends TestCase
         $this->bearer($access)->getJson('/api/v1/auth/me')->assertOk();
         $this->bearer($access)->getJson('/api/v1/auth/sessions')
             ->assertStatus(403)->assertJsonPath('error_code', 'ACCOUNT_PENDING');
+    }
+
+    public function test_new_user_does_not_require_supervisor_approval_and_activates_via_email_otp(): void
+    {
+        $res = $this->postJson('/api/v1/auth/register', [
+            'name'                  => 'أستاذ محمد',
+            'email'                 => 'mohamed.teacher@motafawweq.test',
+            'password'              => self::STRONG_PASSWORD,
+            'password_confirmation' => self::STRONG_PASSWORD,
+            'role'                  => 'teacher',
+        ])->assertCreated();
+
+        $token = $res->json('data.tokens.access_token');
+        $user = User::where('email', 'mohamed.teacher@motafawweq.test')->first();
+
+        // 1) Active right away, not pending supervisor approval
+        $this->assertSame(UserStatus::ACTIVE, $user->status);
+        $this->assertNull($user->email_verified_at);
+
+        // 2) Protected route blocked by unverified email, NOT blocked by ACCOUNT_PENDING
+        $this->bearer($token)->getJson('/api/v1/auth/sessions')
+            ->assertStatus(403)
+            ->assertJsonPath('error_code', 'EMAIL_NOT_VERIFIED');
+
+        // 3) Confirm via email OTP message
+        $otp = $this->sentCode($user, VerifyEmailOtpNotification::class);
+        $this->bearer($token)->postJson('/api/v1/auth/email/verify', ['code' => $otp])->assertOk();
+
+        // 4) Fully active & verified without any supervisor intervention
+        $this->bearer($token)->getJson('/api/v1/auth/sessions')->assertOk();
+    }
+
+    public function test_auth_mail_notifications_implement_should_queue(): void
+    {
+        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldQueue::class, new VerifyEmailOtpNotification('123456', 10));
+        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldQueue::class, new ResetPasswordOtpNotification('123456', 10));
+        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldQueue::class, new NewDeviceLoginNotification('127.0.0.1', 'Mozilla/5.0'));
+        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldQueue::class, new PasswordChangedNotification('127.0.0.1'));
     }
 
     /* ----------------------------------------------------------------- */

@@ -33,7 +33,7 @@ return [
     // Roles a visitor may choose during self-registration (admin is NEVER self-assignable)
     'self_registration_roles' => ['student', 'parent', 'teacher', 'center'],
 
-    // Roles that require admin approval before they can log in
-    'roles_requiring_approval' => ['teacher'],
+    // Roles that require admin approval before they can log in (empty array: users activate via email OTP confirmation only)
+    'roles_requiring_approval' => [],
 ];
 

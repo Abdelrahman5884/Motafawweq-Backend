@@ -68,7 +68,7 @@ class TeacherAnalyticsService extends BaseService
         $examCount = $gradedExamsQuery->count();
         $overallGpa = $examCount > 0
             ? round((float) $gradedExamsQuery->avg('percentage'), 1)
-            : 85.0; // fallback realistic baseline if fresh
+            : 0.0; // no graded exams yet -> no mastery data
 
         // 4. Center vs Online student breakdown
         $centerBreakdown = [];
@@ -279,6 +279,90 @@ class TeacherAnalyticsService extends BaseService
     }
 
     /**
+     * Real attended-students count per day for the last 7 days (oldest -> today).
+     */
+    protected function getWeeklyActivity(User $teacher): array
+    {
+        $start = Carbon::today()->subDays(6);
+
+        $counts = GroupAttendanceRecord::query()
+            ->join('group_attendance_sessions as s', 's.id', '=', 'group_attendance_records.attendance_session_id')
+            ->where('s.teacher_id', $teacher->id)
+            ->whereDate('s.session_date', '>=', $start->toDateString())
+            ->whereIn('group_attendance_records.status', ['present', 'late'])
+            ->selectRaw('DATE(s.session_date) as d, COUNT(*) as c')
+            ->groupBy('d')
+            ->pluck('c', 'd');
+
+        $daysAr = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+        $result = [];
+        for ($i = 0; $i < 7; $i++) {
+            $day = $start->copy()->addDays($i);
+            $result[] = [
+                'date'     => $day->toDateString(),
+                'dayAr'    => $daysAr[$day->dayOfWeek],
+                'dayEn'    => $day->format('D'),
+                'students' => (int) ($counts[$day->toDateString()] ?? 0),
+                'isToday'  => $day->isToday(),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Average graded exam percentage per course (only courses that have graded submissions).
+     */
+    protected function getSubjectMastery(User $teacher): array
+    {
+        return ExamSubmission::query()
+            ->join('exams as e', 'e.id', '=', 'exam_submissions.exam_id')
+            ->leftJoin('courses as c', 'c.id', '=', 'e.course_id')
+            ->where('e.teacher_id', $teacher->id)
+            ->where('exam_submissions.status', ExamSubmissionStatus::GRADED->value)
+            ->selectRaw('COALESCE(c.title_ar, e.title_ar) as name_ar, COALESCE(c.title_en, e.title_en) as name_en, AVG(exam_submissions.percentage) as pct, COUNT(DISTINCT exam_submissions.student_id) as students')
+            ->groupByRaw('COALESCE(c.title_ar, e.title_ar), COALESCE(c.title_en, e.title_en)')
+            ->orderByDesc('students')
+            ->limit(5)
+            ->get()
+            ->map(fn ($row) => [
+                'nameAr'   => $row->name_ar,
+                'nameEn'   => $row->name_en ?: $row->name_ar,
+                'pct'      => round((float) $row->pct, 1),
+                'students' => (int) $row->students,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Enrolled students per study group.
+     */
+    protected function getGroupDistribution(User $teacher): array
+    {
+        $groups = StudyGroup::forTeacher($teacher->id)
+            ->withCount('enrolledEnrollments')
+            ->get();
+
+        $total = (int) $groups->sum('enrolled_enrollments_count');
+
+        return $groups
+            ->filter(fn ($g) => $g->enrolled_enrollments_count > 0)
+            ->sortByDesc('enrolled_enrollments_count')
+            ->map(fn ($g) => [
+                'id'         => $g->uuid,
+                'titleAr'    => $g->name_ar,
+                'titleEn'    => $g->name_en ?: $g->name_ar,
+                'categoryAr' => $g->center_name ?: 'أونلاين',
+                'categoryEn' => $g->center_name ?: 'Online',
+                'count'      => (int) $g->enrolled_enrollments_count,
+                'pct'        => $total > 0 ? (int) round($g->enrolled_enrollments_count / $total * 100) : 0,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * Generate the complete live dashboard payload for TeacherDashboard.jsx.
      */
     public function getDashboardSummary(User $teacher): array
@@ -331,15 +415,15 @@ class TeacherAnalyticsService extends BaseService
                     'recordedDate'      => $lesson->published_at?->toDateString() ?? $lesson->created_at?->toDateString(),
                     'stats'             => [
                         'conceptsCount'  => $conceptsCount,
-                        'completionRate' => 88,
-                        'avgQuizScore'   => 84.5,
+                        'completionRate' => null,
+                        'avgQuizScore'   => null,
                     ],
                 ];
             });
 
         // Active classes summary
         $activeClasses = StudyGroup::forTeacher($teacher->id)
-            ->where('is_active', true)
+            ->where('status', 'active')
             ->withCount('enrolledEnrollments')
             ->take(4)
             ->get()
@@ -368,6 +452,9 @@ class TeacherAnalyticsService extends BaseService
                 'pendingGradingCount' => $pendingHw + $pendingExams,
             ],
             'centerDistribution' => $overview['centerDistribution'],
+            'weeklyActivity'     => $this->getWeeklyActivity($teacher),
+            'subjectMastery'     => $this->getSubjectMastery($teacher),
+            'groupDistribution'  => $this->getGroupDistribution($teacher),
             'upcomingSessions'   => $upcomingSlots,
             'recentLessons'      => $recentLessons,
             'activeClasses'      => $activeClasses,
