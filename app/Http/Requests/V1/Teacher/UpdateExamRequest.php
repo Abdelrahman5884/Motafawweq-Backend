@@ -17,6 +17,7 @@ class UpdateExamRequest extends BaseApiRequest
     {
         $titleAr = $this->input('title_ar') ?? $this->input('titleAr');
         $titleEn = $this->input('title_en') ?? $this->input('titleEn');
+        $courseId = $this->input('course_id') ?? $this->input('courseId');
         $courseTitleAr = $this->input('course_title_ar') ?? $this->input('courseTitleAr');
         $durationMinutes = $this->input('duration_minutes') ?? $this->input('durationMinutes');
         $fullMark = $this->input('full_mark') ?? $this->input('fullMark');
@@ -26,13 +27,16 @@ class UpdateExamRequest extends BaseApiRequest
         $showResults = $this->input('show_results') ?? $this->input('showResults');
 
         $merged = [];
-        if ($titleAr !== null) {
+        if ($titleAr !== null && trim((string) $titleAr) !== '') {
             $merged['title_ar'] = trim(strip_tags((string) $titleAr));
         }
-        if ($titleEn !== null) {
+        if ($titleEn !== null && trim((string) $titleEn) !== '') {
             $merged['title_en'] = trim(strip_tags((string) $titleEn));
         }
-        if ($courseTitleAr !== null) {
+        if ($courseId !== null) {
+            $merged['course_id'] = $courseId;
+        }
+        if ($courseTitleAr !== null && trim((string) $courseTitleAr) !== '') {
             $merged['course_title_ar'] = trim(strip_tags((string) $courseTitleAr));
         }
         if ($durationMinutes !== null) {
@@ -52,6 +56,71 @@ class UpdateExamRequest extends BaseApiRequest
         }
         if ($showResults !== null) {
             $merged['show_results'] = filter_var($showResults, FILTER_VALIDATE_BOOLEAN);
+        }
+
+        $rawQuestions = $this->input('questions');
+        if (is_array($rawQuestions) && !empty($rawQuestions)) {
+            $merged['questions'] = array_values(array_map(function ($q, $idx) {
+                if (!is_array($q)) return $q;
+                $qText = trim(strip_tags((string) ($q['question_ar'] ?? $q['questionAr'] ?? '')));
+                if ($qText === '' || mb_strlen($qText) < 2) {
+                    $qText = 'سؤال رقم ' . ($idx + 1);
+                }
+                $points = isset($q['points']) ? max(1, (int) round((float) $q['points'])) : 5;
+                $type = strtolower(trim((string) ($q['type'] ?? 'mcq')));
+                if (!in_array($type, ['mcq', 'true_false', 'essay'], true)) {
+                    $type = 'mcq';
+                }
+
+                $normalized = [
+                    'type'         => $type,
+                    'points'       => $points,
+                    'question_ar'  => $qText,
+                    'questionAr'   => $qText,
+                    'difficulty'   => trim(strip_tags((string) ($q['difficulty'] ?? 'متوسط'))),
+                ];
+
+                if ($type === 'mcq') {
+                    $rawOpts = $q['options_ar'] ?? $q['optionsAr'] ?? [];
+                    if (!is_array($rawOpts) || empty($rawOpts)) {
+                        $rawOpts = ['الخيار 1', 'الخيار 2', 'الخيار 3', 'الخيار 4'];
+                    }
+                    $opts = array_values(array_map(fn ($o) => trim(strip_tags((string) $o)), $rawOpts));
+                    if (count($opts) < 2) {
+                        $opts = array_merge($opts, ['الخيار الثاني', 'الخيار الثالث']);
+                    }
+                    $normalized['options_ar'] = array_slice($opts, 0, 6);
+                    $normalized['optionsAr'] = $normalized['options_ar'];
+
+                    $cIdx = (int) ($q['correct_index'] ?? $q['correctIndex'] ?? 0);
+                    $normalized['correct_index'] = min(count($normalized['options_ar']) - 1, max(0, $cIdx));
+                    $normalized['correctIndex'] = $normalized['correct_index'];
+                } elseif ($type === 'true_false') {
+                    $cBool = isset($q['correct_bool']) || isset($q['correctBool'])
+                        ? filter_var($q['correct_bool'] ?? $q['correctBool'], FILTER_VALIDATE_BOOLEAN)
+                        : true;
+                    $normalized['correct_bool'] = $cBool;
+                    $normalized['correctBool'] = $cBool;
+                } elseif ($type === 'essay') {
+                    $mAns = trim(strip_tags((string) ($q['model_answer_ar'] ?? $q['modelAnswerAr'] ?? '')));
+                    $normalized['model_answer_ar'] = $mAns;
+                    $normalized['modelAnswerAr'] = $mAns;
+
+                    $rubric = $q['rubric_points_ar'] ?? $q['rubricPointsAr'] ?? [];
+                    if (is_array($rubric)) {
+                        $normalized['rubric_points_ar'] = array_values(array_slice($rubric, 0, 10));
+                        $normalized['rubricPointsAr'] = $normalized['rubric_points_ar'];
+                    }
+                }
+
+                if (isset($q['explanation_ar']) || isset($q['explanationAr'])) {
+                    $exp = trim(strip_tags((string) ($q['explanation_ar'] ?? $q['explanationAr'])));
+                    $normalized['explanation_ar'] = $exp;
+                    $normalized['explanationAr'] = $exp;
+                }
+
+                return $normalized;
+            }, $rawQuestions, array_keys($rawQuestions)));
         }
 
         if (!empty($merged)) {

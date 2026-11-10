@@ -18,7 +18,7 @@ class ExamRepository extends BaseRepository implements ExamRepositoryInterface
     public function getForTeacher(int $teacherId, array $filters = []): Collection
     {
         $query = $this->model->forTeacher($teacherId)
-            ->with(['course'])
+            ->with(['course', 'questions'])
             ->withCount('questions');
 
         $search = trim((string) ($filters['search'] ?? $filters['q'] ?? ''));

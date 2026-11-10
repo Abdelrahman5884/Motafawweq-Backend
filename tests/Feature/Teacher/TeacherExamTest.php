@@ -318,5 +318,67 @@ class TeacherExamTest extends TestCase
             'level'   => 'warning',
         ]);
     }
+
+    public function test_teacher_can_update_exam_questions_matrix_and_metrics_recalculate(): void
+    {
+        $teacher = $this->createTeacher();
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        $exam = Exam::create([
+            'teacher_id'       => $teacher->id,
+            'title_ar'         => 'امتحان أسئلة ديناميكي',
+            'duration_minutes' => 45,
+            'full_mark'        => 5,
+        ]);
+
+        $response = $this->putJson("/api/v1/teacher/exams/{$exam->uuid}", [
+            'titleAr'   => 'امتحان أسئلة ديناميكي مطور',
+            'questions' => [
+                [
+                    'type'         => 'mcq',
+                    'points'       => 5,
+                    'questionAr'   => 'سؤال اختيار من متعدد أول',
+                    'optionsAr'    => ['أ', 'ب', 'ج', 'د'],
+                    'correctIndex' => 1,
+                ],
+                [
+                    'type'        => 'true_false',
+                    'points'      => 5,
+                    'questionAr'  => 'سؤال صح وخطأ ثان',
+                    'correctBool' => false,
+                ],
+                [
+                    'type'          => 'essay',
+                    'points'        => 10,
+                    'questionAr'    => 'سؤال مقالي ثالث',
+                    'modelAnswerAr' => 'إجابة نموذجية مفصلة',
+                ]
+            ],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.titleAr', 'امتحان أسئلة ديناميكي مطور')
+            ->assertJsonPath('data.questionsCount', 3)
+            ->assertJsonPath('data.fullMark', 20)
+            ->assertJsonCount(3, 'data.questions');
+
+        $this->assertDatabaseHas('exam_questions', [
+            'exam_id'     => $exam->id,
+            'question_ar' => 'سؤال اختيار من متعدد أول',
+            'points'      => 5,
+        ]);
+
+        $this->assertDatabaseHas('exam_questions', [
+            'exam_id'     => $exam->id,
+            'question_ar' => 'سؤال صح وخطأ ثان',
+            'points'      => 5,
+        ]);
+
+        $this->assertDatabaseHas('exam_questions', [
+            'exam_id'     => $exam->id,
+            'question_ar' => 'سؤال مقالي ثالث',
+            'points'      => 10,
+        ]);
+    }
 }
 
