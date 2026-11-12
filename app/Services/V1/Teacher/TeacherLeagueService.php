@@ -49,12 +49,22 @@ class TeacherLeagueService extends BaseService
         // 1. Resolve and authorize course
         $courseIdentifier = $data['course_id'] ?? null;
         /** @var Course|null $course */
-        $course = Course::where('uuid', $courseIdentifier)
-            ->orWhere('id', is_numeric($courseIdentifier) ? (int) $courseIdentifier : 0)
-            ->first();
+        $course = null;
+        if (!empty($courseIdentifier)) {
+            $course = Course::where('uuid', $courseIdentifier)
+                ->orWhere('id', is_numeric($courseIdentifier) ? (int) $courseIdentifier : 0)
+                ->first();
+        }
 
         if (!$course) {
-            throw (new ModelNotFoundException())->setModel(Course::class, [$courseIdentifier]);
+            // Fallback to teacher's first course if course_id is empty or was not found
+            $course = Course::where('teacher_id', $teacher->id)->first();
+        }
+
+        if (!$course) {
+            throw ValidationException::withMessages([
+                'course_id' => ['لم يتم العثور على أي مقرر دراسي للمدرس. يرجى إنشاء مقرر دراسي أولاً للبدء في تنظيم الدوري.'],
+            ]);
         }
         $course->assertOwnedBy($teacher);
 
