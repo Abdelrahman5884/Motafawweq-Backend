@@ -133,6 +133,7 @@ class SupabaseStorageService extends BaseService
         int $fileSizeBytes,
         array $extraMetadata = []
     ): array {
+        $mimeType = strtolower(trim(explode(';', $mimeType)[0]));
         $this->validateUploadRequest($user, $entityType, $entityId, $mimeType, $fileSizeBytes);
 
         $config = $this->entityConfigs[$entityType];
