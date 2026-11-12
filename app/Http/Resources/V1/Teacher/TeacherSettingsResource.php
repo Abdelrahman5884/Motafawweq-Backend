@@ -35,6 +35,8 @@ class TeacherSettingsResource extends BaseJsonResource
             'bioAr'                      => $this->bio_ar,
             'bioEn'                      => $this->bio_en,
             'avatar'                     => $user?->avatar ?? 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80',
+            'avatarUrl'                  => $user?->avatar ?? 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80',
+            'avatar_url'                 => $user?->avatar ?? 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80',
             'isVerifiedEducator'         => (bool) $this->is_verified_educator,
             'planTier'                   => $this->plan_tier?->value ?? 'plus',
             'planLabel'                  => $this->plan_tier?->label(),

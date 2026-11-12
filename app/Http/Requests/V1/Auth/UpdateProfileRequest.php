@@ -14,7 +14,7 @@ class UpdateProfileRequest extends BaseApiRequest
         return [
             'name'   => ['sometimes', 'required', 'string', 'min:3', 'max:100'],
             'phone'  => ['nullable', 'string', 'max:20', Rule::unique('users', 'phone')->ignore($userId)],
-            'avatar' => ['nullable', 'string', 'max:255'],
+            'avatar' => ['nullable', 'string', 'max:2048'],
         ];
     }
 }

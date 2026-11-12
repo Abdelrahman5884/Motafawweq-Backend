@@ -18,7 +18,7 @@ class UploadTeacherAvatarRequest extends BaseApiRequest
                 'required',
                 'file',
                 'mimes:jpeg,jpg,png,webp',
-                'max:2048', // Max 2MB
+                'max:5120', // Max 5MB
             ],
         ];
     }
