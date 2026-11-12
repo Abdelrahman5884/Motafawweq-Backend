@@ -65,7 +65,7 @@ class SupabaseStorageService extends BaseService
             'allowed_mimes' => [
                 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav',
                 'audio/webm', 'audio/ogg', 'audio/aac', 'audio/m4a', 'audio/x-m4a',
-                'video/mp4', 'video/webm'
+                'video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'
             ],
             'max_size'      => self::MAX_FILE_SIZE_BYTES,
         ],
