@@ -5,6 +5,8 @@ namespace App\Services\V1\Teacher;
 use App\Enums\LessonAttachmentType;
 use App\Enums\LessonMediaMode;
 use App\Enums\LessonStatus;
+use App\Enums\TeacherPlanTier;
+use App\Models\Course;
 use App\Models\Lesson;
 use App\Models\LessonAttachment;
 use App\Models\StoredFile;
@@ -42,13 +44,15 @@ class TeacherStudioService extends BaseService
     public function createLesson(User $teacher, array $data): Lesson
     {
         $course = null;
-        $courseUuid = $data['course_uuid'] ?? $data['courseUuid'] ?? $data['courseId'] ?? null;
+        $courseUuid = $data['course_uuid'] ?? $data['courseUuid'] ?? $data['courseId'] ?? $data['course_id'] ?? null;
         if (is_string($courseUuid) && Str::isUuid($courseUuid)) {
             // Verify ownership BEFORE opening transaction
             $course = $this->courseRepository->findByUuidForTeacher($courseUuid, $teacher);
         }
 
-        return $this->transaction(function () use ($teacher, $data, $course) {
+        $canUseAi = $this->teacherCanUseAi($teacher);
+
+        return $this->transaction(function () use ($teacher, $data, $course, $canUseAi) {
             $titleAr = trim((string) ($data['title_ar'] ?? $data['titleAr'] ?? $data['title'] ?? ''));
             $titleEn = trim((string) ($data['title_en'] ?? $data['titleEn'] ?? $data['title'] ?? $titleAr));
             $descAr = trim((string) ($data['description_ar'] ?? $data['descriptionAr'] ?? $data['description'] ?? ''));
@@ -67,7 +71,10 @@ class TeacherStudioService extends BaseService
             $durationSecs = max(0, (int) ($data['duration_seconds'] ?? $data['durationSeconds'] ?? 2700));
             $durationLabel = trim((string) ($data['duration_label'] ?? $data['durationLabel'] ?? $this->formatSecondsLabel($durationSecs)));
 
-            $aiFeatures = $this->normalizeAiFeatures($data['ai_features_requested'] ?? $data['aiFeatures'] ?? null);
+            $aiFeatures = $this->normalizeAiFeatures(
+                $data['ai_features_requested'] ?? $data['aiFeatures'] ?? null,
+                $canUseAi
+            );
             $status = LessonStatus::tryFrom((string) ($data['status'] ?? 'published')) ?? LessonStatus::PUBLISHED;
 
             /** @var Lesson $lesson */
@@ -92,9 +99,7 @@ class TeacherStudioService extends BaseService
             ]);
 
             if ($course) {
-                $course->update([
-                    'lessons_count' => $course->lessons()->count(),
-                ]);
+                $this->syncCourseLessonsCount($course->id);
             }
 
             $this->logSecurityEvent(
@@ -121,15 +126,21 @@ class TeacherStudioService extends BaseService
         $lesson = $this->lessonRepository->findByUuidForTeacher($uuid, $teacher);
 
         $course = null;
-        $hasCourseUpdate = array_key_exists('course_uuid', $data) || array_key_exists('courseUuid', $data) || array_key_exists('courseId', $data);
+        $hasCourseUpdate = array_key_exists('course_uuid', $data)
+            || array_key_exists('courseUuid', $data)
+            || array_key_exists('courseId', $data)
+            || array_key_exists('course_id', $data);
         if ($hasCourseUpdate) {
-            $courseUuid = $data['course_uuid'] ?? $data['courseUuid'] ?? $data['courseId'];
+            $courseUuid = $data['course_uuid'] ?? $data['courseUuid'] ?? $data['courseId'] ?? $data['course_id'];
             if (is_string($courseUuid) && Str::isUuid($courseUuid)) {
                 $course = $this->courseRepository->findByUuidForTeacher($courseUuid, $teacher);
             }
         }
 
-        return $this->transaction(function () use ($lesson, $data, $hasCourseUpdate, $course) {
+        $canUseAi = $this->teacherCanUseAi($teacher);
+
+        return $this->transaction(function () use ($lesson, $data, $hasCourseUpdate, $course, $canUseAi) {
+            $oldCourseId = $lesson->course_id;
             $updates = [];
 
             if ($hasCourseUpdate) {
@@ -178,7 +189,10 @@ class TeacherStudioService extends BaseService
             }
 
             if (array_key_exists('ai_features_requested', $data) || array_key_exists('aiFeatures', $data)) {
-                $updates['ai_features_requested'] = $this->normalizeAiFeatures($data['ai_features_requested'] ?? $data['aiFeatures']);
+                $updates['ai_features_requested'] = $this->normalizeAiFeatures(
+                    $data['ai_features_requested'] ?? $data['aiFeatures'],
+                    $canUseAi
+                );
             }
 
             if (array_key_exists('status', $data)) {
@@ -193,6 +207,11 @@ class TeacherStudioService extends BaseService
 
             if (!empty($updates)) {
                 $lesson->update($updates);
+            }
+
+            if ($hasCourseUpdate) {
+                $this->syncCourseLessonsCount($oldCourseId);
+                $this->syncCourseLessonsCount($course?->id);
             }
 
             $this->logSecurityEvent(
@@ -217,15 +236,13 @@ class TeacherStudioService extends BaseService
         $lesson = $this->lessonRepository->findByUuidForTeacher($uuid, $teacher);
 
         $this->transaction(function () use ($lesson) {
-            $course = $lesson->course;
+            $courseId = $lesson->course_id;
             $lessonUuid = $lesson->uuid;
 
             $lesson->delete();
 
-            if ($course) {
-                $course->update([
-                    'lessons_count' => max(1, $course->lessons()->count()),
-                ]);
+            if ($courseId) {
+                $this->syncCourseLessonsCount($courseId);
             }
 
             $this->logSecurityEvent(
@@ -630,8 +647,42 @@ class TeacherStudioService extends BaseService
         return [$embedUrl, $isYoutube];
     }
 
-    protected function normalizeAiFeatures(mixed $raw): array
+    protected function teacherCanUseAi(User $teacher): bool
     {
+        $tier = $teacher->teacherProfile?->plan_tier;
+        if ($tier instanceof TeacherPlanTier) {
+            return $tier->allowsAiFeatures();
+        }
+
+        return $tier === TeacherPlanTier::PRO->value;
+    }
+
+    protected function syncCourseLessonsCount(?int $courseId): void
+    {
+        if (!$courseId) {
+            return;
+        }
+
+        $course = Course::find($courseId);
+        if (!$course) {
+            return;
+        }
+
+        $course->update([
+            'lessons_count' => $course->lessons()->count(),
+        ]);
+    }
+
+    protected function normalizeAiFeatures(mixed $raw, bool $canUseAi = true): array
+    {
+        if (!$canUseAi) {
+            return [
+                'speechToText'    => false,
+                'conceptGraph'    => false,
+                'chapterIndexing' => false,
+            ];
+        }
+
         if (!is_array($raw)) {
             return [
                 'speechToText'    => true,

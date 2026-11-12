@@ -81,6 +81,14 @@ enum TeacherPlanTier: string
         };
     }
 
+    public function allowsAiFeatures(): bool
+    {
+        return match ($this) {
+            self::PRO => true,
+            default   => false,
+        };
+    }
+
     public static function values(): array
     {
         return array_column(self::cases(), 'value');

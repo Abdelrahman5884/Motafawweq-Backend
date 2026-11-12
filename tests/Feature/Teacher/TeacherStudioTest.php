@@ -47,6 +47,11 @@ class TeacherStudioTest extends TestCase
             'price_egp'     => 350,
         ]);
 
+        \App\Models\TeacherProfile::updateOrCreate(
+            ['user_id' => $teacher->id],
+            ['name_ar' => $teacher->name, 'plan_tier' => 'pro']
+        )->forceFill(['plan_tier' => 'pro'])->save();
+
         $response = $this->withToken($token)
             ->postJson('/api/v1/teacher/lessons', [
                 'courseId'    => $course->uuid,
@@ -228,6 +233,84 @@ class TeacherStudioTest extends TestCase
             'event'   => 'teacher.idor_attempt_blocked',
             'level'   => 'warning',
         ]);
+    }
+
+    public function test_course_lessons_count_syncs_automatically_on_create_and_delete(): void
+    {
+        [$teacher, $token] = $this->createAuthenticatedTeacher('teacher.course.sync@motafawweq.com');
+
+        $course = \App\Models\Course::create([
+            'teacher_id'    => $teacher->id,
+            'title_ar'      => 'مقرر الأحياء',
+            'grade_ar'      => 'الصف الثالث الثانوي',
+            'subject_ar'    => 'الأحياء',
+            'lessons_count' => 0,
+        ]);
+
+        $res = $this->withToken($token)->postJson('/api/v1/teacher/lessons', [
+            'title_ar'    => 'الحصة الأولى',
+            'course_uuid' => $course->uuid,
+            'media_mode'  => 'audio',
+        ]);
+
+        $res->assertStatus(201);
+        $lessonUuid = $res->json('data.id');
+        $this->assertSame(1, $course->fresh()->lessons_count);
+
+        $this->withToken($token)
+            ->deleteJson("/api/v1/teacher/lessons/{$lessonUuid}")
+            ->assertStatus(200);
+
+        $this->assertSame(0, $course->fresh()->lessons_count);
+    }
+
+    public function test_ai_features_are_gated_to_pro_plan_only(): void
+    {
+        [$freeTeacher, $freeToken] = $this->createAuthenticatedTeacher('teacher.free.ai@motafawweq.com');
+        $freeProfile = \App\Models\TeacherProfile::create([
+            'user_id' => $freeTeacher->id,
+            'name_ar' => $freeTeacher->name,
+        ]);
+        $freeProfile->forceFill(['plan_tier' => 'plus'])->save();
+
+        $freeRes = $this->withToken($freeToken)->postJson('/api/v1/teacher/lessons', [
+            'title_ar'              => 'حصة بدون برو',
+            'media_mode'            => 'audio',
+            'ai_features_requested' => [
+                'speechToText'    => true,
+                'conceptGraph'    => true,
+                'chapterIndexing' => true,
+            ],
+        ]);
+
+        $freeRes->assertStatus(201)
+            ->assertJsonPath('data.aiFeatures.speechToText', false)
+            ->assertJsonPath('data.aiFeatures.conceptGraph', false)
+            ->assertJsonPath('data.aiFeatures.chapterIndexing', false);
+
+        $this->app['auth']->forgetGuards();
+
+        [$proTeacher, $proToken] = $this->createAuthenticatedTeacher('teacher.pro.ai@motafawweq.com');
+        $proProfile = \App\Models\TeacherProfile::create([
+            'user_id' => $proTeacher->id,
+            'name_ar' => $proTeacher->name,
+        ]);
+        $proProfile->forceFill(['plan_tier' => 'pro'])->save();
+
+        $proRes = $this->withToken($proToken)->postJson('/api/v1/teacher/lessons', [
+            'title_ar'              => 'حصة مع برو',
+            'media_mode'            => 'audio',
+            'ai_features_requested' => [
+                'speechToText'    => true,
+                'conceptGraph'    => false,
+                'chapterIndexing' => true,
+            ],
+        ]);
+
+        $proRes->assertStatus(201)
+            ->assertJsonPath('data.aiFeatures.speechToText', true)
+            ->assertJsonPath('data.aiFeatures.conceptGraph', false)
+            ->assertJsonPath('data.aiFeatures.chapterIndexing', true);
     }
 }
 
