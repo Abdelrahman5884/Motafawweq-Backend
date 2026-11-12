@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\Public\CertificateVerificationController;
+use App\Http\Controllers\Api\V1\Storage\StorageController;
 use App\Http\Controllers\Api\V1\Student\StudentExamTakingController;
 use App\Http\Controllers\Api\V1\Student\StudentHomeworkController;
 use App\Http\Controllers\Api\V1\Teacher\LessonWorkspaceController;
@@ -113,6 +114,18 @@ Route::prefix('v1')->group(function () {
                 Route::get('/sessions', [SessionController::class, 'index']);
                 Route::delete('/sessions/{sessionId}', [SessionController::class, 'destroy'])->whereUuid('sessionId');
                 Route::get('/login-history', [SessionController::class, 'history']);
+            });
+
+            // Centralized Supabase Storage Direct Upload & Media Management
+            Route::prefix('storage')->group(function () {
+                Route::post('/presign-upload', [StorageController::class, 'presignUpload'])
+                    ->middleware('throttle:teacher-uploads');
+                Route::post('/confirm-upload', [StorageController::class, 'confirmUpload'])
+                    ->middleware('throttle:api');
+                Route::get('/download-url/{fileUuid}', [StorageController::class, 'getDownloadUrl'])
+                    ->whereUuid('fileUuid');
+                Route::delete('/files/{fileUuid}', [StorageController::class, 'destroy'])
+                    ->whereUuid('fileUuid');
             });
 
             // Student: join study group by join code or QR scan

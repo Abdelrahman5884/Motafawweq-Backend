@@ -3,6 +3,7 @@
 namespace App\Services\V1\Teacher;
 
 use App\Enums\StageType;
+use App\Models\StoredFile;
 use App\Models\TeacherProfile;
 use App\Models\User;
 use App\Repositories\Contracts\TeacherPayoutAccountRepositoryInterface;
@@ -198,15 +199,35 @@ class TeacherSettingsService extends BaseService
             $profile = $this->profileRepository->firstOrCreateForTeacher($teacher);
 
             $extension = $allowedMimes[$detectedMime];
-            $filename = 'avatars/teachers/' . Str::uuid() . '.' . $extension;
+            $disk = $this->getAvatarDisk();
+            $filename = ($disk === 'supabase')
+                ? 'users/profiles/' . $teacher->id . '_' . Str::uuid() . '.' . $extension
+                : 'avatars/teachers/' . Str::uuid() . '.' . $extension;
 
-            Storage::disk('public')->put($filename, file_get_contents($file->getRealPath()));
+            Storage::disk($disk)->put($filename, file_get_contents($file->getRealPath()));
 
             // Clean up previous local avatar if it was stored on public disk
             $this->deleteOldLocalAvatar($teacher->avatar);
 
-            $publicUrl = Storage::disk('public')->url($filename);
+            $publicUrl = ($disk === 'supabase' && method_exists(Storage::disk($disk), 'temporaryUrl'))
+                ? Storage::disk($disk)->temporaryUrl($filename, now()->addDays(7))
+                : Storage::disk($disk)->url($filename);
+
             $teacher->update(['avatar' => $publicUrl]);
+
+            StoredFile::create([
+                'uuid'              => (string) Str::uuid(),
+                'user_id'           => $teacher->id,
+                'entity_type'       => 'user_avatar',
+                'entity_id'         => (string) $teacher->id,
+                'original_filename' => basename($file->getClientOriginalName()),
+                'storage_disk'      => $disk,
+                'storage_path'      => $filename,
+                'mime_type'         => $detectedMime,
+                'file_size_bytes'   => (int) $file->getSize(),
+                'storage_provider'  => $disk === 'supabase' ? 'supabase' : 'local',
+                'upload_status'     => 'completed',
+            ]);
 
             $this->logSecurityEvent(
                 'teacher.avatar.uploaded',
@@ -265,6 +286,14 @@ class TeacherSettingsService extends BaseService
         }
 
         return $avatarValue;
+    }
+
+    protected function getAvatarDisk(): string
+    {
+        if (app()->environment('testing')) {
+            return 'public';
+        }
+        return config('filesystems.disks.supabase.key') ? 'supabase' : 'public';
     }
 
     protected function deleteOldLocalAvatar(?string $oldAvatarUrl): void

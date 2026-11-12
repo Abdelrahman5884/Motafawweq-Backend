@@ -224,6 +224,10 @@ class TeacherStudioController extends BaseApiController
             return $this->notFoundResponse(__('messages.not_found'));
         }
 
+        if ($request->query('stream_type') === 'redirect' && method_exists(Storage::disk($disk), 'temporaryUrl')) {
+            return redirect()->away(Storage::disk($disk)->temporaryUrl($attachment->storage_path, now()->addMinutes(60)));
+        }
+
         return response(
             Storage::disk($disk)->get($attachment->storage_path),
             Response::HTTP_OK,
@@ -251,6 +255,10 @@ class TeacherStudioController extends BaseApiController
         $disk = $lesson->media_disk ?? 'local';
         if (!$lesson->media_path || !Storage::disk($disk)->exists($lesson->media_path)) {
             return $this->notFoundResponse(__('messages.not_found'));
+        }
+
+        if ($request->query('stream_type') === 'redirect' && method_exists(Storage::disk($disk), 'temporaryUrl')) {
+            return redirect()->away(Storage::disk($disk)->temporaryUrl($lesson->media_path, now()->addMinutes(60)));
         }
 
         return response(

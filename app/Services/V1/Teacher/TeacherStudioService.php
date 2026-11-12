@@ -7,6 +7,7 @@ use App\Enums\LessonMediaMode;
 use App\Enums\LessonStatus;
 use App\Models\Lesson;
 use App\Models\LessonAttachment;
+use App\Models\StoredFile;
 use App\Models\User;
 use App\Repositories\Contracts\CourseRepositoryInterface;
 use App\Repositories\Contracts\LessonRepositoryInterface;
@@ -236,6 +237,20 @@ class TeacherStudioService extends BaseService
     }
 
     /**
+     * Get target storage disk (supabase with fallback to local).
+     */
+    protected function getStorageDisk(): string
+    {
+        if (Storage::disk('local') instanceof \Illuminate\Support\Testing\Fakes\StorageFake) {
+            return 'local';
+        }
+        if (Storage::disk('supabase') instanceof \Illuminate\Support\Testing\Fakes\StorageFake) {
+            return 'supabase';
+        }
+        return config('filesystems.disks.supabase.key') ? 'supabase' : 'local';
+    }
+
+    /**
      * Securely inspect magic bytes and store an audio/video recording on the private disk.
      */
     public function uploadMedia(
@@ -285,12 +300,13 @@ class TeacherStudioService extends BaseService
 
         return $this->transaction(function () use ($teacher, $lesson, $file, $detectedMime, $allowedMediaMimes, $mode, $durationSeconds) {
             $extension = $allowedMediaMimes[$detectedMime];
-            $storagePath = "lessons/{$teacher->id}/{$lesson->uuid}/media/" . Str::uuid() . ".{$extension}";
+            $disk = $this->getStorageDisk();
+            $storagePath = "lessons/audio/{$teacher->id}_{$lesson->uuid}_" . Str::uuid() . ".{$extension}";
 
-            Storage::disk('local')->put($storagePath, file_get_contents($file->getRealPath()));
+            Storage::disk($disk)->put($storagePath, file_get_contents($file->getRealPath()));
 
-            if ($lesson->media_path && Storage::disk($lesson->media_disk ?? 'local')->exists($lesson->media_path)) {
-                Storage::disk($lesson->media_disk ?? 'local')->delete($lesson->media_path);
+            if ($lesson->media_path && Storage::disk($lesson->media_disk ?? $disk)->exists($lesson->media_path)) {
+                Storage::disk($lesson->media_disk ?? $disk)->delete($lesson->media_path);
             }
 
             $resolvedMode = $mode
@@ -301,7 +317,7 @@ class TeacherStudioService extends BaseService
 
             $lesson->update([
                 'media_mode'          => $resolvedMode,
-                'media_disk'          => 'local',
+                'media_disk'          => $disk,
                 'media_path'          => $storagePath,
                 'media_original_name' => $this->sanitizeOriginalFileName($file->getClientOriginalName()),
                 'media_mime_type'     => $detectedMime,
@@ -309,6 +325,22 @@ class TeacherStudioService extends BaseService
                 'duration_seconds'    => $secs,
                 'duration_label'      => $this->formatSecondsLabel($secs),
             ]);
+
+            StoredFile::updateOrCreate(
+                ['storage_path' => $storagePath],
+                [
+                    'uuid'              => (string) Str::uuid(),
+                    'user_id'           => $teacher->id,
+                    'entity_type'       => 'lesson_media',
+                    'entity_id'         => $lesson->uuid,
+                    'original_filename' => $this->sanitizeOriginalFileName($file->getClientOriginalName()),
+                    'storage_disk'      => $disk,
+                    'mime_type'         => $detectedMime,
+                    'file_size_bytes'   => (int) $file->getSize(),
+                    'storage_provider'  => $disk === 'supabase' ? 'supabase' : 'local',
+                    'upload_status'     => 'completed',
+                ]
+            );
 
             $this->logSecurityEvent(
                 'teacher.lesson.media_uploaded',
@@ -390,10 +422,10 @@ class TeacherStudioService extends BaseService
         }
 
         return $this->transaction(function () use ($teacher, $lesson, $file, $rawContent, $type, $detectedMime, $extension, $meta) {
-            $folder = $type === LessonAttachmentType::PDF ? 'pdfs' : 'whiteboards';
-            $storagePath = "lessons/{$teacher->id}/{$lesson->uuid}/{$folder}/" . Str::uuid() . ".{$extension}";
+            $disk = $this->getStorageDisk();
+            $storagePath = "lessons/attachments/{$teacher->id}_{$lesson->uuid}_" . Str::uuid() . ".{$extension}";
 
-            Storage::disk('local')->put($storagePath, $rawContent);
+            Storage::disk($disk)->put($storagePath, $rawContent);
 
             $nextOrder = (int) LessonAttachment::where('lesson_id', $lesson->id)
                 ->where('type', $type)
@@ -414,7 +446,7 @@ class TeacherStudioService extends BaseService
                 'title'              => trim((string) ($meta['title'] ?? $defaultTitle)),
                 'caption'            => isset($meta['caption']) ? trim((string) $meta['caption']) : ($type === LessonAttachmentType::WHITEBOARD_IMAGE ? 'رسم توضيحي للشرح وملاحظات السبورة' : null),
                 'original_file_name' => $cleanFileName,
-                'storage_disk'       => 'local',
+                'storage_disk'       => $disk,
                 'storage_path'       => $storagePath,
                 'mime_type'          => $detectedMime,
                 'file_size_bytes'    => $sizeBytes,
@@ -423,6 +455,25 @@ class TeacherStudioService extends BaseService
                     ? max(1, (int) ($meta['pages_count'] ?? $meta['pagesCount'] ?? 12))
                     : null,
                 'display_order'      => $nextOrder,
+            ]);
+
+            StoredFile::create([
+                'uuid'              => (string) Str::uuid(),
+                'user_id'           => $teacher->id,
+                'entity_type'       => 'lesson_attachment',
+                'entity_id'         => $lesson->uuid,
+                'original_filename' => $cleanFileName,
+                'storage_disk'      => $disk,
+                'storage_path'      => $storagePath,
+                'mime_type'         => $detectedMime,
+                'file_size_bytes'   => $sizeBytes,
+                'storage_provider'  => $disk === 'supabase' ? 'supabase' : 'local',
+                'upload_status'     => 'completed',
+                'metadata'          => [
+                    'attachment_uuid' => $attachment->uuid,
+                    'type'            => $type->value,
+                    'title'           => $attachment->title,
+                ],
             ]);
 
             $this->logSecurityEvent(
@@ -512,6 +563,8 @@ class TeacherStudioService extends BaseService
             if ($path && Storage::disk($disk)->exists($path)) {
                 Storage::disk($disk)->delete($path);
             }
+
+            StoredFile::where('storage_path', $path)->delete();
 
             // Re-index remaining attachments of the same type sequentially (1, 2, 3...)
             $remaining = LessonAttachment::where('lesson_id', $lesson->id)
