@@ -6,6 +6,7 @@ use App\Enums\LessonAttachmentType;
 use App\Http\Resources\BaseJsonResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
 class LessonAttachmentResource extends BaseJsonResource

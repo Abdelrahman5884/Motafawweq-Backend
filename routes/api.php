@@ -216,13 +216,6 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('uuid');
                     Route::delete('/{uuid}/attachments/{attachmentUuid}', [TeacherStudioController::class, 'destroyAttachment'])
                         ->whereUuid(['uuid', 'attachmentUuid']);
-
-                    Route::get('/{uuid}/media/stream', [TeacherStudioController::class, 'streamMedia'])
-                        ->whereUuid('uuid')
-                        ->name('api.v1.teacher.lessons.media.stream');
-                    Route::get('/{uuid}/attachments/{attachmentUuid}/stream', [TeacherStudioController::class, 'streamAttachment'])
-                        ->whereUuid(['uuid', 'attachmentUuid'])
-                        ->name('api.v1.teacher.lessons.attachments.stream');
                 });
 
                 // Stage 6: Lesson Workspace, Chapters, Transcripts & Concept Graphs (without AI)
@@ -388,4 +381,14 @@ Route::prefix('v1')->group(function () {
                 });
             });
         });
+
+    // Signed media & attachment streaming (authorized via cryptographic temporary signed URLs)
+    Route::prefix('teacher/lessons')->group(function () {
+        Route::get('/{uuid}/media/stream', [TeacherStudioController::class, 'streamMedia'])
+            ->whereUuid('uuid')
+            ->name('api.v1.teacher.lessons.media.stream');
+        Route::get('/{uuid}/attachments/{attachmentUuid}/stream', [TeacherStudioController::class, 'streamAttachment'])
+            ->whereUuid(['uuid', 'attachmentUuid'])
+            ->name('api.v1.teacher.lessons.attachments.stream');
+    });
 });

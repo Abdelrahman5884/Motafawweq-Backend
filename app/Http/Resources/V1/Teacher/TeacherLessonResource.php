@@ -8,6 +8,7 @@ use App\Enums\LessonStatus;
 use App\Http\Resources\BaseJsonResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
 class TeacherLessonResource extends BaseJsonResource
@@ -28,6 +29,7 @@ class TeacherLessonResource extends BaseJsonResource
             : (string) ($this->status ?? 'published');
 
         $attachments = $this->relationLoaded('attachments') ? $this->attachments : collect();
+        $attachments->each(fn ($a) => $a->setRelation('lesson', $this->resource));
         $pdfs = $attachments->filter(fn ($a) => ($a->type instanceof LessonAttachmentType ? $a->type : LessonAttachmentType::tryFrom((string) $a->type)) === LessonAttachmentType::PDF)->values();
         $images = $attachments->filter(fn ($a) => ($a->type instanceof LessonAttachmentType ? $a->type : LessonAttachmentType::tryFrom((string) $a->type)) === LessonAttachmentType::WHITEBOARD_IMAGE)->values();
 

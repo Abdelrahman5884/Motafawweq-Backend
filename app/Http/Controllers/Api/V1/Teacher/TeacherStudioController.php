@@ -215,9 +215,16 @@ class TeacherStudioController extends BaseApiController
             return $this->forbiddenResponse(__('messages.invalid_signed_url'));
         }
 
-        $teacher = $this->authenticatedUser();
-        $lesson = $this->lessonRepository->findByUuidForTeacher($uuid, $teacher);
-        $attachment = $this->lessonRepository->findAttachmentByUuidForTeacher($attachmentUuid, $lesson, $teacher);
+        $teacher = $request->user('sanctum');
+        if ($teacher) {
+            $lesson = $this->lessonRepository->findByUuidForTeacher($uuid, $teacher);
+            $attachment = $this->lessonRepository->findAttachmentByUuidForTeacher($attachmentUuid, $lesson, $teacher);
+        } else {
+            $lesson = \App\Models\Lesson::where('uuid', $uuid)->firstOrFail();
+            $attachment = \App\Models\LessonAttachment::where('uuid', $attachmentUuid)
+                ->where('lesson_id', $lesson->id)
+                ->firstOrFail();
+        }
 
         $disk = $attachment->storage_disk ?? 'local';
         if (!Storage::disk($disk)->exists($attachment->storage_path)) {
@@ -249,8 +256,12 @@ class TeacherStudioController extends BaseApiController
             return $this->forbiddenResponse(__('messages.invalid_signed_url'));
         }
 
-        $teacher = $this->authenticatedUser();
-        $lesson = $this->lessonRepository->findByUuidForTeacher($uuid, $teacher);
+        $teacher = $request->user('sanctum');
+        if ($teacher) {
+            $lesson = $this->lessonRepository->findByUuidForTeacher($uuid, $teacher);
+        } else {
+            $lesson = \App\Models\Lesson::where('uuid', $uuid)->firstOrFail();
+        }
 
         $disk = $lesson->media_disk ?? 'local';
         if (!$lesson->media_path || !Storage::disk($disk)->exists($lesson->media_path)) {
