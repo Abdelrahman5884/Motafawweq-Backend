@@ -317,4 +317,89 @@ class TeacherLeagueTest extends TestCase
             'event'   => 'teacher.idor_attempt_blocked',
         ]);
     }
+
+    public function test_teacher_can_update_existing_league(): void
+    {
+        $teacher = $this->createTeacher();
+        $course = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar'   => 'كورس الأحياء',
+            'stage'      => 'sec',
+            'grade_ar'   => 'الصف الثالث الثانوي',
+        ]);
+
+        $league = CourseLeague::create([
+            'teacher_id'    => $teacher->id,
+            'course_id'     => $course->id,
+            'title_ar'      => 'دوري قديم',
+            'group_name_ar' => 'جميع المجموعات (دوري موحد)',
+            'duration_type' => LeagueDuration::MONTHLY,
+            'duration_days' => 30,
+            'is_active'     => true,
+        ]);
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        $response = $this->putJson("/api/v1/teacher/leagues/{$league->uuid}", [
+            'title_ar'  => 'دوري الأحياء المعدل',
+            'duration'  => 'weekly',
+            'is_active' => false,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.leagueTitle', 'دوري الأحياء المعدل')
+            ->assertJsonPath('data.durationType', 'weekly')
+            ->assertJsonPath('data.isActive', false);
+
+        $this->assertDatabaseHas('course_leagues', [
+            'id'            => $league->id,
+            'title_ar'      => 'دوري الأحياء المعدل',
+            'duration_type' => 'weekly',
+            'is_active'     => false,
+        ]);
+    }
+
+    public function test_teacher_can_add_student_to_started_league(): void
+    {
+        $teacher = $this->createTeacher();
+        $course = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar'   => 'كورس الأحياء',
+            'stage'      => 'sec',
+            'grade_ar'   => 'الصف الثالث الثانوي',
+        ]);
+
+        $league = CourseLeague::create([
+            'teacher_id'        => $teacher->id,
+            'course_id'         => $course->id,
+            'title_ar'          => 'دوري الأحياء',
+            'group_name_ar'     => 'جميع المجموعات (دوري موحد)',
+            'duration_type'     => LeagueDuration::MONTHLY,
+            'duration_days'     => 30,
+            'is_active'         => true,
+            'total_competitors' => 0,
+        ]);
+
+        $lateStudent = $this->createStudent('يوسف متأخر', 'youssef.late@motafawweq.com');
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        $response = $this->postJson("/api/v1/teacher/leagues/{$league->uuid}/participants", [
+            'student_id' => (string) $lateStudent->id,
+            'initial_xp' => 1250,
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.totalCompetitors', 1)
+            ->assertJsonPath('data.leaderboard.0.nameAr', 'يوسف متأخر')
+            ->assertJsonPath('data.leaderboard.0.score', 1250);
+
+        $this->assertDatabaseHas('league_participants', [
+            'course_league_id' => $league->id,
+            'student_id'       => $lateStudent->id,
+            'xp_points'        => 1250,
+        ]);
+    }
 }

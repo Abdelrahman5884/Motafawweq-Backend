@@ -28,6 +28,7 @@ class CourseLeagueResource extends BaseJsonResource
             'courseNameAr'       => $this->course_name_ar ?: ($this->whenLoaded('course', fn () => $this->course?->title_ar) ?? 'المقرر الدراسي'),
             'groupNameAr'        => $this->group_name_ar,
             'durationLabelAr'    => $durationLabel,
+            'durationType'       => $this->duration_type instanceof LeagueDuration ? $this->duration_type->value : (string) $this->duration_type,
             'durationDays'       => (int) $this->duration_days,
             'totalCompetitors'   => (int) $this->total_competitors,
             'roundDaysRemaining' => $this->roundDaysRemaining(),

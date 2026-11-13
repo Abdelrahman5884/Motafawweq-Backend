@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api\V1\Teacher;
 
 use App\Http\Controllers\Api\BaseApiController;
+use App\Http\Requests\V1\Teacher\AddLeagueParticipantRequest;
 use App\Http\Requests\V1\Teacher\AwardLeagueXpRequest;
 use App\Http\Requests\V1\Teacher\StoreCourseLeagueRequest;
+use App\Http\Requests\V1\Teacher\UpdateCourseLeagueRequest;
 use App\Http\Resources\V1\Teacher\CourseLeagueDetailResource;
 use App\Http\Resources\V1\Teacher\CourseLeagueResource;
 use App\Services\V1\Teacher\TeacherLeagueService;
@@ -66,6 +68,42 @@ class TeacherLeagueController extends BaseApiController
         return $this->successResponse(
             new CourseLeagueDetailResource($league),
             __('messages.league_fetched')
+        );
+    }
+
+    /**
+     * PUT/PATCH /api/v1/teacher/leagues/{uuid}
+     * Update an existing league's details, duration, target group, or active status.
+     */
+    public function update(UpdateCourseLeagueRequest $request, string $uuid): JsonResponse
+    {
+        $league = $this->leagueService->updateLeague(
+            $this->authenticatedUser(),
+            $uuid,
+            $request->validated()
+        );
+
+        return $this->successResponse(
+            new CourseLeagueDetailResource($league),
+            'تم تحديث بيانات الدوري بنجاح.'
+        );
+    }
+
+    /**
+     * POST /api/v1/teacher/leagues/{uuid}/participants
+     * Add a student participant to an existing league after it has started.
+     */
+    public function addParticipant(AddLeagueParticipantRequest $request, string $uuid): JsonResponse
+    {
+        $league = $this->leagueService->addParticipant(
+            $this->authenticatedUser(),
+            $uuid,
+            $request->validated()
+        );
+
+        return $this->createdResponse(
+            new CourseLeagueDetailResource($league),
+            'تم إضافة الطالب إلى الدوري بنجاح.'
         );
     }
 

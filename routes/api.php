@@ -339,6 +339,12 @@ Route::prefix('v1')->group(function () {
                     Route::post('/', [TeacherLeagueController::class, 'store']);
                     Route::get('/{uuid}', [TeacherLeagueController::class, 'show'])
                         ->whereUuid('uuid');
+                    Route::put('/{uuid}', [TeacherLeagueController::class, 'update'])
+                        ->whereUuid('uuid');
+                    Route::patch('/{uuid}', [TeacherLeagueController::class, 'update'])
+                        ->whereUuid('uuid');
+                    Route::post('/{uuid}/participants', [TeacherLeagueController::class, 'addParticipant'])
+                        ->whereUuid('uuid');
                     Route::post('/{uuid}/award-xp', [TeacherLeagueController::class, 'awardXp'])
                         ->whereUuid('uuid');
                     Route::post('/{uuid}/recalculate', [TeacherLeagueController::class, 'recalculate'])
