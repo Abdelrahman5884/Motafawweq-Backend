@@ -72,6 +72,11 @@ return [
             'visibility' => 'private',
             'throw' => false,
             'report' => false,
+            'retries' => 1,
+            'http' => [
+                'connect_timeout' => 8,
+                'timeout' => 45,
+            ],
         ],
 
     ],

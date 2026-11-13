@@ -68,7 +68,7 @@ class TeacherStudioService extends BaseService
             $modeValue = (string) ($data['media_mode'] ?? $data['mode'] ?? ($safeEmbedUrl ? 'embed' : 'video'));
             $mediaMode = LessonMediaMode::tryFrom($modeValue) ?? LessonMediaMode::VIDEO;
 
-            $durationSecs = max(0, (int) ($data['duration_seconds'] ?? $data['durationSeconds'] ?? 2700));
+            $durationSecs = max(0, (int) ($data['duration_seconds'] ?? $data['durationSeconds'] ?? 0));
             $durationLabel = trim((string) ($data['duration_label'] ?? $data['durationLabel'] ?? $this->formatSecondsLabel($durationSecs)));
 
             $aiFeatures = $this->normalizeAiFeatures(
@@ -268,6 +268,69 @@ class TeacherStudioService extends BaseService
     }
 
     /**
+     * Stream a local temp file to the preferred disk with automatic fallback to local disk
+     * if remote S3/Supabase upload fails or times out.
+     */
+    protected function storeStreamWithFallback(string $preferredDisk, string $storagePath, string $realPath): string
+    {
+        if ($preferredDisk === 'supabase') {
+            try {
+                $stream = fopen($realPath, 'rb');
+                if ($stream !== false) {
+                    try {
+                        $uploaded = Storage::disk('supabase')->put($storagePath, $stream);
+                    } finally {
+                        if (is_resource($stream)) {
+                            fclose($stream);
+                        }
+                    }
+
+                    if ($uploaded) {
+                        return 'supabase';
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Fall back to local private disk if Supabase S3 times out or fails
+            }
+        }
+
+        $localStream = fopen($realPath, 'rb');
+        if ($localStream !== false) {
+            try {
+                Storage::disk('local')->put($storagePath, $localStream);
+            } finally {
+                if (is_resource($localStream)) {
+                    fclose($localStream);
+                }
+            }
+        } else {
+            Storage::disk('local')->put($storagePath, file_get_contents($realPath));
+        }
+
+        return 'local';
+    }
+
+    /**
+     * Store raw file bytes to the preferred disk with automatic fallback to local disk.
+     */
+    protected function storeBytesWithFallback(string $preferredDisk, string $storagePath, string $rawContent): string
+    {
+        if ($preferredDisk === 'supabase') {
+            try {
+                if (Storage::disk('supabase')->put($storagePath, $rawContent)) {
+                    return 'supabase';
+                }
+            } catch (\Throwable $e) {
+                // Fall back to local private disk
+            }
+        }
+
+        Storage::disk('local')->put($storagePath, $rawContent);
+
+        return 'local';
+    }
+
+    /**
      * Securely inspect magic bytes and store an audio/video recording on the private disk.
      */
     public function uploadMedia(
@@ -317,20 +380,27 @@ class TeacherStudioService extends BaseService
 
         return $this->transaction(function () use ($teacher, $lesson, $file, $detectedMime, $allowedMediaMimes, $mode, $durationSeconds) {
             $extension = $allowedMediaMimes[$detectedMime];
-            $disk = $this->getStorageDisk();
+            $preferredDisk = $this->getStorageDisk();
             $storagePath = "lessons/audio/{$teacher->id}_{$lesson->uuid}_" . Str::uuid() . ".{$extension}";
 
-            Storage::disk($disk)->put($storagePath, file_get_contents($file->getRealPath()));
+            $disk = $this->storeStreamWithFallback($preferredDisk, $storagePath, $file->getRealPath());
 
-            if ($lesson->media_path && Storage::disk($lesson->media_disk ?? $disk)->exists($lesson->media_path)) {
-                Storage::disk($lesson->media_disk ?? $disk)->delete($lesson->media_path);
+            if ($lesson->media_path) {
+                try {
+                    $oldDisk = $lesson->media_disk ?? $disk;
+                    if (Storage::disk($oldDisk)->exists($lesson->media_path)) {
+                        Storage::disk($oldDisk)->delete($lesson->media_path);
+                    }
+                } catch (\Throwable $e) {
+                    // Do not fail upload if old remote file cleanup fails
+                }
             }
 
             $resolvedMode = $mode
                 ? (LessonMediaMode::tryFrom($mode) ?? (str_starts_with($detectedMime, 'audio/') ? LessonMediaMode::AUDIO : LessonMediaMode::VIDEO))
                 : (str_starts_with($detectedMime, 'audio/') ? LessonMediaMode::AUDIO : LessonMediaMode::VIDEO);
 
-            $secs = $durationSeconds !== null && $durationSeconds > 0 ? $durationSeconds : ($lesson->duration_seconds ?: 2700);
+            $secs = $durationSeconds !== null && $durationSeconds > 0 ? $durationSeconds : ($lesson->duration_seconds ?: 0);
 
             $lesson->update([
                 'media_mode'          => $resolvedMode,
@@ -439,10 +509,10 @@ class TeacherStudioService extends BaseService
         }
 
         return $this->transaction(function () use ($teacher, $lesson, $file, $rawContent, $type, $detectedMime, $extension, $meta) {
-            $disk = $this->getStorageDisk();
+            $preferredDisk = $this->getStorageDisk();
             $storagePath = "lessons/attachments/{$teacher->id}_{$lesson->uuid}_" . Str::uuid() . ".{$extension}";
 
-            Storage::disk($disk)->put($storagePath, $rawContent);
+            $disk = $this->storeBytesWithFallback($preferredDisk, $storagePath, $rawContent);
 
             $nextOrder = (int) LessonAttachment::where('lesson_id', $lesson->id)
                 ->where('type', $type)
@@ -730,8 +800,17 @@ class TeacherStudioService extends BaseService
 
     protected function formatSecondsLabel(int $seconds): string
     {
-        $m = intdiv($seconds, 60);
+        if ($seconds <= 0) {
+            return '00:00';
+        }
+
+        $h = intdiv($seconds, 3600);
+        $m = intdiv($seconds % 3600, 60);
         $s = $seconds % 60;
+
+        if ($h > 0) {
+            return sprintf('%02d:%02d:%02d', $h, $m, $s);
+        }
 
         return sprintf('%02d:%02d', $m, $s);
     }

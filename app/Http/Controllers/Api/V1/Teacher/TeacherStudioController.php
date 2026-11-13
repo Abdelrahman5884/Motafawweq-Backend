@@ -112,6 +112,7 @@ class TeacherStudioController extends BaseApiController
      */
     public function uploadMedia(UploadLessonMediaRequest $request, string $uuid): JsonResponse
     {
+        @set_time_limit(300);
         $duration = $request->input('duration_seconds') ?? $request->input('durationSeconds');
 
         $lesson = $this->studioService->uploadMedia(
@@ -133,6 +134,7 @@ class TeacherStudioController extends BaseApiController
      */
     public function uploadPdf(UploadLessonAttachmentRequest $request, string $uuid): JsonResponse
     {
+        @set_time_limit(300);
         $attachment = $this->studioService->uploadAttachment(
             $this->authenticatedUser(),
             $uuid,
@@ -154,6 +156,7 @@ class TeacherStudioController extends BaseApiController
      */
     public function uploadImage(UploadLessonAttachmentRequest $request, string $uuid): JsonResponse
     {
+        @set_time_limit(300);
         $attachment = $this->studioService->uploadAttachment(
             $this->authenticatedUser(),
             $uuid,

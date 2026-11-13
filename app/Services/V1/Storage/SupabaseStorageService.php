@@ -506,14 +506,29 @@ class SupabaseStorageService extends BaseService
                         }
 
                         $isAudio = str_starts_with($storedFile->mime_type, 'audio/');
-                        $lesson->update([
+                        $meta = $storedFile->metadata ?? [];
+                        $durationSecs = isset($meta['duration']) ? max(0, (int) $meta['duration']) : 0;
+
+                        $lessonUpdates = [
                             'media_disk'          => $this->diskName,
                             'media_path'          => $storedFile->storage_path,
                             'media_original_name' => $storedFile->original_filename,
                             'media_mime_type'     => $storedFile->mime_type,
                             'media_size_bytes'    => $storedFile->file_size_bytes,
                             'media_mode'          => $isAudio ? LessonMediaMode::AUDIO : LessonMediaMode::VIDEO,
-                        ]);
+                        ];
+
+                        if ($durationSecs > 0) {
+                            $h = intdiv($durationSecs, 3600);
+                            $m = intdiv($durationSecs % 3600, 60);
+                            $s = $durationSecs % 60;
+                            $lessonUpdates['duration_seconds'] = $durationSecs;
+                            $lessonUpdates['duration_label'] = $h > 0
+                                ? sprintf('%02d:%02d:%02d', $h, $m, $s)
+                                : sprintf('%02d:%02d', $m, $s);
+                        }
+
+                        $lesson->update($lessonUpdates);
                     }
                 }
                 break;
