@@ -340,5 +340,97 @@ class TeacherStudyGroupTest extends TestCase
             'level'   => 'warning',
         ]);
     }
+
+    public function test_teacher_cannot_create_or_update_study_group_with_overlapping_schedule(): void
+    {
+        $teacher = $this->createTeacher('teacher.overlap@motafawweq.com');
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        // Create Group 1 on Sunday 16:00 - 18:00
+        $res1 = $this->postJson('/api/v1/teacher/groups', [
+            'name_ar'     => 'المجموعة الأولى',
+            'subject_ar'  => 'فيزياء',
+            'grade_ar'    => 'الصف الثالث الثانوي',
+            'center_name' => 'سنتر الدقي',
+            'slots'       => [
+                ['day_of_week' => DayOfWeek::SUNDAY->value, 'start_time' => '16:00', 'end_time' => '18:00'],
+            ],
+        ]);
+        $res1->assertCreated();
+        $group1Uuid = $res1->json('data.id');
+
+        // Overlap against Group 1 (Sunday 17:00 - 19:00) -> 422
+        $this->postJson('/api/v1/teacher/groups', [
+            'name_ar'     => 'المجموعة المتداخلة',
+            'subject_ar'  => 'فيزياء',
+            'grade_ar'    => 'الصف الثالث الثانوي',
+            'center_name' => 'سنتر الدقي',
+            'slots'       => [
+                ['day_of_week' => DayOfWeek::SUNDAY->value, 'start_time' => '17:00', 'end_time' => '19:00'],
+            ],
+        ])->assertStatus(422)
+          ->assertJsonValidationErrors(['slots']);
+
+        // Intra-group overlap (two sessions on Monday overlapping) -> 422
+        $this->postJson('/api/v1/teacher/groups', [
+            'name_ar'     => 'تداخل داخلي',
+            'subject_ar'  => 'فيزياء',
+            'grade_ar'    => 'الصف الثالث الثانوي',
+            'center_name' => 'سنتر الدقي',
+            'slots'       => [
+                ['day_of_week' => DayOfWeek::MONDAY->value, 'start_time' => '14:00', 'end_time' => '16:00'],
+                ['day_of_week' => DayOfWeek::MONDAY->value, 'start_time' => '15:30', 'end_time' => '17:30'],
+            ],
+        ])->assertStatus(422)
+          ->assertJsonValidationErrors(['slots']);
+
+        // Back-to-back session on Sunday 18:00 - 20:00 -> allowed!
+        $res2 = $this->postJson('/api/v1/teacher/groups', [
+            'name_ar'     => 'المجموعة الثانية',
+            'subject_ar'  => 'فيزياء',
+            'grade_ar'    => 'الصف الثالث الثانوي',
+            'center_name' => 'سنتر الدقي',
+            'slots'       => [
+                ['day_of_week' => DayOfWeek::SUNDAY->value, 'start_time' => '18:00', 'end_time' => '20:00'],
+            ],
+        ]);
+        $res2->assertCreated();
+
+        // Updating Group 1 with its own same slot -> allowed; updating to overlap Group 2 -> 422
+        $this->putJson("/api/v1/teacher/groups/{$group1Uuid}", [
+            'slots' => [
+                ['day_of_week' => DayOfWeek::SUNDAY->value, 'start_time' => '16:00', 'end_time' => '18:00'],
+            ],
+        ])->assertOk();
+
+        $this->putJson("/api/v1/teacher/groups/{$group1Uuid}", [
+            'slots' => [
+                ['day_of_week' => DayOfWeek::SUNDAY->value, 'start_time' => '18:30', 'end_time' => '19:30'],
+            ],
+        ])->assertStatus(422)
+          ->assertJsonValidationErrors(['slots']);
+    }
+
+    public function test_teacher_can_create_schedule_note_with_note_time_and_fetch_it(): void
+    {
+        $teacher = $this->createTeacher('teacher.notes.flow@motafawweq.com');
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        $createRes = $this->postJson('/api/v1/teacher/schedule/notes', [
+            'day_of_week' => DayOfWeek::SUNDAY->value,
+            'note_text'   => 'تجهيز أوراق الامتحان',
+            'note_time'   => '14:30',
+            'priority'    => 'high',
+        ]);
+
+        $createRes->assertCreated()
+            ->assertJsonPath('data.time', '14:30')
+            ->assertJsonPath('data.text', 'تجهيز أوراق الامتحان');
+
+        $scheduleRes = $this->getJson('/api/v1/teacher/schedule');
+        $scheduleRes->assertOk()
+            ->assertJsonPath('data.days.sunday.notes.0.text', 'تجهيز أوراق الامتحان')
+            ->assertJsonPath('data.days.sunday.notes.0.time', '14:30');
+    }
 }
 

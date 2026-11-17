@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class TeacherStudyGroupService extends BaseService
 {
@@ -183,6 +184,15 @@ class TeacherStudyGroupService extends BaseService
             $rawSlots = $data['schedule_slots'] ?? $data['scheduleSlots'] ?? $data['slots'] ?? null;
             if (is_array($rawSlots)) {
                 $this->syncGroupSlots($group, $teacher, $rawSlots);
+            } elseif (($fillableData['status'] ?? null) === 'active') {
+                $existingSlots = $group->scheduleSlots()->get()->map(fn ($s) => [
+                    'day'        => $s->day_of_week instanceof DayOfWeek ? $s->day_of_week->value : (string) $s->day_of_week,
+                    'start_time' => $s->start_time,
+                    'end_time'   => $s->end_time,
+                ])->all();
+                if (!empty($existingSlots)) {
+                    $this->assertNoScheduleOverlap($teacher, $existingSlots, $group->id, true);
+                }
             }
 
             $this->logSecurityEvent('teacher.group.updated', [
@@ -240,10 +250,17 @@ class TeacherStudyGroupService extends BaseService
     }
 
     /**
-     * Sync schedule slots for a group.
+     * Sync schedule slots for a group after validating there are no time overlaps.
      */
     protected function syncGroupSlots(StudyGroup $group, User $teacher, array $slots): void
     {
+        $this->assertNoScheduleOverlap(
+            $teacher,
+            $slots,
+            $group->id,
+            $group->status === 'active'
+        );
+
         GroupScheduleSlot::where('study_group_id', $group->id)->delete();
 
         foreach ($slots as $slot) {
@@ -256,8 +273,8 @@ class TeacherStudyGroupService extends BaseService
                 continue;
             }
 
-            $startTime = trim((string) ($slot['start_time'] ?? $slot['startTime'] ?? '16:00'));
-            $endTime = trim((string) ($slot['end_time'] ?? $slot['endTime'] ?? '18:00'));
+            $startTime = $this->normalizeTime((string) ($slot['start_time'] ?? $slot['startTime'] ?? '16:00'));
+            $endTime = $this->normalizeTime((string) ($slot['end_time'] ?? $slot['endTime'] ?? '18:00'));
             $hall = trim(strip_tags((string) ($slot['hall'] ?? $slot['hall_name'] ?? $group->hall_name ?? 'القاعة الرئيسية')));
 
             GroupScheduleSlot::create([
@@ -269,6 +286,152 @@ class TeacherStudyGroupService extends BaseService
                 'hall_name'      => $hall,
             ]);
         }
+    }
+
+    /**
+     * Validate that submitted schedule slots have valid ranges and do not overlap
+     * with each other or with any other active group belonging to the teacher.
+     *
+     * @throws ValidationException
+     */
+    protected function assertNoScheduleOverlap(
+        User $teacher,
+        array $slots,
+        ?int $excludeGroupId = null,
+        bool $checkActiveGroups = true
+    ): void {
+        $dayNamesAr = [
+            'saturday'  => 'السبت',
+            'sunday'    => 'الأحد',
+            'monday'    => 'الاثنين',
+            'tuesday'   => 'الثلاثاء',
+            'wednesday' => 'الأربعاء',
+            'thursday'  => 'الخميس',
+            'friday'    => 'الجمعة',
+        ];
+
+        $normalized = [];
+        foreach ($slots as $slot) {
+            if (!is_array($slot)) {
+                continue;
+            }
+
+            $day = strtolower(trim((string) ($slot['day'] ?? $slot['day_of_week'] ?? '')));
+            if (!in_array($day, DayOfWeek::values(), true)) {
+                continue;
+            }
+
+            $startTime = $this->normalizeTime((string) ($slot['start_time'] ?? $slot['startTime'] ?? '16:00'));
+            $endTime = $this->normalizeTime((string) ($slot['end_time'] ?? $slot['endTime'] ?? '18:00'));
+            $startMin = $this->parseTimeToMinutes($startTime);
+            $endMin = $this->parseTimeToMinutes($endTime);
+
+            if ($startMin < 0 || $endMin < 0 || $endMin <= $startMin) {
+                $dayAr = $dayNamesAr[$day] ?? $day;
+                throw ValidationException::withMessages([
+                    'slots' => ["وقت انتهاء الحصة يجب أن يكون بعد وقت البداية يوم {$dayAr} ({$startTime} - {$endTime})."],
+                ]);
+            }
+
+            $normalized[] = [
+                'day'        => $day,
+                'day_ar'     => $dayNamesAr[$day] ?? $day,
+                'start_time' => $startTime,
+                'end_time'   => $endTime,
+                'start_min'  => $startMin,
+                'end_min'    => $endMin,
+            ];
+        }
+
+        if (empty($normalized)) {
+            return;
+        }
+
+        // 1. Check intra-group overlap (two sessions within the same group on the same day)
+        $count = count($normalized);
+        for ($i = 0; $i < $count; $i++) {
+            for ($j = $i + 1; $j < $count; $j++) {
+                $a = $normalized[$i];
+                $b = $normalized[$j];
+                if ($a['day'] === $b['day'] && $a['start_min'] < $b['end_min'] && $a['end_min'] > $b['start_min']) {
+                    throw ValidationException::withMessages([
+                        'slots' => ["يوجد تداخل في مواعيد الحصص داخل نفس المجموعة يوم {$a['day_ar']} ({$a['start_time']} - {$a['end_time']} مع {$b['start_time']} - {$b['end_time']})."],
+                    ]);
+                }
+            }
+        }
+
+        if (!$checkActiveGroups) {
+            return;
+        }
+
+        // 2. Check overlap against all other active groups owned by this teacher
+        $days = array_values(array_unique(array_column($normalized, 'day')));
+        $existingSlots = GroupScheduleSlot::query()
+            ->where('teacher_id', $teacher->id)
+            ->whereIn('day_of_week', $days)
+            ->when($excludeGroupId !== null, fn ($q) => $q->where('study_group_id', '!=', $excludeGroupId))
+            ->whereHas('studyGroup', fn ($q) => $q->where('status', 'active'))
+            ->with('studyGroup:id,name_ar')
+            ->get();
+
+        foreach ($normalized as $slot) {
+            foreach ($existingSlots as $existing) {
+                $existingDay = $existing->day_of_week instanceof DayOfWeek
+                    ? $existing->day_of_week->value
+                    : (string) $existing->day_of_week;
+
+                if ($existingDay !== $slot['day']) {
+                    continue;
+                }
+
+                $existingStart = $this->parseTimeToMinutes((string) $existing->start_time);
+                $existingEnd = $this->parseTimeToMinutes((string) $existing->end_time);
+
+                if ($existingStart < 0 || $existingEnd < 0) {
+                    continue;
+                }
+
+                if ($slot['start_min'] < $existingEnd && $slot['end_min'] > $existingStart) {
+                    $groupName = $existing->studyGroup?->name_ar ?? 'مجموعة أخرى';
+                    throw ValidationException::withMessages([
+                        'slots' => ["يوجد تعارض في المواعيد يوم {$slot['day_ar']} ({$slot['start_time']} - {$slot['end_time']}) مع مجموعة «{$groupName}» ({$existing->start_time} - {$existing->end_time})."],
+                    ]);
+                }
+            }
+        }
+    }
+
+    /**
+     * Normalize HH:MM time string (e.g. "4:00" -> "04:00").
+     */
+    protected function normalizeTime(string $time): string
+    {
+        $parts = explode(':', trim($time));
+        if (count($parts) !== 2) {
+            return trim($time);
+        }
+
+        return sprintf('%02d:%02d', (int) $parts[0], (int) $parts[1]);
+    }
+
+    /**
+     * Convert HH:MM time string to minutes since midnight, or -1 if invalid.
+     */
+    protected function parseTimeToMinutes(string $time): int
+    {
+        $parts = explode(':', trim($time));
+        if (count($parts) !== 2) {
+            return -1;
+        }
+
+        $hours = (int) $parts[0];
+        $minutes = (int) $parts[1];
+        if ($hours < 0 || $hours > 23 || $minutes < 0 || $minutes > 59) {
+            return -1;
+        }
+
+        return ($hours * 60) + $minutes;
     }
 
     /**
