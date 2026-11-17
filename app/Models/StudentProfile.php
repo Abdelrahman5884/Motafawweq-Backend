@@ -15,8 +15,10 @@ class StudentProfile extends Model
         'student_id',
         'stage',
         'grade_ar',
+        'track_ar',
         'governorate',
         'school_name',
+        'center_name',
         'parent_name',
         'parent_phone',
         'daily_study_goal_minutes',
@@ -25,6 +27,7 @@ class StudentProfile extends Model
         'show_on_leaderboard',
         'display_name_mode',
         'nickname',
+        'target_goal',
         'preferences',
         'notifications',
     ];

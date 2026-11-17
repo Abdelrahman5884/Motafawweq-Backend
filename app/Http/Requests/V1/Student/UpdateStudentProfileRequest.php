@@ -64,6 +64,21 @@ class UpdateStudentProfileRequest extends BaseApiRequest
             $merged['display_name_mode'] = strtolower(trim((string) $displayMode));
         }
 
+        $trackAr = $this->input('track_ar') ?? $this->input('trackAr') ?? $this->input('track');
+        if ($trackAr !== null) {
+            $merged['track_ar'] = trim(strip_tags((string) $trackAr));
+        }
+
+        $targetGoal = $this->input('target_goal') ?? $this->input('targetGoal');
+        if ($targetGoal !== null) {
+            $merged['target_goal'] = trim(strip_tags((string) $targetGoal));
+        }
+
+        $centerName = $this->input('center_name') ?? $this->input('centerName') ?? $this->input('center');
+        if ($centerName !== null) {
+            $merged['center_name'] = trim(strip_tags((string) $centerName));
+        }
+
         if (! empty($merged)) {
             $this->merge($merged);
         }
@@ -74,10 +89,13 @@ class UpdateStudentProfileRequest extends BaseApiRequest
         return [
             'name' => ['sometimes', 'string', 'min:2', 'max:120'],
             'phone' => ['nullable', 'string', 'max:30'],
+            'avatar' => ['nullable', 'string', 'max:2048'],
             'stage' => ['nullable', 'string', Rule::in(StageType::values())],
             'grade_ar' => ['nullable', 'string', 'max:100'],
+            'track_ar' => ['nullable', 'string', 'max:100'],
             'governorate' => ['nullable', 'string', 'max:100'],
             'school_name' => ['nullable', 'string', 'max:150'],
+            'center_name' => ['nullable', 'string', 'max:150'],
             'parent_name' => ['nullable', 'string', 'max:150'],
             'parent_phone' => ['nullable', 'string', 'max:30'],
             'daily_study_goal_minutes' => ['nullable', 'integer', 'min:15', 'max:720'],
@@ -86,6 +104,7 @@ class UpdateStudentProfileRequest extends BaseApiRequest
             'show_on_leaderboard' => ['nullable', 'boolean'],
             'display_name_mode' => ['nullable', 'string', Rule::in(['full', 'initials', 'nickname'])],
             'nickname' => ['nullable', 'string', 'max:60'],
+            'target_goal' => ['nullable', 'string', 'max:255'],
             'preferences' => ['nullable', 'array'],
             'notifications' => ['nullable', 'array'],
         ];

@@ -18,6 +18,7 @@ class StudentProfileService extends BaseService
             [
                 'stage' => 'high',
                 'grade_ar' => 'الصف الثالث الثانوي',
+                'track_ar' => 'علمي علوم',
                 'daily_study_goal_minutes' => 120,
                 'weekly_exams_goal' => 3,
                 'target_score_percent' => 90,
@@ -42,6 +43,9 @@ class StudentProfileService extends BaseService
             if (array_key_exists('phone', $data)) {
                 $userUpdates['phone'] = $data['phone'] ? trim(strip_tags((string) $data['phone'])) : null;
             }
+            if (array_key_exists('avatar', $data) && is_string($data['avatar']) && strlen($data['avatar']) <= 2048) {
+                $userUpdates['avatar'] = trim($data['avatar']);
+            }
             if (! empty($userUpdates)) {
                 $student->update($userUpdates);
             }
@@ -51,8 +55,10 @@ class StudentProfileService extends BaseService
             $profileFields = [
                 'stage',
                 'grade_ar',
+                'track_ar',
                 'governorate',
                 'school_name',
+                'center_name',
                 'parent_name',
                 'parent_phone',
                 'daily_study_goal_minutes',
@@ -61,6 +67,7 @@ class StudentProfileService extends BaseService
                 'show_on_leaderboard',
                 'display_name_mode',
                 'nickname',
+                'target_goal',
                 'preferences',
                 'notifications',
             ];
@@ -98,8 +105,10 @@ class StudentProfileService extends BaseService
             'studentCode' => $student->student_code,
             'stage' => $profile->stage,
             'gradeAr' => $profile->grade_ar,
+            'trackAr' => $profile->track_ar,
             'governorate' => $profile->governorate,
             'schoolName' => $profile->school_name,
+            'centerName' => $profile->center_name,
             'parentName' => $profile->parent_name,
             'parentPhone' => $profile->parent_phone,
             'dailyStudyGoalMinutes' => (int) $profile->daily_study_goal_minutes,
@@ -108,6 +117,7 @@ class StudentProfileService extends BaseService
             'showOnLeaderboard' => (bool) $profile->show_on_leaderboard,
             'displayNameMode' => $profile->display_name_mode,
             'nickname' => $profile->nickname,
+            'targetGoal' => $profile->target_goal,
             'preferences' => $profile->preferences ?? [],
             'notifications' => $profile->notifications ?? [],
         ];

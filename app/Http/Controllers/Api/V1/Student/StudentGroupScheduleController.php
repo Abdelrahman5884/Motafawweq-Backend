@@ -151,4 +151,43 @@ class StudentGroupScheduleController extends BaseApiController
 
         return $this->successResponse($data);
     }
+
+    /**
+     * POST /api/v1/student/schedule/notes
+     */
+    public function storeScheduleNote(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $note = $this->groupScheduleService->createScheduleNote(
+            $this->authenticatedUser(),
+            $request->only(['day_of_week', 'day', 'text', 'time', 'priority'])
+        );
+
+        return $this->createdResponse($note, 'تم حفظ الملحوظة بنجاح.');
+    }
+
+    /**
+     * PATCH /api/v1/student/schedule/notes/{uuid}/toggle
+     */
+    public function toggleScheduleNote(string $uuid): JsonResponse
+    {
+        $note = $this->groupScheduleService->toggleScheduleNote(
+            $this->authenticatedUser(),
+            $uuid
+        );
+
+        return $this->successResponse($note);
+    }
+
+    /**
+     * DELETE /api/v1/student/schedule/notes/{uuid}
+     */
+    public function destroyScheduleNote(string $uuid): JsonResponse
+    {
+        $this->groupScheduleService->deleteScheduleNote(
+            $this->authenticatedUser(),
+            $uuid
+        );
+
+        return $this->successResponse(null, 'تم حذف الملحوظة بنجاح.');
+    }
 }

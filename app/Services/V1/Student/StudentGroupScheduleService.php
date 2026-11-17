@@ -7,6 +7,7 @@ use App\Enums\EnrollmentStatus;
 use App\Models\GroupAttendanceRecord;
 use App\Models\GroupEnrollment;
 use App\Models\GroupScheduleSlot;
+use App\Models\StudentScheduleNote;
 use App\Models\StudentStudySession;
 use App\Models\StudyGroup;
 use App\Models\User;
@@ -49,6 +50,8 @@ class StudentGroupScheduleService extends BaseService
                 'centerName' => $group?->center_name,
                 'hallName' => $group?->hall_name,
                 'scheduleAr' => $group?->schedule_ar,
+                'priceEgp' => (float) ($group?->price_egp ?? 0),
+                'joinCode' => $group?->join_code,
                 'teacherName' => $group?->teacher?->name,
                 'enrollmentStatus' => $status,
                 'studentBarcode' => $status === EnrollmentStatus::ENROLLED->value ? $enrollment->student_barcode : null,
@@ -160,10 +163,105 @@ class StudentGroupScheduleService extends BaseService
             'notes' => $s->notes,
         ])->values()->all();
 
+        $notesMap = [
+            'saturday' => [],
+            'sunday' => [],
+            'monday' => [],
+            'tuesday' => [],
+            'wednesday' => [],
+            'thursday' => [],
+            'friday' => [],
+        ];
+
+        $notes = StudentScheduleNote::forStudent($student->id)
+            ->orderBy('created_at')
+            ->get();
+
+        foreach ($notes as $n) {
+            $d = strtolower((string) $n->day_of_week);
+            if (! isset($notesMap[$d])) {
+                $notesMap[$d] = [];
+            }
+            $notesMap[$d][] = [
+                'id' => $n->uuid,
+                'text' => $n->text,
+                'time' => $n->time,
+                'priority' => $n->priority,
+                'isDone' => (bool) $n->is_done,
+            ];
+        }
+
         return [
             'classSessions' => $classSessions,
             'personalSessions' => $personalSessions,
+            'scheduleNotes' => $notesMap,
         ];
+    }
+
+    /**
+     * Create a daily schedule note for the student.
+     */
+    public function createScheduleNote(User $student, array $data): array
+    {
+        $day = strtolower(trim((string) ($data['day_of_week'] ?? $data['day'] ?? 'saturday')));
+        $text = trim(strip_tags((string) ($data['text'] ?? '')));
+        if ($text === '') {
+            throw ValidationException::withMessages(['text' => ['يرجى إدخال نص الملحوظة.']]);
+        }
+
+        $note = StudentScheduleNote::create([
+            'student_id' => $student->id,
+            'day_of_week' => $day,
+            'text' => $text,
+            'time' => isset($data['time']) ? trim(strip_tags((string) $data['time'])) : null,
+            'priority' => in_array($data['priority'] ?? 'medium', ['low', 'medium', 'high'], true) ? $data['priority'] : 'medium',
+            'is_done' => false,
+        ]);
+
+        return [
+            'id' => $note->uuid,
+            'day' => $note->day_of_week,
+            'text' => $note->text,
+            'time' => $note->time,
+            'priority' => $note->priority,
+            'isDone' => (bool) $note->is_done,
+        ];
+    }
+
+    /**
+     * Toggle a daily schedule note completion status.
+     */
+    public function toggleScheduleNote(User $student, string $uuid): array
+    {
+        /** @var StudentScheduleNote|null $note */
+        $note = StudentScheduleNote::where('uuid', $uuid)->first();
+        if (! $note) {
+            throw (new ModelNotFoundException)->setModel(StudentScheduleNote::class, [$uuid]);
+        }
+        $note->assertOwnedByStudent($student);
+        $note->update(['is_done' => ! $note->is_done]);
+
+        return [
+            'id' => $note->uuid,
+            'day' => $note->day_of_week,
+            'isDone' => (bool) $note->is_done,
+        ];
+    }
+
+    /**
+     * Delete a daily schedule note.
+     */
+    public function deleteScheduleNote(User $student, string $uuid): bool
+    {
+        /** @var StudentScheduleNote|null $note */
+        $note = StudentScheduleNote::where('uuid', $uuid)->first();
+        if (! $note) {
+            throw (new ModelNotFoundException)->setModel(StudentScheduleNote::class, [$uuid]);
+        }
+        $note->assertOwnedByStudent($student);
+        $note->delete();
+
+        return true;
     }
 
     /**
