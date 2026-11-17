@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Teacher;
 
+use App\Enums\EnrollmentStatus;
 use App\Enums\ExamQuestionType;
 use App\Enums\ExamStatus;
 use App\Enums\ExamSubmissionStatus;
@@ -11,7 +12,8 @@ use App\Enums\UserStatus;
 use App\Models\Exam;
 use App\Models\ExamQuestion;
 use App\Models\ExamSubmission;
-use App\Models\SecurityAuditLog;
+use App\Models\GroupEnrollment;
+use App\Models\StudyGroup;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -24,22 +26,42 @@ class TeacherExamGradingTest extends TestCase
     protected function createTeacher(string $email = 'teacher.grading@motafawweq.com'): User
     {
         return User::factory()->create([
-            'email'             => $email,
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'email' => $email,
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
 
     protected function createStudent(string $email = 'student.tester@motafawweq.com'): User
     {
-        return User::factory()->create([
-            'name'              => 'أحمد المتفوق',
-            'email'             => $email,
-            'role'              => UserRole::STUDENT,
-            'status'            => UserStatus::ACTIVE,
+        $student = User::factory()->create([
+            'name' => 'أحمد المتفوق',
+            'email' => $email,
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
+
+        $teacher = User::where('role', UserRole::TEACHER)->latest('id')->first();
+        if ($teacher) {
+            $group = StudyGroup::firstOrCreate(
+                ['teacher_id' => $teacher->id, 'join_code' => 'TEST-GRP-'.$teacher->id],
+                [
+                    'name_ar' => 'مجموعة الاختبار',
+                    'subject_ar' => 'الأحياء',
+                    'grade_ar' => 'الصف الثالث الثانوي',
+                    'center_name' => 'سنتر الاختبار',
+                    'status' => 'active',
+                ]
+            );
+            GroupEnrollment::firstOrCreate(
+                ['study_group_id' => $group->id, 'student_id' => $student->id],
+                ['status' => EnrollmentStatus::ENROLLED, 'enrolled_at' => now()]
+            );
+        }
+
+        return $student;
     }
 
     public function test_student_can_submit_objective_exam_and_get_auto_graded_immediately(): void
@@ -48,42 +70,42 @@ class TeacherExamGradingTest extends TestCase
         $student = $this->createStudent();
 
         $exam = Exam::create([
-            'teacher_id'       => $teacher->id,
-            'title_ar'         => 'امتحان الأحياء الموضوعي',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان الأحياء الموضوعي',
             'duration_minutes' => 30,
-            'full_mark'        => 20,
-            'pass_score'       => 10,
-            'questions_count'  => 2,
-            'status'           => ExamStatus::ACTIVE,
-            'show_results'     => true,
+            'full_mark' => 20,
+            'pass_score' => 10,
+            'questions_count' => 2,
+            'status' => ExamStatus::ACTIVE,
+            'show_results' => true,
         ]);
 
         $q1 = ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 1,
-            'type'            => ExamQuestionType::MCQ,
-            'points'          => 10,
-            'question_ar'     => 'أي الجزيئات التالية ينتج مباشرة من التحلل السكري؟',
-            'options_ar'      => ['حمض البيروفيك', 'حمض الستريك', 'الأسيتيل كوانزيم'],
-            'correct_index'   => 0,
+            'type' => ExamQuestionType::MCQ,
+            'points' => 10,
+            'question_ar' => 'أي الجزيئات التالية ينتج مباشرة من التحلل السكري؟',
+            'options_ar' => ['حمض البيروفيك', 'حمض الستريك', 'الأسيتيل كوانزيم'],
+            'correct_index' => 0,
         ]);
 
         $q2 = ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 2,
-            'type'            => ExamQuestionType::TRUE_FALSE,
-            'points'          => 10,
-            'question_ar'     => 'الريبوسومات هي المسؤولة عن بناء البروتين في الخلية.',
-            'correct_bool'    => true,
+            'type' => ExamQuestionType::TRUE_FALSE,
+            'points' => 10,
+            'question_ar' => 'الريبوسومات هي المسؤولة عن بناء البروتين في الخلية.',
+            'correct_bool' => true,
         ]);
 
         Sanctum::actingAs($student, [TokenType::ACCESS->value]);
 
         $payload = [
             'startedAt' => now()->subMinutes(15)->toIso8601String(),
-            'answers'   => [
+            'answers' => [
                 [
-                    'questionUuid'  => $q1->uuid,
+                    'questionUuid' => $q1->uuid,
                     'selectedIndex' => 0, // Correct
                 ],
                 [
@@ -105,11 +127,11 @@ class TeacherExamGradingTest extends TestCase
             ->assertJsonPath('data.isFullMark', true);
 
         $this->assertDatabaseHas('exam_submissions', [
-            'exam_id'    => $exam->id,
+            'exam_id' => $exam->id,
             'student_id' => $student->id,
-            'status'     => ExamSubmissionStatus::GRADED->value,
-            'score'      => 20.00,
-            'is_passed'  => true,
+            'status' => ExamSubmissionStatus::GRADED->value,
+            'score' => 20.00,
+            'is_passed' => true,
         ]);
 
         $exam->refresh();
@@ -125,32 +147,32 @@ class TeacherExamGradingTest extends TestCase
         $student = $this->createStudent('essay.student@motafawweq.com');
 
         $exam = Exam::create([
-            'teacher_id'       => $teacher->id,
-            'title_ar'         => 'امتحان الأحياء الشامل مع مقالي',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان الأحياء الشامل مع مقالي',
             'duration_minutes' => 60,
-            'full_mark'        => 30,
-            'pass_score'       => 15,
-            'questions_count'  => 2,
-            'status'           => ExamStatus::ACTIVE,
-            'show_results'     => true,
+            'full_mark' => 30,
+            'pass_score' => 15,
+            'questions_count' => 2,
+            'status' => ExamStatus::ACTIVE,
+            'show_results' => true,
         ]);
 
         $q1 = ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 1,
-            'type'            => ExamQuestionType::MCQ,
-            'points'          => 10,
-            'question_ar'     => 'سؤال اختياري',
-            'options_ar'      => ['أ', 'ب'],
-            'correct_index'   => 1,
+            'type' => ExamQuestionType::MCQ,
+            'points' => 10,
+            'question_ar' => 'سؤال اختياري',
+            'options_ar' => ['أ', 'ب'],
+            'correct_index' => 1,
         ]);
 
         $q2 = ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 2,
-            'type'            => ExamQuestionType::ESSAY,
-            'points'          => 20,
-            'question_ar'     => 'اشرح بالتفصيل آلية انقباض اللييفة العضلية حسب نظرية الخيوط المنزلقة.',
+            'type' => ExamQuestionType::ESSAY,
+            'points' => 20,
+            'question_ar' => 'اشرح بالتفصيل آلية انقباض اللييفة العضلية حسب نظرية الخيوط المنزلقة.',
             'model_answer_ar' => 'تنزلق خيوط الأكتين فوق الميوسين بمساعدة الروابط المستعرضة وأيونات الكالسيوم وATP.',
         ]);
 
@@ -159,11 +181,11 @@ class TeacherExamGradingTest extends TestCase
         $payload = [
             'answers' => [
                 [
-                    'questionUuid'  => $q1->uuid,
+                    'questionUuid' => $q1->uuid,
                     'selectedIndex' => 1, // 10 points
                 ],
                 [
-                    'questionUuid'    => $q2->uuid,
+                    'questionUuid' => $q2->uuid,
                     'essayAnswerText' => 'تتصل الروابط المستعرضة الممتدة من الميوسين بخيوط الأكتين وتسحبها في وجود طاقة ATP.',
                 ],
             ],
@@ -177,10 +199,10 @@ class TeacherExamGradingTest extends TestCase
             ->assertJsonPath('data.score', 10); // Preliminary objective score
 
         $this->assertDatabaseHas('exam_submissions', [
-            'exam_id'    => $exam->id,
+            'exam_id' => $exam->id,
             'student_id' => $student->id,
-            'status'     => ExamSubmissionStatus::SUBMITTED->value,
-            'score'      => 10.00,
+            'status' => ExamSubmissionStatus::SUBMITTED->value,
+            'score' => 10.00,
         ]);
     }
 
@@ -190,23 +212,23 @@ class TeacherExamGradingTest extends TestCase
         $student = $this->createStudent('closed.test@motafawweq.com');
 
         $exam = Exam::create([
-            'teacher_id'       => $teacher->id,
-            'title_ar'         => 'امتحان مغلق',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان مغلق',
             'duration_minutes' => 30,
-            'full_mark'        => 10,
-            'pass_score'       => 5,
-            'questions_count'  => 1,
-            'status'           => ExamStatus::CLOSED,
+            'full_mark' => 10,
+            'pass_score' => 5,
+            'questions_count' => 1,
+            'status' => ExamStatus::CLOSED,
         ]);
 
         $q1 = ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 1,
-            'type'            => ExamQuestionType::MCQ,
-            'points'          => 10,
-            'question_ar'     => 'سؤال تجريبي',
-            'options_ar'      => ['أ', 'ب'],
-            'correct_index'   => 0,
+            'type' => ExamQuestionType::MCQ,
+            'points' => 10,
+            'question_ar' => 'سؤال تجريبي',
+            'options_ar' => ['أ', 'ب'],
+            'correct_index' => 0,
         ]);
 
         Sanctum::actingAs($student, [TokenType::ACCESS->value]);
@@ -227,27 +249,27 @@ class TeacherExamGradingTest extends TestCase
         $student = $this->createStudent('list.student@motafawweq.com');
 
         $exam = Exam::create([
-            'teacher_id'        => $teacher->id,
-            'title_ar'          => 'امتحان الأحياء للرصد',
-            'duration_minutes'  => 45,
-            'full_mark'         => 50,
-            'pass_score'        => 25,
-            'questions_count'   => 1,
-            'status'            => ExamStatus::ACTIVE,
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان الأحياء للرصد',
+            'duration_minutes' => 45,
+            'full_mark' => 50,
+            'pass_score' => 25,
+            'questions_count' => 1,
+            'status' => ExamStatus::ACTIVE,
             'submissions_count' => 1,
-            'avg_score'         => 45.0,
-            'pass_rate'         => 100.0,
+            'avg_score' => 45.0,
+            'pass_rate' => 100.0,
         ]);
 
         $submission = ExamSubmission::create([
-            'exam_id'      => $exam->id,
-            'student_id'   => $student->id,
-            'score'        => 45,
-            'full_mark'    => 50,
-            'percentage'   => 90.0,
-            'is_passed'    => true,
+            'exam_id' => $exam->id,
+            'student_id' => $student->id,
+            'score' => 45,
+            'full_mark' => 50,
+            'percentage' => 90.0,
+            'is_passed' => true,
             'is_full_mark' => false,
-            'status'       => ExamSubmissionStatus::GRADED,
+            'status' => ExamSubmissionStatus::GRADED,
             'submitted_at' => now(),
         ]);
 
@@ -270,38 +292,38 @@ class TeacherExamGradingTest extends TestCase
         $student = $this->createStudent('details.student@motafawweq.com');
 
         $exam = Exam::create([
-            'teacher_id'       => $teacher->id,
-            'title_ar'         => 'امتحان التفاصيل',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان التفاصيل',
             'duration_minutes' => 45,
-            'full_mark'        => 20,
-            'pass_score'       => 10,
-            'questions_count'  => 1,
-            'status'           => ExamStatus::ACTIVE,
+            'full_mark' => 20,
+            'pass_score' => 10,
+            'questions_count' => 1,
+            'status' => ExamStatus::ACTIVE,
         ]);
 
         $q = ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 1,
-            'type'            => ExamQuestionType::ESSAY,
-            'points'          => 20,
-            'question_ar'     => 'علل: سرعة استجابة الخلايا اللمفاوية التائية في الاستجابة المناعية الثانوية؟',
+            'type' => ExamQuestionType::ESSAY,
+            'points' => 20,
+            'question_ar' => 'علل: سرعة استجابة الخلايا اللمفاوية التائية في الاستجابة المناعية الثانوية؟',
             'model_answer_ar' => 'لوجود خلايا الذاكرة التائية المتكونة في الاستجابة الأولية.',
         ]);
 
         $submission = ExamSubmission::create([
-            'exam_id'      => $exam->id,
-            'student_id'   => $student->id,
-            'score'        => 0,
-            'full_mark'    => 20,
-            'status'       => ExamSubmissionStatus::SUBMITTED,
+            'exam_id' => $exam->id,
+            'student_id' => $student->id,
+            'score' => 0,
+            'full_mark' => 20,
+            'status' => ExamSubmissionStatus::SUBMITTED,
             'submitted_at' => now(),
         ]);
 
         $submission->answers()->create([
-            'exam_question_id'  => $q->id,
+            'exam_question_id' => $q->id,
             'essay_answer_text' => 'بسبب وجود خلايا الذاكرة المناعية.',
-            'points_awarded'    => 0,
-            'is_correct'        => null,
+            'points_awarded' => 0,
+            'is_correct' => null,
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -321,38 +343,38 @@ class TeacherExamGradingTest extends TestCase
         $student = $this->createStudent('grade.essay@motafawweq.com');
 
         $exam = Exam::create([
-            'teacher_id'       => $teacher->id,
-            'title_ar'         => 'امتحان تصحيح المقالي',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان تصحيح المقالي',
             'duration_minutes' => 45,
-            'full_mark'        => 20,
-            'pass_score'       => 10,
-            'questions_count'  => 1,
-            'status'           => ExamStatus::ACTIVE,
+            'full_mark' => 20,
+            'pass_score' => 10,
+            'questions_count' => 1,
+            'status' => ExamStatus::ACTIVE,
         ]);
 
         $q = ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 1,
-            'type'            => ExamQuestionType::ESSAY,
-            'points'          => 20,
-            'question_ar'     => 'اشرح أهمية هرمون الأوكسين في نمو النبات.',
+            'type' => ExamQuestionType::ESSAY,
+            'points' => 20,
+            'question_ar' => 'اشرح أهمية هرمون الأوكسين في نمو النبات.',
             'model_answer_ar' => 'ينظم عمليات النمو والانتحاء الضوئي والجاذبي.',
         ]);
 
         $submission = ExamSubmission::create([
-            'exam_id'      => $exam->id,
-            'student_id'   => $student->id,
-            'score'        => 0,
-            'full_mark'    => 20,
-            'status'       => ExamSubmissionStatus::SUBMITTED,
+            'exam_id' => $exam->id,
+            'student_id' => $student->id,
+            'score' => 0,
+            'full_mark' => 20,
+            'status' => ExamSubmissionStatus::SUBMITTED,
             'submitted_at' => now(),
         ]);
 
         $submission->answers()->create([
-            'exam_question_id'  => $q->id,
+            'exam_question_id' => $q->id,
             'essay_answer_text' => 'يؤثر على استطالة الخلايا النباتية والانتحاء.',
-            'points_awarded'    => 0,
-            'is_correct'        => null,
+            'points_awarded' => 0,
+            'is_correct' => null,
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -360,8 +382,8 @@ class TeacherExamGradingTest extends TestCase
         $payload = [
             'answers' => [
                 [
-                    'questionUuid'    => $q->uuid,
-                    'pointsAwarded'   => 18,
+                    'questionUuid' => $q->uuid,
+                    'pointsAwarded' => 18,
                     'teacherFeedback' => 'إجابة نموذجية وممتازة!',
                 ],
             ],
@@ -394,21 +416,21 @@ class TeacherExamGradingTest extends TestCase
         $student = $this->createStudent('idor.student@motafawweq.com');
 
         $examA = Exam::create([
-            'teacher_id'       => $teacherA->id,
-            'title_ar'         => 'امتحان الأستاذ أ',
+            'teacher_id' => $teacherA->id,
+            'title_ar' => 'امتحان الأستاذ أ',
             'duration_minutes' => 30,
-            'full_mark'        => 10,
-            'pass_score'       => 5,
-            'questions_count'  => 1,
-            'status'           => ExamStatus::ACTIVE,
+            'full_mark' => 10,
+            'pass_score' => 5,
+            'questions_count' => 1,
+            'status' => ExamStatus::ACTIVE,
         ]);
 
         $submission = ExamSubmission::create([
-            'exam_id'      => $examA->id,
-            'student_id'   => $student->id,
-            'score'        => 8,
-            'full_mark'    => 10,
-            'status'       => ExamSubmissionStatus::GRADED,
+            'exam_id' => $examA->id,
+            'student_id' => $student->id,
+            'score' => 8,
+            'full_mark' => 10,
+            'status' => ExamSubmissionStatus::GRADED,
             'submitted_at' => now(),
         ]);
 
@@ -429,7 +451,7 @@ class TeacherExamGradingTest extends TestCase
         // Verify Anti-IDOR security audit log recorded
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
+            'event' => 'teacher.idor_attempt_blocked',
         ]);
     }
 }

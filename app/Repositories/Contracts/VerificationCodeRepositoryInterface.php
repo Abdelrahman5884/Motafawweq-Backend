@@ -28,4 +28,3 @@ interface VerificationCodeRepositoryInterface extends BaseRepositoryInterface
      */
     public function pruneStale(int $olderThanHours = 24): int;
 }
-

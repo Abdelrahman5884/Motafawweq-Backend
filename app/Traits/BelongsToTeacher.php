@@ -44,7 +44,7 @@ trait BelongsToTeacher
     {
         $teacherId = $teacher instanceof User ? $teacher->id : $teacher;
 
-        return $query->where($this->getTable() . '.teacher_id', $teacherId);
+        return $query->where($this->getTable().'.teacher_id', $teacherId);
     }
 
     /**
@@ -68,14 +68,14 @@ trait BelongsToTeacher
             return;
         }
 
-        if (!$user->isTeacher() || !$this->isOwnedBy($user)) {
+        if (! $user->isTeacher() || ! $this->isOwnedBy($user)) {
             $this->logSecurityEvent(
                 'teacher.idor_attempt_blocked',
                 [
                     'attempted_by_user_id' => $user->id,
-                    'resource_owner_id'    => $this->teacher_id,
-                    'resource_type'        => static::class,
-                    'resource_uuid'        => $this->uuid ?? $this->getKey(),
+                    'resource_owner_id' => $this->teacher_id,
+                    'resource_type' => static::class,
+                    'resource_uuid' => $this->uuid ?? $this->getKey(),
                 ],
                 'warning',
                 $this
@@ -85,4 +85,3 @@ trait BelongsToTeacher
         }
     }
 }
-

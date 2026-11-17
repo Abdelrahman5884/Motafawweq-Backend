@@ -15,7 +15,7 @@ use Illuminate\Support\Str;
 
 class CourseLeague extends Model
 {
-    use HasFactory, SoftDeletes, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory, SoftDeletes;
 
     protected $table = 'course_leagues';
 
@@ -37,11 +37,11 @@ class CourseLeague extends Model
     protected function casts(): array
     {
         return [
-            'duration_type'     => LeagueDuration::class,
-            'duration_days'     => 'integer',
-            'is_active'         => 'boolean',
-            'starts_at'         => 'datetime',
-            'ends_at'           => 'datetime',
+            'duration_type' => LeagueDuration::class,
+            'duration_days' => 'integer',
+            'is_active' => 'boolean',
+            'starts_at' => 'datetime',
+            'ends_at' => 'datetime',
             'total_competitors' => 'integer',
         ];
     }
@@ -75,11 +75,12 @@ class CourseLeague extends Model
      */
     public function roundDaysRemaining(): int
     {
-        if (!$this->ends_at) {
+        if (! $this->ends_at) {
             return 0;
         }
 
         $diff = (int) Carbon::now()->diffInDays($this->ends_at, false);
+
         return max(0, $diff);
     }
 
@@ -112,18 +113,18 @@ class CourseLeague extends Model
             $tier = LeagueTier::resolveFromXp((int) $participant->xp_points)->value;
 
             $badge = match ($newRank) {
-                1       => 'بطل الكورس',
-                2       => 'وصيف الكورس',
-                3       => 'المركز الثالث',
+                1 => 'بطل الكورس',
+                2 => 'وصيف الكورس',
+                3 => 'المركز الثالث',
                 4, 5, 6 => 'نجم متألق',
                 default => 'منافس نشط',
             };
 
             $participant->update([
-                'previous_rank'  => $prev,
-                'rank'           => $newRank,
-                'movement'       => $movement,
-                'tier'           => $tier,
+                'previous_rank' => $prev,
+                'rank' => $newRank,
+                'movement' => $movement,
+                'tier' => $tier,
                 'badge_title_ar' => $badge,
             ]);
 

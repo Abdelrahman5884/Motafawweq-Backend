@@ -38,10 +38,9 @@ class GradeHomeworkSubmissionRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'status'      => ['required', 'string', Rule::in(['graded', 'rejected'])],
-            'score'       => ['nullable', 'numeric', 'min:0'],
+            'status' => ['required', 'string', Rule::in(['graded', 'rejected'])],
+            'score' => ['nullable', 'numeric', 'min:0'],
             'feedback_ar' => ['nullable', 'string', 'max:2000'],
         ];
     }
 }
-

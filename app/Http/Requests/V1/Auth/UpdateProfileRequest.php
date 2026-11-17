@@ -12,8 +12,8 @@ class UpdateProfileRequest extends BaseApiRequest
         $userId = $this->user()?->id;
 
         return [
-            'name'   => ['sometimes', 'required', 'string', 'min:3', 'max:100'],
-            'phone'  => ['nullable', 'string', 'max:20', Rule::unique('users', 'phone')->ignore($userId)],
+            'name' => ['sometimes', 'required', 'string', 'min:3', 'max:100'],
+            'phone' => ['nullable', 'string', 'max:20', Rule::unique('users', 'phone')->ignore($userId)],
             'avatar' => ['nullable', 'string', 'max:2048'],
         ];
     }

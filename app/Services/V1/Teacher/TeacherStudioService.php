@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Support\Testing\Fakes\StorageFake;
 use Illuminate\Validation\ValidationException;
 
 class TeacherStudioService extends BaseService
@@ -79,23 +80,23 @@ class TeacherStudioService extends BaseService
 
             /** @var Lesson $lesson */
             $lesson = $this->lessonRepository->create([
-                'teacher_id'            => $teacher->id,
-                'course_id'             => $course?->id,
-                'title_ar'              => $titleAr,
-                'title_en'              => $titleEn,
-                'description_ar'        => $descAr,
-                'description_en'        => $descEn,
-                'subject_ar'            => $subjectAr,
-                'grade_ar'              => $gradeAr,
-                'target_group_code'     => $targetGroup !== '' ? $targetGroup : null,
-                'media_mode'            => $mediaMode,
-                'embed_url'             => $safeEmbedUrl,
-                'is_youtube'            => $isYoutube,
-                'duration_seconds'      => $durationSecs,
-                'duration_label'        => $durationLabel,
+                'teacher_id' => $teacher->id,
+                'course_id' => $course?->id,
+                'title_ar' => $titleAr,
+                'title_en' => $titleEn,
+                'description_ar' => $descAr,
+                'description_en' => $descEn,
+                'subject_ar' => $subjectAr,
+                'grade_ar' => $gradeAr,
+                'target_group_code' => $targetGroup !== '' ? $targetGroup : null,
+                'media_mode' => $mediaMode,
+                'embed_url' => $safeEmbedUrl,
+                'is_youtube' => $isYoutube,
+                'duration_seconds' => $durationSecs,
+                'duration_label' => $durationLabel,
                 'ai_features_requested' => $aiFeatures,
-                'status'                => $status,
-                'published_at'          => $status === LessonStatus::PUBLISHED ? now() : null,
+                'status' => $status,
+                'published_at' => $status === LessonStatus::PUBLISHED ? now() : null,
             ]);
 
             if ($course) {
@@ -107,7 +108,7 @@ class TeacherStudioService extends BaseService
                 [
                     'lesson_uuid' => $lesson->uuid,
                     'course_uuid' => $course?->uuid,
-                    'media_mode'  => $mediaMode->value,
+                    'media_mode' => $mediaMode->value,
                     'ai_features' => $aiFeatures,
                 ],
                 'info',
@@ -199,13 +200,13 @@ class TeacherStudioService extends BaseService
                 $status = LessonStatus::tryFrom((string) $data['status']);
                 if ($status) {
                     $updates['status'] = $status;
-                    if ($status === LessonStatus::PUBLISHED && !$lesson->published_at) {
+                    if ($status === LessonStatus::PUBLISHED && ! $lesson->published_at) {
                         $updates['published_at'] = now();
                     }
                 }
             }
 
-            if (!empty($updates)) {
+            if (! empty($updates)) {
                 $lesson->update($updates);
             }
 
@@ -217,7 +218,7 @@ class TeacherStudioService extends BaseService
             $this->logSecurityEvent(
                 'teacher.lesson.updated',
                 [
-                    'lesson_uuid'    => $lesson->uuid,
+                    'lesson_uuid' => $lesson->uuid,
                     'updated_fields' => array_keys($updates),
                 ],
                 'info',
@@ -258,12 +259,13 @@ class TeacherStudioService extends BaseService
      */
     protected function getStorageDisk(): string
     {
-        if (Storage::disk('local') instanceof \Illuminate\Support\Testing\Fakes\StorageFake) {
+        if (Storage::disk('local') instanceof StorageFake) {
             return 'local';
         }
-        if (Storage::disk('supabase') instanceof \Illuminate\Support\Testing\Fakes\StorageFake) {
+        if (Storage::disk('supabase') instanceof StorageFake) {
             return 'supabase';
         }
+
         return config('filesystems.disks.supabase.key') ? 'supabase' : 'local';
     }
 
@@ -347,27 +349,27 @@ class TeacherStudioService extends BaseService
         $detectedMime = $realPath ? $finfo->file($realPath) : $file->getMimeType();
 
         $allowedMediaMimes = [
-            'audio/mpeg'      => 'mp3',
-            'audio/mp3'       => 'mp3',
-            'audio/wav'       => 'wav',
-            'audio/x-wav'     => 'wav',
-            'audio/webm'      => 'webm',
-            'audio/ogg'       => 'ogg',
-            'audio/mp4'       => 'm4a',
-            'video/mp4'       => 'mp4',
-            'video/webm'      => 'webm',
-            'video/ogg'       => 'ogv',
+            'audio/mpeg' => 'mp3',
+            'audio/mp3' => 'mp3',
+            'audio/wav' => 'wav',
+            'audio/x-wav' => 'wav',
+            'audio/webm' => 'webm',
+            'audio/ogg' => 'ogg',
+            'audio/mp4' => 'm4a',
+            'video/mp4' => 'mp4',
+            'video/webm' => 'webm',
+            'video/ogg' => 'ogv',
             'video/quicktime' => 'mov',
         ];
 
-        if (!isset($allowedMediaMimes[$detectedMime])) {
+        if (! isset($allowedMediaMimes[$detectedMime])) {
             $this->logSecurityEvent(
                 'teacher.upload.malicious_signature_blocked',
                 [
-                    'lesson_uuid'   => $lesson->uuid,
+                    'lesson_uuid' => $lesson->uuid,
                     'detected_mime' => $detectedMime,
                     'original_name' => $file->getClientOriginalName(),
-                    'context'       => 'lesson_media',
+                    'context' => 'lesson_media',
                 ],
                 'warning',
                 $lesson
@@ -381,7 +383,7 @@ class TeacherStudioService extends BaseService
         return $this->transaction(function () use ($teacher, $lesson, $file, $detectedMime, $allowedMediaMimes, $mode, $durationSeconds) {
             $extension = $allowedMediaMimes[$detectedMime];
             $preferredDisk = $this->getStorageDisk();
-            $storagePath = "lessons/audio/{$teacher->id}_{$lesson->uuid}_" . Str::uuid() . ".{$extension}";
+            $storagePath = "lessons/audio/{$teacher->id}_{$lesson->uuid}_".Str::uuid().".{$extension}";
 
             $disk = $this->storeStreamWithFallback($preferredDisk, $storagePath, $file->getRealPath());
 
@@ -403,29 +405,29 @@ class TeacherStudioService extends BaseService
             $secs = $durationSeconds !== null && $durationSeconds > 0 ? $durationSeconds : ($lesson->duration_seconds ?: 0);
 
             $lesson->update([
-                'media_mode'          => $resolvedMode,
-                'media_disk'          => $disk,
-                'media_path'          => $storagePath,
+                'media_mode' => $resolvedMode,
+                'media_disk' => $disk,
+                'media_path' => $storagePath,
                 'media_original_name' => $this->sanitizeOriginalFileName($file->getClientOriginalName()),
-                'media_mime_type'     => $detectedMime,
-                'media_size_bytes'    => $file->getSize(),
-                'duration_seconds'    => $secs,
-                'duration_label'      => $this->formatSecondsLabel($secs),
+                'media_mime_type' => $detectedMime,
+                'media_size_bytes' => $file->getSize(),
+                'duration_seconds' => $secs,
+                'duration_label' => $this->formatSecondsLabel($secs),
             ]);
 
             StoredFile::updateOrCreate(
                 ['storage_path' => $storagePath],
                 [
-                    'uuid'              => (string) Str::uuid(),
-                    'user_id'           => $teacher->id,
-                    'entity_type'       => 'lesson_media',
-                    'entity_id'         => $lesson->uuid,
+                    'uuid' => (string) Str::uuid(),
+                    'user_id' => $teacher->id,
+                    'entity_type' => 'lesson_media',
+                    'entity_id' => $lesson->uuid,
                     'original_filename' => $this->sanitizeOriginalFileName($file->getClientOriginalName()),
-                    'storage_disk'      => $disk,
-                    'mime_type'         => $detectedMime,
-                    'file_size_bytes'   => (int) $file->getSize(),
-                    'storage_provider'  => $disk === 'supabase' ? 'supabase' : 'local',
-                    'upload_status'     => 'completed',
+                    'storage_disk' => $disk,
+                    'mime_type' => $detectedMime,
+                    'file_size_bytes' => (int) $file->getSize(),
+                    'storage_provider' => $disk === 'supabase' ? 'supabase' : 'local',
+                    'upload_status' => 'completed',
                 ]
             );
 
@@ -433,8 +435,8 @@ class TeacherStudioService extends BaseService
                 'teacher.lesson.media_uploaded',
                 [
                     'lesson_uuid' => $lesson->uuid,
-                    'mime_type'   => $detectedMime,
-                    'size_bytes'  => $file->getSize(),
+                    'mime_type' => $detectedMime,
+                    'size_bytes' => $file->getSize(),
                 ],
                 'info',
                 $lesson
@@ -463,14 +465,14 @@ class TeacherStudioService extends BaseService
 
         if ($type === LessonAttachmentType::PDF) {
             $hasPdfHeader = str_starts_with($rawContent, '%PDF-');
-            if ($detectedMime !== 'application/pdf' || !$hasPdfHeader) {
+            if ($detectedMime !== 'application/pdf' || ! $hasPdfHeader) {
                 $this->logSecurityEvent(
                     'teacher.upload.malicious_signature_blocked',
                     [
-                        'lesson_uuid'   => $lesson->uuid,
+                        'lesson_uuid' => $lesson->uuid,
                         'detected_mime' => $detectedMime,
                         'original_name' => $file->getClientOriginalName(),
-                        'context'       => 'lesson_pdf',
+                        'context' => 'lesson_pdf',
                     ],
                     'warning',
                     $lesson
@@ -484,18 +486,18 @@ class TeacherStudioService extends BaseService
         } else {
             $allowedImages = [
                 'image/jpeg' => 'jpg',
-                'image/png'  => 'png',
+                'image/png' => 'png',
                 'image/webp' => 'webp',
             ];
 
-            if (!isset($allowedImages[$detectedMime])) {
+            if (! isset($allowedImages[$detectedMime])) {
                 $this->logSecurityEvent(
                     'teacher.upload.malicious_signature_blocked',
                     [
-                        'lesson_uuid'   => $lesson->uuid,
+                        'lesson_uuid' => $lesson->uuid,
                         'detected_mime' => $detectedMime,
                         'original_name' => $file->getClientOriginalName(),
-                        'context'       => 'lesson_whiteboard_image',
+                        'context' => 'lesson_whiteboard_image',
                     ],
                     'warning',
                     $lesson
@@ -510,7 +512,7 @@ class TeacherStudioService extends BaseService
 
         return $this->transaction(function () use ($teacher, $lesson, $file, $rawContent, $type, $detectedMime, $extension, $meta) {
             $preferredDisk = $this->getStorageDisk();
-            $storagePath = "lessons/attachments/{$teacher->id}_{$lesson->uuid}_" . Str::uuid() . ".{$extension}";
+            $storagePath = "lessons/attachments/{$teacher->id}_{$lesson->uuid}_".Str::uuid().".{$extension}";
 
             $disk = $this->storeBytesWithFallback($preferredDisk, $storagePath, $rawContent);
 
@@ -527,50 +529,50 @@ class TeacherStudioService extends BaseService
             $sizeBytes = (int) $file->getSize();
 
             $attachment = LessonAttachment::create([
-                'lesson_id'          => $lesson->id,
-                'teacher_id'         => $teacher->id,
-                'type'               => $type,
-                'title'              => trim((string) ($meta['title'] ?? $defaultTitle)),
-                'caption'            => isset($meta['caption']) ? trim((string) $meta['caption']) : ($type === LessonAttachmentType::WHITEBOARD_IMAGE ? 'رسم توضيحي للشرح وملاحظات السبورة' : null),
+                'lesson_id' => $lesson->id,
+                'teacher_id' => $teacher->id,
+                'type' => $type,
+                'title' => trim((string) ($meta['title'] ?? $defaultTitle)),
+                'caption' => isset($meta['caption']) ? trim((string) $meta['caption']) : ($type === LessonAttachmentType::WHITEBOARD_IMAGE ? 'رسم توضيحي للشرح وملاحظات السبورة' : null),
                 'original_file_name' => $cleanFileName,
-                'storage_disk'       => $disk,
-                'storage_path'       => $storagePath,
-                'mime_type'          => $detectedMime,
-                'file_size_bytes'    => $sizeBytes,
-                'file_size_label'    => $this->formatBytes($sizeBytes),
-                'pages_count'        => $type === LessonAttachmentType::PDF
+                'storage_disk' => $disk,
+                'storage_path' => $storagePath,
+                'mime_type' => $detectedMime,
+                'file_size_bytes' => $sizeBytes,
+                'file_size_label' => $this->formatBytes($sizeBytes),
+                'pages_count' => $type === LessonAttachmentType::PDF
                     ? max(1, (int) ($meta['pages_count'] ?? $meta['pagesCount'] ?? 12))
                     : null,
-                'display_order'      => $nextOrder,
+                'display_order' => $nextOrder,
             ]);
 
             StoredFile::create([
-                'uuid'              => (string) Str::uuid(),
-                'user_id'           => $teacher->id,
-                'entity_type'       => 'lesson_attachment',
-                'entity_id'         => $lesson->uuid,
+                'uuid' => (string) Str::uuid(),
+                'user_id' => $teacher->id,
+                'entity_type' => 'lesson_attachment',
+                'entity_id' => $lesson->uuid,
                 'original_filename' => $cleanFileName,
-                'storage_disk'      => $disk,
-                'storage_path'      => $storagePath,
-                'mime_type'         => $detectedMime,
-                'file_size_bytes'   => $sizeBytes,
-                'storage_provider'  => $disk === 'supabase' ? 'supabase' : 'local',
-                'upload_status'     => 'completed',
-                'metadata'          => [
+                'storage_disk' => $disk,
+                'storage_path' => $storagePath,
+                'mime_type' => $detectedMime,
+                'file_size_bytes' => $sizeBytes,
+                'storage_provider' => $disk === 'supabase' ? 'supabase' : 'local',
+                'upload_status' => 'completed',
+                'metadata' => [
                     'attachment_uuid' => $attachment->uuid,
-                    'type'            => $type->value,
-                    'title'           => $attachment->title,
+                    'type' => $type->value,
+                    'title' => $attachment->title,
                 ],
             ]);
 
             $this->logSecurityEvent(
                 'teacher.lesson.attachment_uploaded',
                 [
-                    'lesson_uuid'     => $lesson->uuid,
+                    'lesson_uuid' => $lesson->uuid,
                     'attachment_uuid' => $attachment->uuid,
-                    'type'            => $type->value,
-                    'mime_type'       => $detectedMime,
-                    'size_bytes'      => $sizeBytes,
+                    'type' => $type->value,
+                    'mime_type' => $detectedMime,
+                    'size_bytes' => $sizeBytes,
                 ],
                 'info',
                 $attachment
@@ -618,7 +620,7 @@ class TeacherStudioService extends BaseService
                 'teacher.lesson.attachments_reordered',
                 [
                     'lesson_uuid' => $lesson->uuid,
-                    'type'        => $attachmentType->value,
+                    'type' => $attachmentType->value,
                 ],
                 'info',
                 $lesson
@@ -667,9 +669,9 @@ class TeacherStudioService extends BaseService
             $this->logSecurityEvent(
                 'teacher.lesson.attachment_deleted',
                 [
-                    'lesson_uuid'     => $lesson->uuid,
+                    'lesson_uuid' => $lesson->uuid,
                     'attachment_uuid' => $attUuid,
-                    'type'            => $type->value,
+                    'type' => $type->value,
                 ],
                 'warning'
             );
@@ -687,7 +689,7 @@ class TeacherStudioService extends BaseService
             return [null, false];
         }
 
-        if (!preg_match('#^https://#i', $rawUrl)) {
+        if (! preg_match('#^https://#i', $rawUrl)) {
             throw ValidationException::withMessages([
                 'embed_url' => [__('messages.invalid_embed_url')],
             ]);
@@ -729,12 +731,12 @@ class TeacherStudioService extends BaseService
 
     protected function syncCourseLessonsCount(?int $courseId): void
     {
-        if (!$courseId) {
+        if (! $courseId) {
             return;
         }
 
         $course = Course::find($courseId);
-        if (!$course) {
+        if (! $course) {
             return;
         }
 
@@ -745,25 +747,25 @@ class TeacherStudioService extends BaseService
 
     protected function normalizeAiFeatures(mixed $raw, bool $canUseAi = true): array
     {
-        if (!$canUseAi) {
+        if (! $canUseAi) {
             return [
-                'speechToText'    => false,
-                'conceptGraph'    => false,
+                'speechToText' => false,
+                'conceptGraph' => false,
                 'chapterIndexing' => false,
             ];
         }
 
-        if (!is_array($raw)) {
+        if (! is_array($raw)) {
             return [
-                'speechToText'    => true,
-                'conceptGraph'    => true,
+                'speechToText' => true,
+                'conceptGraph' => true,
                 'chapterIndexing' => true,
             ];
         }
 
         return [
-            'speechToText'    => (bool) ($raw['speechToText'] ?? $raw['speech_to_text'] ?? true),
-            'conceptGraph'    => (bool) ($raw['conceptGraph'] ?? $raw['concept_graph'] ?? true),
+            'speechToText' => (bool) ($raw['speechToText'] ?? $raw['speech_to_text'] ?? true),
+            'conceptGraph' => (bool) ($raw['conceptGraph'] ?? $raw['concept_graph'] ?? true),
             'chapterIndexing' => (bool) ($raw['chapterIndexing'] ?? $raw['chapter_indexing'] ?? true),
         ];
     }
@@ -774,8 +776,8 @@ class TeacherStudioService extends BaseService
             '3rd Secondary' => 'الصف الثالث الثانوي',
             '2nd Secondary' => 'الصف الثاني الثانوي',
             '1st Secondary' => 'الصف الأول الثانوي',
-            '3rd Prep'      => 'الصف الثالث الإعدادي',
-            default         => trim($grade) ?: 'الصف الثالث الثانوي',
+            '3rd Prep' => 'الصف الثالث الإعدادي',
+            default => trim($grade) ?: 'الصف الثالث الثانوي',
         };
     }
 
@@ -792,10 +794,10 @@ class TeacherStudioService extends BaseService
             return '0 KB';
         }
         if ($bytes < 1024 * 1024) {
-            return round($bytes / 1024, 1) . ' KB';
+            return round($bytes / 1024, 1).' KB';
         }
 
-        return round($bytes / (1024 * 1024), 1) . ' MB';
+        return round($bytes / (1024 * 1024), 1).' MB';
     }
 
     protected function formatSecondsLabel(int $seconds): string
@@ -815,4 +817,3 @@ class TeacherStudioService extends BaseService
         return sprintf('%02d:%02d', $m, $s);
     }
 }
-

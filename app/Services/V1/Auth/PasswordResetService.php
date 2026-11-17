@@ -33,7 +33,7 @@ class PasswordResetService extends BaseService
     {
         $user = $this->userRepository->findByEmail($email);
 
-        if (!$user) {
+        if (! $user) {
             throw ValidationException::withMessages([
                 'email' => [__('messages.email_not_found')],
             ]);
@@ -50,8 +50,8 @@ class PasswordResetService extends BaseService
         } catch (Throwable $e) {
             Log::error('[PASSWORD-RESET-MAIL-FAILED]', [
                 'user_id' => $user->id,
-                'email'   => $user->email,
-                'error'   => $e->getMessage(),
+                'email' => $user->email,
+                'error' => $e->getMessage(),
             ]);
 
             throw ValidationException::withMessages([
@@ -71,7 +71,7 @@ class PasswordResetService extends BaseService
     {
         $user = $this->userRepository->findByEmail($email);
 
-        if (!$user || $user->status === UserStatus::SUSPENDED) {
+        if (! $user || $user->status === UserStatus::SUSPENDED) {
             throw ValidationException::withMessages(['code' => [__('messages.otp_invalid')]]);
         }
 
@@ -87,7 +87,7 @@ class PasswordResetService extends BaseService
     {
         $user = $this->userRepository->findByEmail($email);
 
-        if (!$user || $user->status === UserStatus::SUSPENDED) {
+        if (! $user || $user->status === UserStatus::SUSPENDED) {
             throw ValidationException::withMessages(['code' => [__('messages.otp_invalid')]]);
         }
 
@@ -95,12 +95,12 @@ class PasswordResetService extends BaseService
 
         $this->transaction(function () use ($user, $newPassword) {
             $this->userRepository->forceUpdate($user, [
-                'password'              => $newPassword,
-                'password_changed_at'   => now(),
+                'password' => $newPassword,
+                'password_changed_at' => now(),
                 'failed_login_attempts' => 0,
-                'locked_until'          => null,
+                'locked_until' => null,
                 // Receiving the code by email proves ownership of the mailbox
-                'email_verified_at'     => $user->email_verified_at ?? now(),
+                'email_verified_at' => $user->email_verified_at ?? now(),
             ]);
 
             $this->tokenService->revokeAll($user);
@@ -110,4 +110,3 @@ class PasswordResetService extends BaseService
         $this->logSecurityEvent('PASSWORD_RESET_COMPLETED', ['user_id' => $user->id]);
     }
 }
-

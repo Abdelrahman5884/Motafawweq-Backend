@@ -15,8 +15,7 @@ class DirectPaymentActionRequest extends FormRequest
     {
         return [
             'reason' => ['nullable', 'string', 'max:255'],
-            'notes'  => ['nullable', 'string', 'max:500'],
+            'notes' => ['nullable', 'string', 'max:500'],
         ];
     }
 }
-

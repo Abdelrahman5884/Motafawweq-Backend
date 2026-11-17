@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 
 class LeagueParticipant extends Model
 {
-    use HasFactory, SoftDeletes, HasSecurityAudit;
+    use HasFactory, HasSecurityAudit, SoftDeletes;
 
     protected $table = 'league_participants';
 
@@ -37,14 +37,14 @@ class LeagueParticipant extends Model
     protected function casts(): array
     {
         return [
-            'rank'                => 'integer',
-            'previous_rank'       => 'integer',
-            'xp_points'           => 'integer',
-            'streak_days'         => 'integer',
+            'rank' => 'integer',
+            'previous_rank' => 'integer',
+            'xp_points' => 'integer',
+            'streak_days' => 'integer',
             'perfect_exams_count' => 'integer',
-            'exams_solved_count'  => 'integer',
-            'homework_rate'       => 'integer',
-            'attendance_rate'     => 'integer',
+            'exams_solved_count' => 'integer',
+            'homework_rate' => 'integer',
+            'attendance_rate' => 'integer',
         ];
     }
 
@@ -67,4 +67,3 @@ class LeagueParticipant extends Model
         return $this->belongsTo(User::class, 'student_id');
     }
 }
-

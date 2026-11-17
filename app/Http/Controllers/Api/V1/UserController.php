@@ -34,6 +34,7 @@ class UserController extends BaseApiController
     public function show(int|string $id): JsonResponse
     {
         $user = $this->userService->getUser($id);
+
         return $this->successResponse(new UserResource($user));
     }
 
@@ -43,7 +44,7 @@ class UserController extends BaseApiController
     public function destroy(int|string $id): JsonResponse
     {
         $this->userService->deleteUser($id);
+
         return $this->successResponse(null, __('messages.user_deleted'));
     }
 }
-

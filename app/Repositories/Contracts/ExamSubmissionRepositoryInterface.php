@@ -17,4 +17,3 @@ interface ExamSubmissionRepositoryInterface extends BaseRepositoryInterface
      */
     public function findByUuidForExam(string $uuid, int $examId): ExamSubmission;
 }
-

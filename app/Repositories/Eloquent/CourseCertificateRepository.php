@@ -21,7 +21,7 @@ class CourseCertificateRepository extends BaseRepository implements CourseCertif
             ->orderByDesc('issue_date')
             ->orderByDesc('id');
 
-        if (!empty($filters['search'])) {
+        if (! empty($filters['search'])) {
             $s = trim((string) $filters['search']);
             $query->where(function ($q) use ($s) {
                 $q->where('student_name_ar', 'like', "%{$s}%")
@@ -31,14 +31,14 @@ class CourseCertificateRepository extends BaseRepository implements CourseCertif
             });
         }
 
-        if (!empty($filters['course_id']) && $filters['course_id'] !== 'all') {
+        if (! empty($filters['course_id']) && $filters['course_id'] !== 'all') {
             $query->where(function ($q) use ($filters) {
                 $q->where('course_id', $filters['course_id'])
-                    ->orWhere('course_name_ar', 'like', '%' . $filters['course_id'] . '%');
+                    ->orWhere('course_name_ar', 'like', '%'.$filters['course_id'].'%');
             });
         }
 
-        if (!empty($filters['status']) && $filters['status'] !== 'all') {
+        if (! empty($filters['status']) && $filters['status'] !== 'all') {
             $query->where('status', $filters['status']);
         }
 
@@ -61,4 +61,3 @@ class CourseCertificateRepository extends BaseRepository implements CourseCertif
             ->first();
     }
 }
-

@@ -34,7 +34,7 @@ class EmailVerificationService extends BaseService
         $this->otpService->verify($user, VerificationCodeType::EMAIL_VERIFICATION, $code);
         $this->userRepository->forceUpdate($user, [
             'email_verified_at' => now(),
-            'status'            => UserStatus::ACTIVE->value,
+            'status' => UserStatus::ACTIVE->value,
         ]);
 
         $this->logSecurityEvent('EMAIL_VERIFIED', ['user_id' => $user->id]);
@@ -49,4 +49,3 @@ class EmailVerificationService extends BaseService
         }
     }
 }
-

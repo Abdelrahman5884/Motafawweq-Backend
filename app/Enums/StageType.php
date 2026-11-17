@@ -4,10 +4,10 @@ namespace App\Enums;
 
 enum StageType: string
 {
-    case THANAWYA  = 'stage-thanawya';
+    case THANAWYA = 'stage-thanawya';
     case SECONDARY = 'stage-secondary';
-    case PREP      = 'stage-prep';
-    case PRIMARY   = 'stage-primary';
+    case PREP = 'stage-prep';
+    case PRIMARY = 'stage-primary';
 
     public static function values(): array
     {
@@ -41,7 +41,7 @@ enum StageType: string
     {
         return [
             [
-                'id'     => self::THANAWYA->value,
+                'id' => self::THANAWYA->value,
                 'nameAr' => 'مرحلة الثانوية العامة',
                 'nameEn' => 'Thanawya Amma Stage',
                 'descAr' => 'الشهادة الرسمية والمؤهلة للجامعات ونظام البابل شيت الحديث',
@@ -51,7 +51,7 @@ enum StageType: string
                 ],
             ],
             [
-                'id'     => self::SECONDARY->value,
+                'id' => self::SECONDARY->value,
                 'nameAr' => 'المرحلة الثانوية',
                 'nameEn' => 'Secondary Stage',
                 'descAr' => 'صفوف النقل وتأسيس المواد العلمية والأدبية',
@@ -62,7 +62,7 @@ enum StageType: string
                 ],
             ],
             [
-                'id'     => self::PREP->value,
+                'id' => self::PREP->value,
                 'nameAr' => 'المرحلة الإعدادية',
                 'nameEn' => 'Preparatory Stage',
                 'descAr' => 'مناهج العلوم والرياضيات واللغات للإعدادية العامة والشهادة',
@@ -74,7 +74,7 @@ enum StageType: string
                 ],
             ],
             [
-                'id'     => self::PRIMARY->value,
+                'id' => self::PRIMARY->value,
                 'nameAr' => 'المرحلة الابتدائية',
                 'nameEn' => 'Primary Stage',
                 'descAr' => 'التأسيس المبكر ومناهج الصفوف الابتدائية المطورة',
@@ -88,4 +88,3 @@ enum StageType: string
         ];
     }
 }
-

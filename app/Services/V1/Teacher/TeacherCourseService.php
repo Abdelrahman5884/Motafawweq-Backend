@@ -61,31 +61,31 @@ class TeacherCourseService extends BaseService
 
             /** @var Course $course */
             $course = $this->courseRepository->create([
-                'teacher_id'     => $teacher->id,
-                'title_ar'       => $titleAr,
-                'title_en'       => $titleEn,
-                'stage_id'       => $stageId,
-                'stage_name_ar'  => $stageNameAr,
-                'grade_ar'       => $gradeAr,
-                'subject_ar'     => $subjectAr,
-                'subject_en'     => $subjectEn,
-                'price_egp'      => $priceEgp,
+                'teacher_id' => $teacher->id,
+                'title_ar' => $titleAr,
+                'title_en' => $titleEn,
+                'stage_id' => $stageId,
+                'stage_name_ar' => $stageNameAr,
+                'grade_ar' => $gradeAr,
+                'subject_ar' => $subjectAr,
+                'subject_en' => $subjectEn,
+                'price_egp' => $priceEgp,
                 'description_ar' => $descriptionAr,
                 'description_en' => $descriptionEn,
-                'cover_url'      => $data['cover_url'] ?? $data['cover'] ?? null,
-                'hours_total'    => $hoursTotal !== '' ? $hoursTotal : '2 ساعة',
-                'lessons_count'  => $lessonsCount,
-                'status'         => $status,
+                'cover_url' => $data['cover_url'] ?? $data['cover'] ?? null,
+                'hours_total' => $hoursTotal !== '' ? $hoursTotal : '2 ساعة',
+                'lessons_count' => $lessonsCount,
+                'status' => $status,
             ]);
 
             $this->logSecurityEvent(
                 'teacher.course.created',
                 [
                     'course_uuid' => $course->uuid,
-                    'title_ar'    => $course->title_ar,
-                    'stage_id'    => $course->stage_id,
-                    'grade_ar'    => $course->grade_ar,
-                    'price_egp'   => $course->price_egp,
+                    'title_ar' => $course->title_ar,
+                    'stage_id' => $course->stage_id,
+                    'grade_ar' => $course->grade_ar,
+                    'price_egp' => $course->price_egp,
                 ],
                 'info',
                 $course
@@ -115,7 +115,7 @@ class TeacherCourseService extends BaseService
 
             if (array_key_exists('title_en', $data) || array_key_exists('titleEn', $data)) {
                 $updates['title_en'] = trim((string) ($data['title_en'] ?? $data['titleEn']));
-            } elseif (isset($updates['title_ar']) && !array_key_exists('title_en', $data)) {
+            } elseif (isset($updates['title_ar']) && ! array_key_exists('title_en', $data)) {
                 $updates['title_en'] = $updates['title_ar'];
             }
 
@@ -168,14 +168,14 @@ class TeacherCourseService extends BaseService
                 }
             }
 
-            if (!empty($updates)) {
+            if (! empty($updates)) {
                 $course->update($updates);
             }
 
             $this->logSecurityEvent(
                 'teacher.course.updated',
                 [
-                    'course_uuid'    => $course->uuid,
+                    'course_uuid' => $course->uuid,
                     'updated_fields' => array_keys($updates),
                 ],
                 'info',
@@ -204,7 +204,7 @@ class TeacherCourseService extends BaseService
                 'teacher.course.deleted',
                 [
                     'course_uuid' => $courseUuid,
-                    'title_ar'    => $titleAr,
+                    'title_ar' => $titleAr,
                 ],
                 'warning'
             );
@@ -231,4 +231,3 @@ class TeacherCourseService extends BaseService
         return ['sec', 'المرحلة الثانوية'];
     }
 }
-

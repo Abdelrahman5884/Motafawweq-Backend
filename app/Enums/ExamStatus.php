@@ -4,15 +4,15 @@ namespace App\Enums;
 
 enum ExamStatus: string
 {
-    case ACTIVE    = 'active';
-    case CLOSED    = 'closed';
+    case ACTIVE = 'active';
+    case CLOSED = 'closed';
     case SCHEDULED = 'scheduled';
 
     public function labelAr(): string
     {
         return match ($this) {
-            self::ACTIVE    => 'نشط ومتاح للطلاب',
-            self::CLOSED    => 'مغلق',
+            self::ACTIVE => 'نشط ومتاح للطلاب',
+            self::CLOSED => 'مغلق',
             self::SCHEDULED => 'مجدول بميعاد لاحق',
         };
     }
@@ -22,4 +22,3 @@ enum ExamStatus: string
         return array_column(self::cases(), 'value');
     }
 }
-

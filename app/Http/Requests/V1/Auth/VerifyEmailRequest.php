@@ -9,7 +9,7 @@ class VerifyEmailRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'code' => ['required', 'string', 'digits:' . config('auth_security.otp.length')],
+            'code' => ['required', 'string', 'digits:'.config('auth_security.otp.length')],
         ];
     }
 }

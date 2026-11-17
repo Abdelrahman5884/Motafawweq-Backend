@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class GroupScheduleSlot extends Model
 {
-    use HasFactory, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory;
 
     protected $fillable = [
         'study_group_id',
@@ -38,4 +38,3 @@ class GroupScheduleSlot extends Model
         return $this->belongsTo(StudyGroup::class, 'study_group_id');
     }
 }
-

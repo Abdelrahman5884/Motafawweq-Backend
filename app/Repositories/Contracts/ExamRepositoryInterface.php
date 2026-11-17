@@ -14,4 +14,3 @@ interface ExamRepositoryInterface extends BaseRepositoryInterface
 
     public function countActiveForTeacher(int $teacherId): int;
 }
-

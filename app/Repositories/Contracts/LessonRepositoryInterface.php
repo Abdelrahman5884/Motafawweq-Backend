@@ -15,4 +15,3 @@ interface LessonRepositoryInterface extends BaseRepositoryInterface
 
     public function findAttachmentByUuidForTeacher(string $attachmentUuid, Lesson $lesson, User $teacher): LessonAttachment;
 }
-

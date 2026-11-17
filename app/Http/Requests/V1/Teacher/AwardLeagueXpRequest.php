@@ -21,7 +21,7 @@ class AwardLeagueXpRequest extends BaseApiRequest
 
         $merged = [
             'student_id' => $studentId,
-            'xp_amount'  => (int) $xp,
+            'xp_amount' => (int) $xp,
         ];
 
         if ($reason !== null) {
@@ -35,9 +35,8 @@ class AwardLeagueXpRequest extends BaseApiRequest
     {
         return [
             'student_id' => ['required'],
-            'xp_amount'  => ['required', 'integer', 'min:1', 'max:5000'],
-            'reason_ar'  => ['nullable', 'string', 'max:255'],
+            'xp_amount' => ['required', 'integer', 'min:1', 'max:5000'],
+            'reason_ar' => ['nullable', 'string', 'max:255'],
         ];
     }
 }
-

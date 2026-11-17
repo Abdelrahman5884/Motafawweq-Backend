@@ -23,9 +23,9 @@ class TeacherCertificateController extends Controller
     public function index(Request $request): JsonResponse
     {
         $filters = [
-            'search'    => $request->query('search'),
+            'search' => $request->query('search'),
             'course_id' => $request->query('course_id'),
-            'status'    => $request->query('status'),
+            'status' => $request->query('status'),
         ];
 
         $paginator = $this->certificateService->listCertificates(
@@ -81,4 +81,3 @@ class TeacherCertificateController extends Controller
         );
     }
 }
-

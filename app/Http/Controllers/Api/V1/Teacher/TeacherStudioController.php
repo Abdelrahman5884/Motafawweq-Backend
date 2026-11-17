@@ -11,6 +11,8 @@ use App\Http\Requests\V1\Teacher\UploadLessonAttachmentRequest;
 use App\Http\Requests\V1\Teacher\UploadLessonMediaRequest;
 use App\Http\Resources\V1\Teacher\LessonAttachmentResource;
 use App\Http\Resources\V1\Teacher\TeacherLessonResource;
+use App\Models\Lesson;
+use App\Models\LessonAttachment;
 use App\Repositories\Contracts\LessonRepositoryInterface;
 use App\Services\V1\Teacher\TeacherStudioService;
 use Illuminate\Http\JsonResponse;
@@ -214,7 +216,7 @@ class TeacherStudioController extends BaseApiController
      */
     public function streamAttachment(Request $request, string $uuid, string $attachmentUuid): Response
     {
-        if (!$request->hasValidSignature()) {
+        if (! $request->hasValidSignature()) {
             return $this->forbiddenResponse(__('messages.invalid_signed_url'));
         }
 
@@ -223,14 +225,14 @@ class TeacherStudioController extends BaseApiController
             $lesson = $this->lessonRepository->findByUuidForTeacher($uuid, $teacher);
             $attachment = $this->lessonRepository->findAttachmentByUuidForTeacher($attachmentUuid, $lesson, $teacher);
         } else {
-            $lesson = \App\Models\Lesson::where('uuid', $uuid)->firstOrFail();
-            $attachment = \App\Models\LessonAttachment::where('uuid', $attachmentUuid)
+            $lesson = Lesson::where('uuid', $uuid)->firstOrFail();
+            $attachment = LessonAttachment::where('uuid', $attachmentUuid)
                 ->where('lesson_id', $lesson->id)
                 ->firstOrFail();
         }
 
         $disk = $attachment->storage_disk ?? 'local';
-        if (!Storage::disk($disk)->exists($attachment->storage_path)) {
+        if (! Storage::disk($disk)->exists($attachment->storage_path)) {
             return $this->notFoundResponse(__('messages.not_found'));
         }
 
@@ -242,8 +244,8 @@ class TeacherStudioController extends BaseApiController
             Storage::disk($disk)->get($attachment->storage_path),
             Response::HTTP_OK,
             [
-                'Content-Type'           => $attachment->mime_type,
-                'Content-Disposition'    => 'inline; filename="' . addslashes($attachment->original_file_name) . '"',
+                'Content-Type' => $attachment->mime_type,
+                'Content-Disposition' => 'inline; filename="'.addslashes($attachment->original_file_name).'"',
                 'X-Content-Type-Options' => 'nosniff',
             ]
         );
@@ -255,7 +257,7 @@ class TeacherStudioController extends BaseApiController
      */
     public function streamMedia(Request $request, string $uuid): Response
     {
-        if (!$request->hasValidSignature()) {
+        if (! $request->hasValidSignature()) {
             return $this->forbiddenResponse(__('messages.invalid_signed_url'));
         }
 
@@ -263,11 +265,11 @@ class TeacherStudioController extends BaseApiController
         if ($teacher) {
             $lesson = $this->lessonRepository->findByUuidForTeacher($uuid, $teacher);
         } else {
-            $lesson = \App\Models\Lesson::where('uuid', $uuid)->firstOrFail();
+            $lesson = Lesson::where('uuid', $uuid)->firstOrFail();
         }
 
         $disk = $lesson->media_disk ?? 'local';
-        if (!$lesson->media_path || !Storage::disk($disk)->exists($lesson->media_path)) {
+        if (! $lesson->media_path || ! Storage::disk($disk)->exists($lesson->media_path)) {
             return $this->notFoundResponse(__('messages.not_found'));
         }
 
@@ -279,11 +281,10 @@ class TeacherStudioController extends BaseApiController
             Storage::disk($disk)->get($lesson->media_path),
             Response::HTTP_OK,
             [
-                'Content-Type'           => $lesson->media_mime_type ?? 'video/mp4',
-                'Content-Disposition'    => 'inline; filename="' . addslashes($lesson->media_original_name ?? 'lesson.mp4') . '"',
+                'Content-Type' => $lesson->media_mime_type ?? 'video/mp4',
+                'Content-Disposition' => 'inline; filename="'.addslashes($lesson->media_original_name ?? 'lesson.mp4').'"',
                 'X-Content-Type-Options' => 'nosniff',
             ]
         );
     }
 }
-

@@ -6,8 +6,14 @@ use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\Public\CertificateVerificationController;
 use App\Http\Controllers\Api\V1\Storage\StorageController;
+use App\Http\Controllers\Api\V1\Student\StudentBillingController;
+use App\Http\Controllers\Api\V1\Student\StudentCourseLessonController;
+use App\Http\Controllers\Api\V1\Student\StudentDashboardController;
 use App\Http\Controllers\Api\V1\Student\StudentExamTakingController;
+use App\Http\Controllers\Api\V1\Student\StudentGamificationController;
+use App\Http\Controllers\Api\V1\Student\StudentGroupScheduleController;
 use App\Http\Controllers\Api\V1\Student\StudentHomeworkController;
+use App\Http\Controllers\Api\V1\Student\StudentProfileController;
 use App\Http\Controllers\Api\V1\Teacher\LessonWorkspaceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherAnalyticsController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherAttendanceController;
@@ -46,10 +52,10 @@ use Illuminate\Support\Facades\Route;
 // Health check endpoint
 Route::get('/ping', function () {
     return response()->json([
-        'success'   => true,
-        'message'   => 'Motafawweq Platform API is active and healthy.',
+        'success' => true,
+        'message' => 'Motafawweq Platform API is active and healthy.',
         'timestamp' => now()->toIso8601String(),
-        'version'   => 'v1',
+        'version' => 'v1',
     ]);
 });
 
@@ -129,21 +135,128 @@ Route::prefix('v1')->group(function () {
                     ->whereUuid('fileUuid');
             });
 
-            // Student: join study group by join code or QR scan
-            Route::post('/groups/join', [TeacherRosterController::class, 'studentJoin'])
-                ->middleware('throttle:join-code');
+            // Legacy Student aliases (strictly protected with role:student + idempotency)
+            Route::middleware('role:student')->group(function () {
+                Route::post('/groups/join', [StudentGroupScheduleController::class, 'join'])
+                    ->middleware(['throttle:join-code', 'idempotent']);
 
-            // Stage 11: Student exam taking & submission
-            Route::post('/exams/{uuid}/submit', [StudentExamTakingController::class, 'submit'])
-                ->whereUuid('uuid')
-                ->middleware('throttle:exam-submit');
+                Route::post('/exams/{uuid}/submit', [StudentExamTakingController::class, 'submit'])
+                    ->whereUuid('uuid')
+                    ->middleware(['throttle:exam-submit', 'idempotent']);
 
-            // Stage 12: Student homework submission
-            Route::post('/homeworks/{uuid}/submit', [StudentHomeworkController::class, 'submit'])
-                ->whereUuid('uuid')
-                ->middleware('throttle:teacher-uploads');
-            Route::get('/homeworks/submissions/{submissionUuid}/attachment', [StudentHomeworkController::class, 'downloadSubmissionAttachment'])
-                ->whereUuid('submissionUuid');
+                Route::post('/homeworks/{uuid}/submit', [StudentHomeworkController::class, 'submit'])
+                    ->whereUuid('uuid')
+                    ->middleware(['throttle:student-uploads', 'idempotent']);
+
+                Route::get('/homeworks/submissions/{submissionUuid}/attachment', [StudentHomeworkController::class, 'downloadSubmissionAttachment'])
+                    ->whereUuid('submissionUuid');
+            });
+
+            // Student Portal area (strictly isolated to active, verified students)
+            Route::prefix('student')->middleware('role:student')->group(function () {
+                // Phase 2: Profile, Study Goals, Preferences & Privacy
+                Route::get('/profile', [StudentProfileController::class, 'show'])
+                    ->middleware('throttle:student-read');
+                Route::put('/profile', [StudentProfileController::class, 'update'])
+                    ->middleware('throttle:student-write');
+
+                // Phase 3: Study Groups, Weekly Schedule, Personal Study Sessions & Attendance
+                Route::get('/groups', [StudentGroupScheduleController::class, 'index'])
+                    ->middleware('throttle:student-read');
+                Route::post('/groups/join', [StudentGroupScheduleController::class, 'join'])
+                    ->middleware(['throttle:join-code', 'idempotent']);
+                Route::delete('/groups/{uuid}/leave', [StudentGroupScheduleController::class, 'leave'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
+
+                Route::get('/schedule', [StudentGroupScheduleController::class, 'schedule'])
+                    ->middleware('throttle:student-read');
+                Route::post('/study-sessions', [StudentGroupScheduleController::class, 'storeStudySession'])
+                    ->middleware('throttle:student-write');
+                Route::put('/study-sessions/{uuid}', [StudentGroupScheduleController::class, 'updateStudySession'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
+                Route::patch('/study-sessions/{uuid}/toggle', [StudentGroupScheduleController::class, 'toggleStudySession'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
+                Route::delete('/study-sessions/{uuid}', [StudentGroupScheduleController::class, 'destroyStudySession'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
+
+                Route::get('/attendance', [StudentGroupScheduleController::class, 'attendance'])
+                    ->middleware('throttle:student-read');
+
+                // Phase 4: Courses, Lessons, Anti-Skip Progress Heartbeat, Bookmarks & Notes
+                Route::get('/courses', [StudentCourseLessonController::class, 'courses'])
+                    ->middleware('throttle:student-read');
+                Route::get('/courses/{uuid}', [StudentCourseLessonController::class, 'showCourse'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-read');
+                Route::get('/lessons/{uuid}', [StudentCourseLessonController::class, 'showLesson'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-read');
+                Route::post('/lessons/{uuid}/progress', [StudentCourseLessonController::class, 'recordProgress'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:progress-heartbeat');
+                Route::post('/lessons/{uuid}/bookmark', [StudentCourseLessonController::class, 'toggleBookmark'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
+                Route::post('/lessons/{uuid}/notes', [StudentCourseLessonController::class, 'storeNote'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
+                Route::delete('/lessons/notes/{noteUuid}', [StudentCourseLessonController::class, 'destroyNote'])
+                    ->whereUuid('noteUuid')
+                    ->middleware('throttle:student-write');
+
+                // Phase 5: Exams, Server-Timed Attempts, Auto-Graded Submission & Mistake Bank
+                Route::get('/exams', [StudentExamTakingController::class, 'index'])
+                    ->middleware('throttle:student-read');
+                Route::post('/exams/{uuid}/start', [StudentExamTakingController::class, 'start'])
+                    ->whereUuid('uuid')
+                    ->middleware(['throttle:exam-submit', 'idempotent']);
+                Route::post('/exams/{uuid}/submit', [StudentExamTakingController::class, 'submit'])
+                    ->whereUuid('uuid')
+                    ->middleware(['throttle:exam-submit', 'idempotent']);
+                Route::get('/mistake-bank', [StudentExamTakingController::class, 'mistakeBank'])
+                    ->middleware('throttle:student-read');
+
+                // Phase 6: Homeworks & Secure Attachment Streaming
+                Route::get('/homeworks', [StudentHomeworkController::class, 'index'])
+                    ->middleware('throttle:student-read');
+                Route::post('/homeworks/{uuid}/submit', [StudentHomeworkController::class, 'submit'])
+                    ->whereUuid('uuid')
+                    ->middleware(['throttle:student-uploads', 'idempotent']);
+                Route::get('/homeworks/submissions/{submissionUuid}/attachment', [StudentHomeworkController::class, 'downloadSubmissionAttachment'])
+                    ->whereUuid('submissionUuid')
+                    ->middleware('throttle:student-read');
+
+                // Phase 7 & 8: Gamification (Immutable XP Ledger), Leagues, Leaderboard & Certificates
+                Route::get('/gamification', [StudentGamificationController::class, 'summary'])
+                    ->middleware('throttle:student-read');
+                Route::get('/leagues', [StudentGamificationController::class, 'leagues'])
+                    ->middleware('throttle:student-read');
+                Route::get('/leagues/{uuid}/leaderboard', [StudentGamificationController::class, 'leaderboard'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-read');
+                Route::get('/certificates', [StudentGamificationController::class, 'certificates'])
+                    ->middleware('throttle:student-read');
+
+                // Phase 9: Billing, Coupon Validation & Direct Teacher Payments
+                Route::get('/billing', [StudentBillingController::class, 'overview'])
+                    ->middleware('throttle:student-read');
+                Route::post('/billing/coupons/validate', [StudentBillingController::class, 'validateCoupon'])
+                    ->middleware('throttle:student-checkout');
+                Route::post('/billing/payments', [StudentBillingController::class, 'storePayment'])
+                    ->middleware(['throttle:student-checkout', 'idempotent']);
+
+                // Phase 10: Dashboard, Analytics & Revision Hub
+                Route::get('/dashboard', [StudentDashboardController::class, 'dashboard'])
+                    ->middleware('throttle:student-read');
+                Route::get('/analytics', [StudentDashboardController::class, 'analytics'])
+                    ->middleware('throttle:student-read');
+                Route::get('/revision', [StudentDashboardController::class, 'revision'])
+                    ->middleware('throttle:student-read');
+            });
 
             // Admin area
             Route::prefix('admin')->middleware('role:admin')->group(function () {

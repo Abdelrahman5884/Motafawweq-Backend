@@ -9,9 +9,6 @@ use Illuminate\Pagination\LengthAwarePaginator;
 
 abstract class BaseRepository implements BaseRepositoryInterface
 {
-    /**
-     * @var Model
-     */
     protected Model $model;
 
     public function __construct(Model $model)
@@ -57,6 +54,7 @@ abstract class BaseRepository implements BaseRepositoryInterface
     public function forceUpdate(Model $model, array $attributes): Model
     {
         $model->forceFill($attributes)->save();
+
         return $model;
     }
 
@@ -64,13 +62,14 @@ abstract class BaseRepository implements BaseRepositoryInterface
     {
         $record = $this->findOrFail($id);
         $record->update($attributes);
+
         return $record->fresh();
     }
 
     public function delete(int|string $id): bool
     {
         $record = $this->findOrFail($id);
+
         return (bool) $record->delete();
     }
 }
-

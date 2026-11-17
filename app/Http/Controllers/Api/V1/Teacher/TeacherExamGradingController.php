@@ -32,10 +32,10 @@ class TeacherExamGradingController extends BaseApiController
             TeacherExamSubmissionResource::collection($result['submissions']),
             __('messages.exam_submissions_fetched'),
             meta: [
-                'total'            => $result['submissions']->count(),
-                'avgScore'         => (float) $result['exam']->avg_score,
-                'passRate'         => (float) $result['exam']->pass_rate,
-                'topScoreCount'    => (int) $result['exam']->top_score_count,
+                'total' => $result['submissions']->count(),
+                'avgScore' => (float) $result['exam']->avg_score,
+                'passRate' => (float) $result['exam']->pass_rate,
+                'topScoreCount' => (int) $result['exam']->top_score_count,
                 'submissionsCount' => (int) $result['exam']->submissions_count,
             ]
         );
@@ -78,4 +78,3 @@ class TeacherExamGradingController extends BaseApiController
         );
     }
 }
-

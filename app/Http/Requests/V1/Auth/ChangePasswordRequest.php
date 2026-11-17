@@ -11,7 +11,7 @@ class ChangePasswordRequest extends BaseApiRequest
     {
         return [
             'current_password' => ['required', 'string', 'max:128'],
-            'new_password'     => [
+            'new_password' => [
                 'required',
                 'string',
                 'max:128',

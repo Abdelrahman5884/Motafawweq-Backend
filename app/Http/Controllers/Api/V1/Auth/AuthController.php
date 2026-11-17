@@ -32,7 +32,7 @@ class AuthController extends BaseApiController
         );
 
         return $this->createdResponse([
-            'user'   => new UserResource($result['user']),
+            'user' => new UserResource($result['user']),
             'tokens' => new AuthTokenResource($result['tokens']),
         ], __('messages.register_success'));
     }
@@ -47,7 +47,7 @@ class AuthController extends BaseApiController
         );
 
         return $this->successResponse([
-            'user'   => new UserResource($result['user']),
+            'user' => new UserResource($result['user']),
             'tokens' => new AuthTokenResource($result['tokens']),
         ], __('messages.login_success'));
     }
@@ -56,7 +56,7 @@ class AuthController extends BaseApiController
     {
         $token = $request->user()->currentAccessToken();
 
-        if (!$token instanceof PersonalAccessToken) {
+        if (! $token instanceof PersonalAccessToken) {
             throw AuthSecurityException::invalidRefreshToken();
         }
 
@@ -113,7 +113,7 @@ class AuthController extends BaseApiController
             'password' => ['required', 'string'],
         ]);
 
-        if (!Hash::check($validated['password'], $user->password)) {
+        if (! Hash::check($validated['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'password' => ['كلمة المرور غير صحيحة.'],
             ]);

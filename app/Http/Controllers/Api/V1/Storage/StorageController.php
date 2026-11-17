@@ -53,15 +53,15 @@ class StorageController extends BaseApiController
         $storedFile = $this->storageService->confirmUpload($user, $validated['file_id']);
 
         return $this->successResponse([
-            'id'                => $storedFile->uuid,
-            'entity_type'       => $storedFile->entity_type,
-            'entity_id'         => $storedFile->entity_id,
+            'id' => $storedFile->uuid,
+            'entity_type' => $storedFile->entity_type,
+            'entity_id' => $storedFile->entity_id,
             'original_filename' => $storedFile->original_filename,
-            'mime_type'         => $storedFile->mime_type,
-            'file_size_bytes'   => $storedFile->file_size_bytes,
-            'status'            => $storedFile->upload_status,
-            'download_url'      => $this->storageService->getTemporaryDownloadUrl($user, $storedFile, 60),
-            'created_at'        => $storedFile->created_at?->toISOString(),
+            'mime_type' => $storedFile->mime_type,
+            'file_size_bytes' => $storedFile->file_size_bytes,
+            'status' => $storedFile->upload_status,
+            'download_url' => $this->storageService->getTemporaryDownloadUrl($user, $storedFile, 60),
+            'created_at' => $storedFile->created_at?->toISOString(),
         ], 'تم التحقق من اكتمال الرفع وحفظ بيانات الملف بنجاح.');
     }
 
@@ -77,11 +77,11 @@ class StorageController extends BaseApiController
         $url = $this->storageService->getTemporaryDownloadUrl($user, $storedFile, 60);
 
         return $this->successResponse([
-            'file_id'      => $storedFile->uuid,
-            'filename'     => $storedFile->original_filename,
-            'mime_type'    => $storedFile->mime_type,
+            'file_id' => $storedFile->uuid,
+            'filename' => $storedFile->original_filename,
+            'mime_type' => $storedFile->mime_type,
             'download_url' => $url,
-            'expires_in'   => 3600,
+            'expires_in' => 3600,
         ], 'تم إنشاء رابط التنزيل المؤقت بنجاح.');
     }
 
@@ -99,4 +99,3 @@ class StorageController extends BaseApiController
         return $this->successResponse([], 'تم حذف الملف بنجاح من وحدة التخزين السحابي.');
     }
 }
-

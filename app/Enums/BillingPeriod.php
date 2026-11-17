@@ -5,15 +5,15 @@ namespace App\Enums;
 enum BillingPeriod: string
 {
     case MONTHLY = 'monthly';
-    case TERM    = 'term';
-    case ANNUAL  = 'annual';
+    case TERM = 'term';
+    case ANNUAL = 'annual';
 
     public function label(): string
     {
         return match ($this) {
             self::MONTHLY => 'شهرياً',
-            self::TERM    => 'نصف سنوي (ترم دراسي)',
-            self::ANNUAL  => 'سنة دراسية كاملة',
+            self::TERM => 'نصف سنوي (ترم دراسي)',
+            self::ANNUAL => 'سنة دراسية كاملة',
         };
     }
 
@@ -21,9 +21,8 @@ enum BillingPeriod: string
     {
         return match ($this) {
             self::MONTHLY => 30,
-            self::TERM    => 150,
-            self::ANNUAL  => 365,
+            self::TERM => 150,
+            self::ANNUAL => 365,
         };
     }
 }
-

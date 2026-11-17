@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LessonTranscript extends Model
 {
-    use HasFactory, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory;
 
     protected $fillable = [
         'lesson_id',
@@ -35,4 +35,3 @@ class LessonTranscript extends Model
         return $this->belongsTo(Lesson::class);
     }
 }
-

@@ -96,4 +96,3 @@ class TeacherPayoutAccountController extends BaseApiController
         );
     }
 }
-

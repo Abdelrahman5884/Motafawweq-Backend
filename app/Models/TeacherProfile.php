@@ -43,16 +43,16 @@ class TeacherProfile extends Model
     protected function casts(): array
     {
         return [
-            'stages_taught'                => 'array',
-            'plan_tier'                    => TeacherPlanTier::class,
-            'is_verified_educator'         => 'boolean',
-            'two_factor_enabled'           => 'boolean',
+            'stages_taught' => 'array',
+            'plan_tier' => TeacherPlanTier::class,
+            'is_verified_educator' => 'boolean',
+            'two_factor_enabled' => 'boolean',
             'notify_whatsapp_intervention' => 'boolean',
-            'notify_new_enrollment'        => 'boolean',
-            'notify_exam_submission'       => 'boolean',
-            'auto_watermark_enabled'       => 'boolean',
-            'rating'                       => 'float',
-            'reviews_count'                => 'integer',
+            'notify_new_enrollment' => 'boolean',
+            'notify_exam_submission' => 'boolean',
+            'auto_watermark_enabled' => 'boolean',
+            'rating' => 'float',
+            'reviews_count' => 'integer',
         ];
     }
 
@@ -82,4 +82,3 @@ class TeacherProfile extends Model
         return (int) $this->user_id === (int) $teacherId;
     }
 }
-

@@ -23,7 +23,7 @@ class StudentDirectPaymentRepository extends BaseRepository implements StudentDi
             ->orderByDesc('paid_at')
             ->orderByDesc('id');
 
-        if (!empty($filters['search'])) {
+        if (! empty($filters['search'])) {
             $s = trim((string) $filters['search']);
             $query->where(function ($q) use ($s) {
                 $q->where('student_name_ar', 'like', "%{$s}%")
@@ -34,11 +34,11 @@ class StudentDirectPaymentRepository extends BaseRepository implements StudentDi
             });
         }
 
-        if (!empty($filters['method']) && $filters['method'] !== 'all') {
+        if (! empty($filters['method']) && $filters['method'] !== 'all') {
             $query->where('payment_method', $filters['method']);
         }
 
-        if (!empty($filters['status']) && $filters['status'] !== 'all') {
+        if (! empty($filters['status']) && $filters['status'] !== 'all') {
             $query->where('status', $filters['status']);
         }
 
@@ -65,10 +65,9 @@ class StudentDirectPaymentRepository extends BaseRepository implements StudentDi
         $activeCoursesCount = (int) Course::where('teacher_id', $teacherId)->count();
 
         return [
-            'totalRevenueEgp'        => $totalRevenueEgp,
+            'totalRevenueEgp' => $totalRevenueEgp,
             'confirmedStudentsCount' => $confirmedStudentsCount,
-            'activeCoursesCount'     => $activeCoursesCount,
+            'activeCoursesCount' => $activeCoursesCount,
         ];
     }
 }
-

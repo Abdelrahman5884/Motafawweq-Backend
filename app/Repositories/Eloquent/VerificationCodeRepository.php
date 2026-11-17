@@ -50,4 +50,3 @@ class VerificationCodeRepository extends BaseRepository implements VerificationC
             ->delete();
     }
 }
-

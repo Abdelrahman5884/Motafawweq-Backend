@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LessonAttachment extends Model
 {
-    use HasFactory, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory;
 
     protected $fillable = [
         'lesson_id',
@@ -41,10 +41,10 @@ class LessonAttachment extends Model
     protected function casts(): array
     {
         return [
-            'type'            => LessonAttachmentType::class,
+            'type' => LessonAttachmentType::class,
             'file_size_bytes' => 'integer',
-            'pages_count'     => 'integer',
-            'display_order'   => 'integer',
+            'pages_count' => 'integer',
+            'display_order' => 'integer',
         ];
     }
 
@@ -53,4 +53,3 @@ class LessonAttachment extends Model
         return $this->belongsTo(Lesson::class);
     }
 }
-

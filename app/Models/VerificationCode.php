@@ -23,9 +23,9 @@ class VerificationCode extends Model
     protected function casts(): array
     {
         return [
-            'type'       => VerificationCodeType::class,
+            'type' => VerificationCodeType::class,
             'expires_at' => 'datetime',
-            'used_at'    => 'datetime',
+            'used_at' => 'datetime',
         ];
     }
 
@@ -44,4 +44,3 @@ class VerificationCode extends Model
         return $this->used_at !== null;
     }
 }
-

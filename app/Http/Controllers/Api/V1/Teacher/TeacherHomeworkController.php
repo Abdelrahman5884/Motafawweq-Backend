@@ -130,12 +130,12 @@ class TeacherHomeworkController extends BaseApiController
             TeacherHomeworkSubmissionResource::collection($result['submissions']),
             __('messages.homework_submissions_fetched'),
             meta: [
-                'total'          => $result['submissions']->count(),
-                'totalAssigned'  => (int) $result['homework']->total_assigned,
+                'total' => $result['submissions']->count(),
+                'totalAssigned' => (int) $result['homework']->total_assigned,
                 'submittedCount' => (int) $result['homework']->submitted_count,
-                'gradedCount'    => (int) $result['homework']->graded_count,
+                'gradedCount' => (int) $result['homework']->graded_count,
                 'pendingGrading' => (int) $result['homework']->pending_grading,
-                'avgGrade'       => (float) $result['homework']->avg_grade,
+                'avgGrade' => (float) $result['homework']->avg_grade,
             ]
         );
     }
@@ -188,13 +188,13 @@ class TeacherHomeworkController extends BaseApiController
             $uuid
         );
 
-        if (!$homework->attachment_path || !Storage::disk('local')->exists($homework->attachment_path)) {
+        if (! $homework->attachment_path || ! Storage::disk('local')->exists($homework->attachment_path)) {
             abort(404, __('messages.file_not_found'));
         }
 
         return response()->file(
             Storage::disk('local')->path($homework->attachment_path),
-            ['Content-Disposition' => 'inline; filename="' . ($homework->attachment_name ?: 'homework-attachment') . '"']
+            ['Content-Disposition' => 'inline; filename="'.($homework->attachment_name ?: 'homework-attachment').'"']
         );
     }
 
@@ -213,14 +213,13 @@ class TeacherHomeworkController extends BaseApiController
 
         $submission->homework->assertOwnedBy($teacher);
 
-        if (!$submission->attachment_path || !Storage::disk('local')->exists($submission->attachment_path)) {
+        if (! $submission->attachment_path || ! Storage::disk('local')->exists($submission->attachment_path)) {
             abort(404, __('messages.file_not_found'));
         }
 
         return response()->file(
             Storage::disk('local')->path($submission->attachment_path),
-            ['Content-Disposition' => 'inline; filename="' . ($submission->attachment_name ?: 'solution') . '"']
+            ['Content-Disposition' => 'inline; filename="'.($submission->attachment_name ?: 'solution').'"']
         );
     }
 }
-

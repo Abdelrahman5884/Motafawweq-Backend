@@ -30,7 +30,7 @@ class AddLeagueParticipantRequest extends BaseApiRequest
             $merged['group_ar'] = trim(strip_tags((string) $groupAr));
         }
 
-        if (!empty($merged)) {
+        if (! empty($merged)) {
             $this->merge($merged);
         }
     }
@@ -40,8 +40,7 @@ class AddLeagueParticipantRequest extends BaseApiRequest
         return [
             'student_id' => ['required', 'string', 'max:100'],
             'initial_xp' => ['nullable', 'integer', 'min:0', 'max:1000000'],
-            'group_ar'   => ['nullable', 'string', 'max:150'],
+            'group_ar' => ['nullable', 'string', 'max:150'],
         ];
     }
 }
-

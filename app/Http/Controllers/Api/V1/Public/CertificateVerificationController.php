@@ -19,11 +19,10 @@ class CertificateVerificationController extends Controller
     {
         $result = $this->certificateService->verifyCertificatePublic($serialNumber);
 
-        if (!$result['isValid'] && ($result['status'] ?? '') === 'not_found') {
+        if (! $result['isValid'] && ($result['status'] ?? '') === 'not_found') {
             return $this->notFound($result['messageAr'] ?? 'الشهادة المطلوبة غير مسجلة.');
         }
 
         return $this->success($result, 'تم فحص وتدقيق بيانات الشهادة بنجاح.');
     }
 }
-

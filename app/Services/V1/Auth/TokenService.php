@@ -21,6 +21,7 @@ use Illuminate\Support\Str;
 class TokenService extends BaseService
 {
     public const ABILITY_ACCESS = 'access';
+
     public const ABILITY_REFRESH = 'refresh';
 
     /**
@@ -57,12 +58,12 @@ class TokenService extends BaseService
         $refresh->accessToken->forceFill($meta + ['type' => TokenType::REFRESH])->save();
 
         return [
-            'access_token'       => $access->plainTextToken,
-            'refresh_token'      => $refresh->plainTextToken,
-            'token_type'         => 'Bearer',
-            'expires_in'         => $accessTtl * 60,
+            'access_token' => $access->plainTextToken,
+            'refresh_token' => $refresh->plainTextToken,
+            'token_type' => 'Bearer',
+            'expires_in' => $accessTtl * 60,
             'refresh_expires_in' => $refreshTtl * 60,
-            'session_id'         => $sessionId,
+            'session_id' => $sessionId,
         ];
     }
 
@@ -75,7 +76,7 @@ class TokenService extends BaseService
             // Row lock: two concurrent refreshes with the same token -> only one wins
             $locked = PersonalAccessToken::whereKey($refreshToken->id)->lockForUpdate()->first();
 
-            if (!$locked || !$locked->isRefresh() || ($locked->expires_at && $locked->expires_at->isPast())) {
+            if (! $locked || ! $locked->isRefresh() || ($locked->expires_at && $locked->expires_at->isPast())) {
                 throw AuthSecurityException::invalidRefreshToken();
             }
 
@@ -139,10 +140,9 @@ class TokenService extends BaseService
             $user->tokens()->whereIn('session_id', $overflow->all())->delete();
 
             $this->logSecurityEvent('SESSION_LIMIT_EVICTION', [
-                'user_id'         => $user->id,
+                'user_id' => $user->id,
                 'evicted_session' => $overflow->count(),
             ]);
         }
     }
 }
-

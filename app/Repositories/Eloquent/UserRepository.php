@@ -36,7 +36,7 @@ class UserRepository extends BaseRepository implements UserRepositoryInterface
     public function generateUniqueStudentCode(): string
     {
         do {
-            $code = 'STD-' . strtoupper(Str::random(6));
+            $code = 'STD-'.strtoupper(Str::random(6));
         } while ($this->model->where('student_code', $code)->exists());
 
         return $code;
@@ -45,10 +45,10 @@ class UserRepository extends BaseRepository implements UserRepositoryInterface
     public function recordSuccessfulLogin(User $user, string $ip): void
     {
         $user->forceFill([
-            'last_login_at'         => now(),
-            'last_login_ip'         => $ip,
+            'last_login_at' => now(),
+            'last_login_ip' => $ip,
             'failed_login_attempts' => 0,
-            'locked_until'          => null,
+            'locked_until' => null,
         ])->save();
     }
 
@@ -60,7 +60,7 @@ class UserRepository extends BaseRepository implements UserRepositoryInterface
 
         if ($user->failed_login_attempts >= $maxAttempts) {
             $user->forceFill([
-                'locked_until'          => now()->addMinutes($lockMinutes),
+                'locked_until' => now()->addMinutes($lockMinutes),
                 'failed_login_attempts' => 0,
             ])->save();
 
@@ -84,8 +84,8 @@ class UserRepository extends BaseRepository implements UserRepositoryInterface
 
             $query->where(function ($q) use ($safe) {
                 $q->where('name', 'like', "%{$safe}%")
-                  ->orWhere('email', 'like', "%{$safe}%")
-                  ->orWhere('phone', 'like', "%{$safe}%");
+                    ->orWhere('email', 'like', "%{$safe}%")
+                    ->orWhere('phone', 'like', "%{$safe}%");
             });
         }
 

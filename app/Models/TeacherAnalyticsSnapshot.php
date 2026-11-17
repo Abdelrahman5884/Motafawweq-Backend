@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 
 class TeacherAnalyticsSnapshot extends Model
 {
-    use HasFactory, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory;
 
     protected $table = 'teacher_analytics_snapshots';
 
@@ -29,13 +29,13 @@ class TeacherAnalyticsSnapshot extends Model
     protected function casts(): array
     {
         return [
-            'metric_date'           => 'date:Y-m-d',
+            'metric_date' => 'date:Y-m-d',
             'active_students_count' => 'integer',
-            'attendance_avg'        => 'float',
-            'quiz_avg'              => 'float',
-            'at_risk_count'         => 'integer',
-            'revenue_total'         => 'float',
-            'snapshots_json'        => 'array',
+            'attendance_avg' => 'float',
+            'quiz_avg' => 'float',
+            'at_risk_count' => 'integer',
+            'revenue_total' => 'float',
+            'snapshots_json' => 'array',
         ];
     }
 
@@ -53,4 +53,3 @@ class TeacherAnalyticsSnapshot extends Model
         return $this->belongsTo(User::class, 'teacher_id');
     }
 }
-

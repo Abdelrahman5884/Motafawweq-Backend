@@ -13,7 +13,7 @@ use Illuminate\Support\Str;
 
 class StudentDirectPayment extends Model
 {
-    use HasFactory, SoftDeletes, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'reference_num',
@@ -41,10 +41,10 @@ class StudentDirectPayment extends Model
     {
         return [
             'payment_method' => PaymentMethod::class,
-            'status'         => DirectPaymentStatus::class,
-            'amount_egp'     => 'float',
-            'paid_at'        => 'datetime',
-            'confirmed_at'   => 'datetime',
+            'status' => DirectPaymentStatus::class,
+            'amount_egp' => 'float',
+            'paid_at' => 'datetime',
+            'confirmed_at' => 'datetime',
         ];
     }
 
@@ -92,4 +92,3 @@ class StudentDirectPayment extends Model
         return $this->belongsTo(TeacherPayoutAccount::class, 'payout_account_id');
     }
 }
-

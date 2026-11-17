@@ -5,9 +5,9 @@ namespace App\Enums;
 enum LeagueTier: string
 {
     case DIAMOND = 'Diamond';
-    case GOLD    = 'Gold';
-    case SILVER  = 'Silver';
-    case BRONZE  = 'Bronze';
+    case GOLD = 'Gold';
+    case SILVER = 'Silver';
+    case BRONZE = 'Bronze';
 
     public static function resolveFromXp(int $xp): self
     {
@@ -15,7 +15,7 @@ enum LeagueTier: string
             $xp >= 3000 => self::DIAMOND,
             $xp >= 2500 => self::GOLD,
             $xp >= 1900 => self::SILVER,
-            default     => self::BRONZE,
+            default => self::BRONZE,
         };
     }
 
@@ -23,9 +23,9 @@ enum LeagueTier: string
     {
         return match ($this) {
             self::DIAMOND => 3000,
-            self::GOLD    => 2500,
-            self::SILVER  => 1900,
-            self::BRONZE  => 0,
+            self::GOLD => 2500,
+            self::SILVER => 1900,
+            self::BRONZE => 0,
         };
     }
 
@@ -33,9 +33,9 @@ enum LeagueTier: string
     {
         return match ($this) {
             self::DIAMOND => 'دوري الماسي',
-            self::GOLD    => 'دوري ذهبي',
-            self::SILVER  => 'دوري فضي',
-            self::BRONZE  => 'دوري برونزي',
+            self::GOLD => 'دوري ذهبي',
+            self::SILVER => 'دوري فضي',
+            self::BRONZE => 'دوري برونزي',
         };
     }
 
@@ -44,4 +44,3 @@ enum LeagueTier: string
         return array_column(self::cases(), 'value');
     }
 }
-

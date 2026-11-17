@@ -18,7 +18,7 @@ class UpdateTeacherStagesRequest extends BaseApiRequest
         parent::prepareForValidation();
 
         // Normalize camelCase stagesTaught into stages_taught
-        if ($this->has('stagesTaught') && !$this->has('stages_taught')) {
+        if ($this->has('stagesTaught') && ! $this->has('stages_taught')) {
             $this->merge(['stages_taught' => $this->input('stagesTaught')]);
         }
     }
@@ -26,9 +26,8 @@ class UpdateTeacherStagesRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'stages_taught'   => ['required', 'array', 'max:9'],
+            'stages_taught' => ['required', 'array', 'max:9'],
             'stages_taught.*' => ['required', 'string', Rule::in(StageType::allowedGradesAr())],
         ];
     }
 }
-

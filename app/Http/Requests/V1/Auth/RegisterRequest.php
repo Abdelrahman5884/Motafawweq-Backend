@@ -11,12 +11,12 @@ class RegisterRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'name'         => ['required', 'string', 'min:3', 'max:100', 'regex:/^[\p{Arabic}\p{L}\s\'.-]+$/u'],
-            'email'        => ['required', 'string', 'email:rfc,filter', 'max:255', 'unique:users,email'],
-            'password'     => ['required', 'string', 'confirmed', 'max:128', Password::defaults()],
+            'name' => ['required', 'string', 'min:3', 'max:100', 'regex:/^[\p{Arabic}\p{L}\s\'.-]+$/u'],
+            'email' => ['required', 'string', 'email:rfc,filter', 'max:255', 'unique:users,email'],
+            'password' => ['required', 'string', 'confirmed', 'max:128', Password::defaults()],
             // SECURITY: admin can never be self-assigned
-            'role'         => ['nullable', 'string', Rule::in(config('auth_security.self_registration_roles'))],
-            'phone'        => ['nullable', 'string', 'regex:/^\+?[0-9]{8,15}$/', 'unique:users,phone'],
+            'role' => ['nullable', 'string', Rule::in(config('auth_security.self_registration_roles'))],
+            'phone' => ['nullable', 'string', 'regex:/^\+?[0-9]{8,15}$/', 'unique:users,phone'],
             'student_code' => ['required_if:role,parent', 'nullable', 'string', 'max:20'],
         ];
     }

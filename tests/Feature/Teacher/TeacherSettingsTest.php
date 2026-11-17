@@ -7,7 +7,6 @@ use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\SecurityAuditLog;
-use App\Models\TeacherProfile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -21,11 +20,11 @@ class TeacherSettingsTest extends TestCase
     protected function createAuthenticatedTeacher(array $overrides = []): array
     {
         $teacher = User::factory()->create(array_merge([
-            'name'              => 'د. سلمى السيد',
-            'email'             => 'salma.biology@motafawweq.me',
-            'phone'             => '+20 101 234 5678',
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'name' => 'د. سلمى السيد',
+            'email' => 'salma.biology@motafawweq.me',
+            'phone' => '+20 101 234 5678',
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ], $overrides));
 
@@ -57,8 +56,8 @@ class TeacherSettingsTest extends TestCase
     public function test_student_or_pending_teacher_cannot_access_teacher_settings(): void
     {
         $student = User::factory()->create([
-            'role'              => UserRole::STUDENT,
-            'status'            => UserStatus::ACTIVE,
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
         $studentToken = $student->createToken('test', [TokenType::ACCESS->value])->plainTextToken;
@@ -68,7 +67,7 @@ class TeacherSettingsTest extends TestCase
             ->assertStatus(403);
 
         [$pendingTeacher, $pendingToken] = $this->createAuthenticatedTeacher([
-            'email'  => 'pending.teacher@motafawweq.me',
+            'email' => 'pending.teacher@motafawweq.me',
             'status' => UserStatus::PENDING,
         ]);
 
@@ -82,27 +81,27 @@ class TeacherSettingsTest extends TestCase
         [$teacher, $token] = $this->createAuthenticatedTeacher();
 
         $payload = [
-            'nameAr'                     => 'د. سلمى السيد أحمد <script>alert(1)</script>',
-            'nameEn'                     => 'Dr. Salma El-Sayed Ahmed',
-            'titleAr'                    => 'كبير معلمي الأحياء ومؤلفة سلسلة المتفوق',
-            'subjectAr'                  => 'الأحياء والجيولوجيا',
-            'phone'                      => '+20 109 876 5432',
-            'bioAr'                      => 'خبرة أكثر من 18 عاماً في تدريس مادة الأحياء للثانوية العامة.',
-            'stagesTaught'               => [
+            'nameAr' => 'د. سلمى السيد أحمد <script>alert(1)</script>',
+            'nameEn' => 'Dr. Salma El-Sayed Ahmed',
+            'titleAr' => 'كبير معلمي الأحياء ومؤلفة سلسلة المتفوق',
+            'subjectAr' => 'الأحياء والجيولوجيا',
+            'phone' => '+20 109 876 5432',
+            'bioAr' => 'خبرة أكثر من 18 عاماً في تدريس مادة الأحياء للثانوية العامة.',
+            'stagesTaught' => [
                 'الصف الثالث الثانوي',
                 'الصف الثاني الثانوي',
             ],
-            'twoFactorEnabled'           => false,
+            'twoFactorEnabled' => false,
             'notifyWhatsappIntervention' => true,
-            'notifyNewEnrollment'        => false,
-            'notifyExamSubmission'       => true,
-            'autoWatermarkEnabled'       => true,
-            'preferredTheme'             => 'dark',
-            'preferredLang'              => 'en',
+            'notifyNewEnrollment' => false,
+            'notifyExamSubmission' => true,
+            'autoWatermarkEnabled' => true,
+            'preferredTheme' => 'dark',
+            'preferredLang' => 'en',
             // Attempted privilege escalation fields (must be ignored)
-            'plan_tier'                  => 'pro',
-            'rating'                     => 5.0,
-            'reviews_count'              => 99999,
+            'plan_tier' => 'pro',
+            'rating' => 5.0,
+            'reviews_count' => 99999,
         ];
 
         $response = $this->withHeader('Authorization', "Bearer {$token}")
@@ -123,8 +122,8 @@ class TeacherSettingsTest extends TestCase
 
         // User table synced
         $this->assertDatabaseHas('users', [
-            'id'    => $teacher->id,
-            'name'  => 'د. سلمى السيد أحمد alert(1)',
+            'id' => $teacher->id,
+            'name' => 'د. سلمى السيد أحمد alert(1)',
             'phone' => '+20 109 876 5432',
         ]);
 

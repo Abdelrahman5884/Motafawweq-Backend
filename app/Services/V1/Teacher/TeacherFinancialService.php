@@ -27,9 +27,9 @@ class TeacherFinancialService
 
         return [
             'earnings' => [
-                'totalRevenueEgp'        => $kpis['totalRevenueEgp'],
+                'totalRevenueEgp' => $kpis['totalRevenueEgp'],
                 'confirmedStudentsCount' => $kpis['confirmedStudentsCount'],
-                'activeCoursesCount'     => $kpis['activeCoursesCount'],
+                'activeCoursesCount' => $kpis['activeCoursesCount'],
             ],
             'transactions' => $paginator,
         ];
@@ -40,24 +40,24 @@ class TeacherFinancialService
         /** @var StudentDirectPayment|null $payment */
         $payment = $this->paymentRepository->findByUuidForTeacher($uuid, $teacher->id);
 
-        if (!$payment) {
+        if (! $payment) {
             $this->logSecurityEvent(
                 'teacher.idor_attempt_blocked',
                 [
                     'target_type' => 'StudentDirectPayment',
                     'target_uuid' => $uuid,
-                    'actor_id'    => $teacher->id,
-                    'action'      => 'confirm',
+                    'actor_id' => $teacher->id,
+                    'action' => 'confirm',
                 ],
                 'warning'
             );
 
-            throw (new ModelNotFoundException())->setModel(StudentDirectPayment::class, [$uuid]);
+            throw (new ModelNotFoundException)->setModel(StudentDirectPayment::class, [$uuid]);
         }
 
         DB::transaction(function () use ($payment, $teacher) {
             $payment->update([
-                'status'       => DirectPaymentStatus::CONFIRMED,
+                'status' => DirectPaymentStatus::CONFIRMED,
                 'confirmed_at' => now(),
             ]);
 
@@ -66,12 +66,12 @@ class TeacherFinancialService
                 GroupEnrollment::updateOrCreate(
                     [
                         'study_group_id' => $payment->study_group_id,
-                        'student_id'     => $payment->student_id,
+                        'student_id' => $payment->student_id,
                     ],
                     [
-                        'teacher_id'     => $teacher->id,
-                        'status'         => EnrollmentStatus::ENROLLED,
-                        'enrolled_at'    => now(),
+                        'teacher_id' => $teacher->id,
+                        'status' => EnrollmentStatus::ENROLLED,
+                        'enrolled_at' => now(),
                     ]
                 );
             }
@@ -80,11 +80,11 @@ class TeacherFinancialService
         $this->logSecurityEvent(
             'teacher.direct_payment_confirmed',
             [
-                'teacher_id'    => $teacher->id,
-                'payment_uuid'  => $payment->uuid,
+                'teacher_id' => $teacher->id,
+                'payment_uuid' => $payment->uuid,
                 'reference_num' => $payment->reference_num,
-                'amount_egp'    => $payment->amount_egp,
-                'student_id'    => $payment->student_id,
+                'amount_egp' => $payment->amount_egp,
+                'student_id' => $payment->student_id,
             ],
             'info',
             $payment
@@ -98,33 +98,33 @@ class TeacherFinancialService
         /** @var StudentDirectPayment|null $payment */
         $payment = $this->paymentRepository->findByUuidForTeacher($uuid, $teacher->id);
 
-        if (!$payment) {
+        if (! $payment) {
             $this->logSecurityEvent(
                 'teacher.idor_attempt_blocked',
                 [
                     'target_type' => 'StudentDirectPayment',
                     'target_uuid' => $uuid,
-                    'actor_id'    => $teacher->id,
-                    'action'      => 'reject',
+                    'actor_id' => $teacher->id,
+                    'action' => 'reject',
                 ],
                 'warning'
             );
 
-            throw (new ModelNotFoundException())->setModel(StudentDirectPayment::class, [$uuid]);
+            throw (new ModelNotFoundException)->setModel(StudentDirectPayment::class, [$uuid]);
         }
 
         $payment->update([
-            'status'           => DirectPaymentStatus::REJECTED,
+            'status' => DirectPaymentStatus::REJECTED,
             'rejection_reason' => $reason ?: 'تم رفض التحويل لعدم مطابقة بيانات الإيصال أو نقص المبلغ',
         ]);
 
         $this->logSecurityEvent(
             'teacher.direct_payment_rejected',
             [
-                'teacher_id'    => $teacher->id,
-                'payment_uuid'  => $payment->uuid,
+                'teacher_id' => $teacher->id,
+                'payment_uuid' => $payment->uuid,
                 'reference_num' => $payment->reference_num,
-                'reason'        => $reason,
+                'reason' => $reason,
             ],
             'warning',
             $payment
@@ -133,4 +133,3 @@ class TeacherFinancialService
         return $payment->fresh(['student', 'course', 'studyGroup']);
     }
 }
-

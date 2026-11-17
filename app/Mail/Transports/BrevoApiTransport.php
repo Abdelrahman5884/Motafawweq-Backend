@@ -41,7 +41,7 @@ class BrevoApiTransport extends AbstractTransport implements Stringable
 
         $to = array_map(fn (Address $addr) => array_filter([
             'email' => $addr->getAddress(),
-            'name'  => $addr->getName() ?: null,
+            'name' => $addr->getName() ?: null,
         ]), $email->getTo());
 
         $htmlBody = (string) $email->getHtmlBody();
@@ -53,30 +53,30 @@ class BrevoApiTransport extends AbstractTransport implements Stringable
         $payload = array_filter([
             'sender' => array_filter([
                 'email' => $from->getAddress(),
-                'name'  => $from->getName() ?: config('app.name', 'Motafawweq'),
+                'name' => $from->getName() ?: config('app.name', 'Motafawweq'),
             ]),
-            'to'          => array_values($to),
-            'subject'     => $email->getSubject(),
+            'to' => array_values($to),
+            'subject' => $email->getSubject(),
             'htmlContent' => $htmlBody !== '' ? $htmlBody : nl2br($textBody),
             'textContent' => $textBody,
-            'headers'     => [
+            'headers' => [
                 'X-Entity-Ref-ID' => (string) Str::uuid(),
             ],
         ]);
 
         $response = Http::withHeaders([
-            'api-key'      => $this->apiKey,
-            'accept'       => 'application/json',
+            'api-key' => $this->apiKey,
+            'accept' => 'application/json',
             'content-type' => 'application/json',
         ])->timeout(15)->post(self::ENDPOINT, $payload);
 
         if ($response->failed()) {
-            $errMsg = 'Brevo API error (' . $response->status() . '): ' . ($response->json('message') ?? $response->body());
+            $errMsg = 'Brevo API error ('.$response->status().'): '.($response->json('message') ?? $response->body());
             self::$lastError = $errMsg;
 
             Log::warning('[BREVO-API-MAIL-FAILED]', [
                 'status' => $response->status(),
-                'body'   => $response->json() ?? $response->body(),
+                'body' => $response->json() ?? $response->body(),
             ]);
 
             throw new TransportException($errMsg);
@@ -88,4 +88,3 @@ class BrevoApiTransport extends AbstractTransport implements Stringable
         return 'brevo+api';
     }
 }
-

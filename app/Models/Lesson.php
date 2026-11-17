@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Lesson extends Model
 {
-    use HasFactory, SoftDeletes, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'teacher_id',
@@ -50,13 +50,13 @@ class Lesson extends Model
     protected function casts(): array
     {
         return [
-            'media_mode'            => LessonMediaMode::class,
-            'status'                => LessonStatus::class,
-            'is_youtube'            => 'boolean',
-            'media_size_bytes'      => 'integer',
-            'duration_seconds'      => 'integer',
+            'media_mode' => LessonMediaMode::class,
+            'status' => LessonStatus::class,
+            'is_youtube' => 'boolean',
+            'media_size_bytes' => 'integer',
+            'duration_seconds' => 'integer',
             'ai_features_requested' => 'array',
-            'published_at'          => 'datetime',
+            'published_at' => 'datetime',
         ];
     }
 
@@ -101,4 +101,3 @@ class Lesson extends Model
         return $this->hasOne(LessonConceptGraph::class);
     }
 }
-

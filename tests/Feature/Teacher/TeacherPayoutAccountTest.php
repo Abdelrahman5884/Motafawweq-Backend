@@ -20,11 +20,11 @@ class TeacherPayoutAccountTest extends TestCase
     private function createAuthenticatedTeacher(string $email = 'payout.teacher@motafawweq.com', ?string $phone = null): array
     {
         $teacher = User::factory()->create([
-            'name'              => 'أ. طارق منصور',
-            'email'             => $email,
-            'phone'             => $phone ?? '010' . random_int(10000000, 99999999),
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'name' => 'أ. طارق منصور',
+            'email' => $email,
+            'phone' => $phone ?? '010'.random_int(10000000, 99999999),
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
 
@@ -56,8 +56,8 @@ class TeacherPayoutAccountTest extends TestCase
 
         $response = $this->withToken($token)
             ->postJson('/api/v1/teacher/payout-accounts', [
-                'type'          => 'cib',
-                'labelAr'       => 'حساب البنك التجاري الدولي CIB',
+                'type' => 'cib',
+                'labelAr' => 'حساب البنك التجاري الدولي CIB',
                 'accountNumber' => $rawIban,
             ]);
 
@@ -145,13 +145,13 @@ class TeacherPayoutAccountTest extends TestCase
         [$teacherB, $tokenB] = $this->createAuthenticatedTeacher('teacher.b@motafawweq.com');
 
         $accountA = TeacherPayoutAccount::create([
-            'teacher_id'         => $teacherA->id,
-            'type'               => PayoutAccountType::INSTAPAY,
-            'label_ar'           => 'إنستاباي المعلم أ',
-            'label_en'           => 'Teacher A InstaPay',
+            'teacher_id' => $teacherA->id,
+            'type' => PayoutAccountType::INSTAPAY,
+            'label_ar' => 'إنستاباي المعلم أ',
+            'label_en' => 'Teacher A InstaPay',
             'account_identifier' => 'teacher.a@instapay',
-            'is_default'         => true,
-            'is_active'          => true,
+            'is_default' => true,
+            'is_active' => true,
         ]);
 
         // Teacher B attempts to set Teacher A's account as default
@@ -168,8 +168,8 @@ class TeacherPayoutAccountTest extends TestCase
         $this->assertDatabaseHas('teacher_payout_accounts', ['id' => $accountA->id]);
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
-            'level'   => 'warning',
+            'event' => 'teacher.idor_attempt_blocked',
+            'level' => 'warning',
         ]);
     }
 }

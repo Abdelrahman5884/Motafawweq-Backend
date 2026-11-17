@@ -18,4 +18,3 @@ interface HomeworkRepositoryInterface extends BaseRepositoryInterface
      */
     public function findByUuidForTeacher(string $uuid, User $teacher): Homework;
 }
-

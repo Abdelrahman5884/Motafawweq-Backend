@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ExamSubmissionStatus;
+use App\Traits\BelongsToStudent;
 use App\Traits\HasSecurityAudit;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,19 +13,22 @@ use Illuminate\Support\Str;
 
 class ExamSubmission extends Model
 {
-    use HasFactory, HasSecurityAudit;
+    use BelongsToStudent, HasFactory, HasSecurityAudit;
 
     protected $fillable = [
         'uuid',
         'exam_id',
         'student_id',
         'started_at',
+        'expires_at',
         'submitted_at',
         'score',
         'full_mark',
         'percentage',
         'is_passed',
         'is_full_mark',
+        'tab_switches_count',
+        'ip_address',
         'status',
         'teacher_feedback',
         'graded_by',
@@ -34,15 +38,17 @@ class ExamSubmission extends Model
     protected function casts(): array
     {
         return [
-            'status'       => ExamSubmissionStatus::class,
-            'started_at'   => 'datetime',
+            'status' => ExamSubmissionStatus::class,
+            'started_at' => 'datetime',
+            'expires_at' => 'datetime',
             'submitted_at' => 'datetime',
-            'graded_at'    => 'datetime',
-            'score'        => 'float',
-            'full_mark'    => 'integer',
-            'percentage'   => 'float',
-            'is_passed'    => 'boolean',
+            'graded_at' => 'datetime',
+            'score' => 'float',
+            'full_mark' => 'integer',
+            'percentage' => 'float',
+            'is_passed' => 'boolean',
             'is_full_mark' => 'boolean',
+            'tab_switches_count' => 'integer',
         ];
     }
 
@@ -86,13 +92,12 @@ class ExamSubmission extends Model
         $passScore = (int) ($this->exam?->pass_score ?? 25);
 
         $this->update([
-            'score'        => $totalAwarded,
-            'percentage'   => $percentage,
-            'is_passed'    => $totalAwarded >= $passScore,
+            'score' => $totalAwarded,
+            'percentage' => $percentage,
+            'is_passed' => $totalAwarded >= $passScore,
             'is_full_mark' => $totalAwarded >= $fullMark && $fullMark > 0,
         ]);
 
         return $this;
     }
 }
-

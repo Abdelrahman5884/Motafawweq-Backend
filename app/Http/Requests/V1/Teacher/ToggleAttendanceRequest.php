@@ -39,7 +39,7 @@ class ToggleAttendanceRequest extends BaseApiRequest
             $merged['notes'] = trim(strip_tags((string) $notes));
         }
 
-        if (!empty($merged)) {
+        if (! empty($merged)) {
             $this->merge($merged);
         }
     }
@@ -48,10 +48,9 @@ class ToggleAttendanceRequest extends BaseApiRequest
     {
         return [
             'enrollment_id' => ['required', 'string', 'max:64'],
-            'status'        => ['nullable', 'string', Rule::in(AttendanceStatus::values())],
-            'date'          => ['nullable', 'date_format:Y-m-d'],
-            'notes'         => ['nullable', 'string', 'max:255'],
+            'status' => ['nullable', 'string', Rule::in(AttendanceStatus::values())],
+            'date' => ['nullable', 'date_format:Y-m-d'],
+            'notes' => ['nullable', 'string', 'max:255'],
         ];
     }
 }
-

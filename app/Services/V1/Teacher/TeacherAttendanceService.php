@@ -15,7 +15,6 @@ use App\Services\BaseService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class TeacherAttendanceService extends BaseService
@@ -40,7 +39,7 @@ class TeacherAttendanceService extends BaseService
         $group = $this->groupRepository->findByUuidForTeacher($groupUuid, $teacher);
 
         $enrollment = $this->resolveEnrollmentByCode($group, $codeOrToken);
-        if (!$enrollment) {
+        if (! $enrollment) {
             throw ValidationException::withMessages([
                 'code' => [__('messages.attendance_student_not_found')],
             ]);
@@ -65,16 +64,16 @@ class TeacherAttendanceService extends BaseService
                 $record = GroupAttendanceRecord::updateOrCreate(
                     [
                         'attendance_session_id' => $session->id,
-                        'group_enrollment_id'   => $enrollment->id,
+                        'group_enrollment_id' => $enrollment->id,
                     ],
                     [
-                        'study_group_id'  => $group->id,
-                        'student_id'      => $enrollment->student_id,
-                        'status'          => AttendanceStatus::PRESENT,
+                        'study_group_id' => $group->id,
+                        'student_id' => $enrollment->student_id,
+                        'status' => AttendanceStatus::PRESENT,
                         'recorded_method' => $recordMethodEnum,
-                        'scanned_at'      => now(),
-                        'recorded_by'     => $teacher->id,
-                        'notes'           => $notes ?? $existingRecord?->notes,
+                        'scanned_at' => now(),
+                        'recorded_by' => $teacher->id,
+                        'notes' => $notes ?? $existingRecord?->notes,
                     ]
                 );
 
@@ -83,18 +82,18 @@ class TeacherAttendanceService extends BaseService
             }
 
             $this->logSecurityEvent('teacher.attendance.scanned', [
-                'group_uuid'       => $group->uuid,
-                'session_uuid'     => $session->uuid,
-                'enrollment_uuid'  => $enrollment->uuid,
-                'student_id'       => $enrollment->student_id,
+                'group_uuid' => $group->uuid,
+                'session_uuid' => $session->uuid,
+                'enrollment_uuid' => $enrollment->uuid,
+                'student_id' => $enrollment->student_id,
                 'already_recorded' => $alreadyRecorded,
-                'method'           => $recordMethodEnum->value,
+                'method' => $recordMethodEnum->value,
             ], 'info', $record);
 
             return [
-                'session'         => $session,
-                'record'          => $record->load('student'),
-                'enrollment'      => $enrollment,
+                'session' => $session,
+                'record' => $record->load('student'),
+                'enrollment' => $enrollment,
                 'alreadyRecorded' => $alreadyRecorded,
             ];
         });
@@ -120,8 +119,8 @@ class TeacherAttendanceService extends BaseService
             ->where('status', EnrollmentStatus::ENROLLED->value)
             ->first();
 
-        if (!$enrollment) {
-            throw (new ModelNotFoundException())->setModel(GroupEnrollment::class, [$enrollmentUuid]);
+        if (! $enrollment) {
+            throw (new ModelNotFoundException)->setModel(GroupEnrollment::class, [$enrollmentUuid]);
         }
 
         $targetDate = $date ? Carbon::parse($date)->toDateString() : now()->toDateString();
@@ -143,23 +142,23 @@ class TeacherAttendanceService extends BaseService
 
             if ($record) {
                 $record->update([
-                    'status'          => $newStatus,
+                    'status' => $newStatus,
                     'recorded_method' => AttendanceRecordMethod::MANUAL_TOGGLE,
-                    'scanned_at'      => $newStatus === AttendanceStatus::PRESENT ? now() : null,
-                    'recorded_by'     => $teacher->id,
-                    'notes'           => $notes ?? $record->notes,
+                    'scanned_at' => $newStatus === AttendanceStatus::PRESENT ? now() : null,
+                    'recorded_by' => $teacher->id,
+                    'notes' => $notes ?? $record->notes,
                 ]);
             } else {
                 $record = GroupAttendanceRecord::create([
                     'attendance_session_id' => $session->id,
-                    'study_group_id'        => $group->id,
-                    'group_enrollment_id'   => $enrollment->id,
-                    'student_id'            => $enrollment->student_id,
-                    'status'                => $newStatus,
-                    'recorded_method'       => AttendanceRecordMethod::MANUAL_TOGGLE,
-                    'scanned_at'            => $newStatus === AttendanceStatus::PRESENT ? now() : null,
-                    'recorded_by'           => $teacher->id,
-                    'notes'                 => $notes,
+                    'study_group_id' => $group->id,
+                    'group_enrollment_id' => $enrollment->id,
+                    'student_id' => $enrollment->student_id,
+                    'status' => $newStatus,
+                    'recorded_method' => AttendanceRecordMethod::MANUAL_TOGGLE,
+                    'scanned_at' => $newStatus === AttendanceStatus::PRESENT ? now() : null,
+                    'recorded_by' => $teacher->id,
+                    'notes' => $notes,
                 ]);
             }
 
@@ -167,10 +166,10 @@ class TeacherAttendanceService extends BaseService
             $session->recalculateSummary();
 
             $this->logSecurityEvent('teacher.attendance.toggled', [
-                'group_uuid'      => $group->uuid,
-                'session_uuid'    => $session->uuid,
+                'group_uuid' => $group->uuid,
+                'session_uuid' => $session->uuid,
                 'enrollment_uuid' => $enrollment->uuid,
-                'new_status'      => $newStatus->value,
+                'new_status' => $newStatus->value,
             ], 'info', $record);
 
             return $record->load('student', 'enrollment');
@@ -206,8 +205,8 @@ class TeacherAttendanceService extends BaseService
             ->with(['records.student'])
             ->first();
 
-        if (!$session) {
-            throw (new ModelNotFoundException())->setModel(GroupAttendanceSession::class, [$sessionUuid]);
+        if (! $session) {
+            throw (new ModelNotFoundException)->setModel(GroupAttendanceSession::class, [$sessionUuid]);
         }
 
         $recordsMap = $session->records->keyBy('group_enrollment_id');
@@ -218,22 +217,22 @@ class TeacherAttendanceService extends BaseService
             $status = $record ? $record->status->value : AttendanceStatus::ABSENT->value;
 
             return [
-                'enrollmentId'   => $enrollment->uuid,
-                'studentId'      => $enrollment->student_id,
-                'studentCode'    => $enrollment->student?->student_code,
-                'nameAr'         => $enrollment->student_name_override ?: ($enrollment->student?->name ?? 'طالب'),
-                'phone'          => $enrollment->student_phone_override ?: ($enrollment->student?->phone ?? ''),
-                'status'         => $status,
-                'scannedAt'      => $record?->scanned_at?->toIso8601String(),
+                'enrollmentId' => $enrollment->uuid,
+                'studentId' => $enrollment->student_id,
+                'studentCode' => $enrollment->student?->student_code,
+                'nameAr' => $enrollment->student_name_override ?: ($enrollment->student?->name ?? 'طالب'),
+                'phone' => $enrollment->student_phone_override ?: ($enrollment->student?->phone ?? ''),
+                'status' => $status,
+                'scannedAt' => $record?->scanned_at?->toIso8601String(),
                 'recordedMethod' => $record?->recorded_method?->value,
-                'notes'          => $record?->notes,
+                'notes' => $record?->notes,
             ];
         })->values()->all();
 
         return [
             'session' => $session,
-            'group'   => $group,
-            'roster'  => $roster,
+            'group' => $group,
+            'roster' => $roster,
         ];
     }
 
@@ -249,14 +248,14 @@ class TeacherAttendanceService extends BaseService
             ->whereDate('session_date', $sessionDate)
             ->first();
 
-        if (!$session) {
+        if (! $session) {
             $session = GroupAttendanceSession::create([
-                'study_group_id'  => $group->id,
-                'session_date'    => $sessionDate,
-                'teacher_id'      => $teacher->id,
-                'title_ar'        => 'حصة ' . Carbon::parse($sessionDate)->locale('ar')->isoFormat('dddd D MMMM Y'),
-                'status'          => 'open',
-                'total_enrolled'  => (int) $group->enrolledEnrollments()->count(),
+                'study_group_id' => $group->id,
+                'session_date' => $sessionDate,
+                'teacher_id' => $teacher->id,
+                'title_ar' => 'حصة '.Carbon::parse($sessionDate)->locale('ar')->isoFormat('dddd D MMMM Y'),
+                'status' => 'open',
+                'total_enrolled' => (int) $group->enrolledEnrollments()->count(),
                 'attendance_rate' => 0.0,
             ]);
         }
@@ -317,6 +316,7 @@ class TeacherAttendanceService extends BaseService
         // 4. Structured QR Token: MOTAFAWWEQ:STUDENT:{code}
         if (str_starts_with($clean, 'MOTAFAWWEQ:STUDENT:')) {
             $subCode = trim(substr($clean, strlen('MOTAFAWWEQ:STUDENT:')));
+
             return $this->resolveEnrollmentByCode($group, $subCode);
         }
 
@@ -379,9 +379,9 @@ class TeacherAttendanceService extends BaseService
 
         $enrollment->update([
             'attended_sessions' => $attendedCount,
-            'total_sessions'    => $totalSessionsCount,
-            'attendance_rate'   => min(100, max(0, $rate)),
-            'streak_days'       => max(1, $streak),
+            'total_sessions' => $totalSessionsCount,
+            'attendance_rate' => min(100, max(0, $rate)),
+            'streak_days' => max(1, $streak),
         ]);
     }
 }

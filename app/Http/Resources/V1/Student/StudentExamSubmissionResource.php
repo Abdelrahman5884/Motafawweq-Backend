@@ -27,21 +27,20 @@ class StudentExamSubmissionResource extends BaseJsonResource
         $showResults = (bool) ($this->exam?->show_results ?? true);
 
         return [
-            'id'              => $this->uuid,
-            'examId'          => $this->whenLoaded('exam', fn () => $this->exam?->uuid),
-            'examTitleAr'     => $this->whenLoaded('exam', fn () => $this->exam?->title_ar),
-            'status'          => $status,
-            'statusLabelAr'   => $statusLabelAr,
-            'score'           => $showResults ? (float) $this->score : null,
-            'fullMark'        => (int) $this->full_mark,
-            'percentage'      => $showResults ? (float) $this->percentage : null,
-            'isPassed'        => $showResults ? (bool) $this->is_passed : null,
-            'isFullMark'      => $showResults ? (bool) $this->is_full_mark : null,
+            'id' => $this->uuid,
+            'examId' => $this->whenLoaded('exam', fn () => $this->exam?->uuid),
+            'examTitleAr' => $this->whenLoaded('exam', fn () => $this->exam?->title_ar),
+            'status' => $status,
+            'statusLabelAr' => $statusLabelAr,
+            'score' => $showResults ? (float) $this->score : null,
+            'fullMark' => (int) $this->full_mark,
+            'percentage' => $showResults ? (float) $this->percentage : null,
+            'isPassed' => $showResults ? (bool) $this->is_passed : null,
+            'isFullMark' => $showResults ? (bool) $this->is_full_mark : null,
             'teacherFeedback' => $showResults ? $this->teacher_feedback : null,
-            'startedAt'       => $this->formatDate($this->started_at),
-            'submittedAt'     => $this->formatDate($this->submitted_at),
-            'showResults'     => $showResults,
+            'startedAt' => $this->formatDate($this->started_at),
+            'submittedAt' => $this->formatDate($this->submitted_at),
+            'showResults' => $showResults,
         ];
     }
 }
-

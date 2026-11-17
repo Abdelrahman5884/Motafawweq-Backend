@@ -66,10 +66,10 @@ class AuthSecurityException extends Exception
     public function render(): JsonResponse
     {
         return response()->json(array_filter([
-            'success'    => false,
-            'message'    => $this->getMessage(),
+            'success' => false,
+            'message' => $this->getMessage(),
             'error_code' => $this->errorCode,
-            'meta'       => $this->extra ?: null,
+            'meta' => $this->extra ?: null,
         ], fn ($v) => $v !== null), $this->statusCode);
     }
 }

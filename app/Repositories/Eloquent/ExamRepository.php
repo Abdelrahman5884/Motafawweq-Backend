@@ -46,8 +46,8 @@ class ExamRepository extends BaseRepository implements ExamRepositoryInterface
             ->with(['course', 'questions'])
             ->first();
 
-        if (!$exam) {
-            throw (new ModelNotFoundException())->setModel(Exam::class, [$uuid]);
+        if (! $exam) {
+            throw (new ModelNotFoundException)->setModel(Exam::class, [$uuid]);
         }
 
         $exam->assertOwnedBy($teacher);
@@ -62,4 +62,3 @@ class ExamRepository extends BaseRepository implements ExamRepositoryInterface
             ->count();
     }
 }
-

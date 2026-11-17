@@ -58,8 +58,8 @@ class HomeworkRepository extends BaseRepository implements HomeworkRepositoryInt
             ->with(['course', 'lesson'])
             ->first();
 
-        if (!$homework) {
-            throw (new ModelNotFoundException())->setModel(Homework::class, [$uuid]);
+        if (! $homework) {
+            throw (new ModelNotFoundException)->setModel(Homework::class, [$uuid]);
         }
 
         $homework->assertOwnedBy($teacher);
@@ -67,4 +67,3 @@ class HomeworkRepository extends BaseRepository implements HomeworkRepositoryInt
         return $homework;
     }
 }
-

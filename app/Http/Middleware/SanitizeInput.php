@@ -26,13 +26,13 @@ class SanitizeInput
     /**
      * Handle an incoming request and sanitize string inputs.
      *
-     * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
+     * @param  Closure(Request): (Response)  $next
      */
     public function handle(Request $request, Closure $next): Response
     {
         $input = $request->except(self::EXCEPT);
 
-        if (!empty($input)) {
+        if (! empty($input)) {
             array_walk_recursive($input, function (&$value) {
                 if (is_string($value)) {
                     // Strip null byte attacks

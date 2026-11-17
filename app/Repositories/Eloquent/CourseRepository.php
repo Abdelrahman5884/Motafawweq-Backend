@@ -33,12 +33,12 @@ class CourseRepository extends BaseRepository implements CourseRepositoryInterfa
             });
         }
 
-        if (!empty($filters['stage_id']) || !empty($filters['stage'])) {
+        if (! empty($filters['stage_id']) || ! empty($filters['stage'])) {
             $stage = $filters['stage_id'] ?? $filters['stage'];
             $query->where('stage_id', $stage);
         }
 
-        if (!empty($filters['status'])) {
+        if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
 
@@ -53,8 +53,8 @@ class CourseRepository extends BaseRepository implements CourseRepositoryInterfa
         /** @var Course|null $course */
         $course = $this->model->where('uuid', $uuid)->first();
 
-        if (!$course) {
-            throw (new ModelNotFoundException())->setModel(Course::class, [$uuid]);
+        if (! $course) {
+            throw (new ModelNotFoundException)->setModel(Course::class, [$uuid]);
         }
 
         $course->assertOwnedBy($teacher);
@@ -70,4 +70,3 @@ class CourseRepository extends BaseRepository implements CourseRepositoryInterfa
         return $this->model->forTeacher($teacherId)->count();
     }
 }
-

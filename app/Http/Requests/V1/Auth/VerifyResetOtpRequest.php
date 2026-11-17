@@ -10,7 +10,7 @@ class VerifyResetOtpRequest extends BaseApiRequest
     {
         return [
             'email' => ['required', 'string', 'email', 'max:255'],
-            'code'  => ['required', 'string', 'digits:' . config('auth_security.otp.length')],
+            'code' => ['required', 'string', 'digits:'.config('auth_security.otp.length')],
         ];
     }
 
@@ -23,4 +23,3 @@ class VerifyResetOtpRequest extends BaseApiRequest
         }
     }
 }
-

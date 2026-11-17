@@ -9,6 +9,7 @@ use App\Notifications\Auth\NewDeviceLoginNotification;
 use App\Notifications\Auth\PasswordChangedNotification;
 use App\Notifications\Auth\ResetPasswordOtpNotification;
 use App\Notifications\Auth\VerifyEmailOtpNotification;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Http;
@@ -29,13 +30,13 @@ class AuthSecurityTest extends TestCase
     }
 
     /* ----------------------------------------------------------------- */
-    /* Helpers                                                            */
+    /* Helpers */
     /* ----------------------------------------------------------------- */
 
     private function makeUser(array $attrs = []): User
     {
         return User::factory()->create(array_merge([
-            'email'    => 'user@motafawweq.test',
+            'email' => 'user@motafawweq.test',
             'password' => self::STRONG_PASSWORD,
         ], $attrs));
     }
@@ -55,6 +56,7 @@ class AuthSecurityTest extends TestCase
     {
         // Each call must re-resolve the guard, otherwise the previous user stays cached
         $this->app['auth']->forgetGuards();
+
         return $this->withHeader('Authorization', "Bearer {$token}");
     }
 
@@ -63,21 +65,23 @@ class AuthSecurityTest extends TestCase
         $code = null;
         Notification::assertSentTo($user, $notificationClass, function ($n) use (&$code) {
             $code = $n->code;
+
             return true;
         });
+
         return $code;
     }
 
     /* ----------------------------------------------------------------- */
-    /* Registration                                                       */
+    /* Registration */
     /* ----------------------------------------------------------------- */
 
     public function test_register_returns_token_pair_and_sends_verification_otp(): void
     {
         $response = $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'أحمد محمد',
-            'email'                 => 'Ahmed@Motafawweq.test',
-            'password'              => self::STRONG_PASSWORD,
+            'name' => 'أحمد محمد',
+            'email' => 'Ahmed@Motafawweq.test',
+            'password' => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
         ]);
 
@@ -95,11 +99,11 @@ class AuthSecurityTest extends TestCase
     public function test_cannot_self_register_as_admin(): void
     {
         $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'Hacker',
-            'email'                 => 'hacker@motafawweq.test',
-            'password'              => self::STRONG_PASSWORD,
+            'name' => 'Hacker',
+            'email' => 'hacker@motafawweq.test',
+            'password' => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
-            'role'                  => 'admin',
+            'role' => 'admin',
         ])->assertStatus(422)->assertJsonValidationErrors('role');
 
         $this->assertDatabaseMissing('users', ['email' => 'hacker@motafawweq.test']);
@@ -108,13 +112,13 @@ class AuthSecurityTest extends TestCase
     public function test_mass_assignment_of_status_is_ignored(): void
     {
         $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'Sneaky User',
-            'email'                 => 'sneaky@motafawweq.test',
-            'password'              => self::STRONG_PASSWORD,
+            'name' => 'Sneaky User',
+            'email' => 'sneaky@motafawweq.test',
+            'password' => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
-            'role'                  => 'teacher',
-            'status'                => 'suspended',
-            'email_verified_at'     => now()->toDateTimeString(),
+            'role' => 'teacher',
+            'status' => 'suspended',
+            'email_verified_at' => now()->toDateTimeString(),
         ])->assertCreated();
 
         $user = User::where('email', 'sneaky@motafawweq.test')->first();
@@ -125,9 +129,9 @@ class AuthSecurityTest extends TestCase
     public function test_weak_password_is_rejected(): void
     {
         $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'Weak User',
-            'email'                 => 'weak@motafawweq.test',
-            'password'              => 'password',
+            'name' => 'Weak User',
+            'email' => 'weak@motafawweq.test',
+            'password' => 'password',
             'password_confirmation' => 'password',
         ])->assertStatus(422)->assertJsonValidationErrors('password');
     }
@@ -136,9 +140,9 @@ class AuthSecurityTest extends TestCase
     {
         $password = '<b>Ab1!xyz</b> ';
         $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'Html Pass',
-            'email'                 => 'html@motafawweq.test',
-            'password'              => $password,
+            'name' => 'Html Pass',
+            'email' => 'html@motafawweq.test',
+            'password' => $password,
             'password_confirmation' => $password,
         ])->assertCreated();
 
@@ -147,7 +151,7 @@ class AuthSecurityTest extends TestCase
     }
 
     /* ----------------------------------------------------------------- */
-    /* Login, lockout, enumeration                                        */
+    /* Login, lockout, enumeration */
     /* ----------------------------------------------------------------- */
 
     public function test_login_success_records_history(): void
@@ -224,7 +228,7 @@ class AuthSecurityTest extends TestCase
     }
 
     /* ----------------------------------------------------------------- */
-    /* Token types, refresh rotation, logout                              */
+    /* Token types, refresh rotation, logout */
     /* ----------------------------------------------------------------- */
 
     public function test_refresh_token_cannot_be_used_as_access_token(): void
@@ -306,15 +310,15 @@ class AuthSecurityTest extends TestCase
     }
 
     /* ----------------------------------------------------------------- */
-    /* Email verification                                                 */
+    /* Email verification */
     /* ----------------------------------------------------------------- */
 
     public function test_unverified_user_is_blocked_until_email_is_verified_with_otp(): void
     {
         $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'New Student',
-            'email'                 => 'new@motafawweq.test',
-            'password'              => self::STRONG_PASSWORD,
+            'name' => 'New Student',
+            'email' => 'new@motafawweq.test',
+            'password' => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
         ]);
         $user = User::where('email', 'new@motafawweq.test')->first();
@@ -375,7 +379,7 @@ class AuthSecurityTest extends TestCase
     }
 
     /* ----------------------------------------------------------------- */
-    /* Password reset & change                                            */
+    /* Password reset & change */
     /* ----------------------------------------------------------------- */
 
     public function test_forgot_password_rejects_unregistered_email_and_verifies_otp_step(): void
@@ -396,13 +400,13 @@ class AuthSecurityTest extends TestCase
         // Step 2: wrong OTP is rejected immediately
         $this->postJson('/api/v1/auth/password/verify-otp', [
             'email' => $user->email,
-            'code'  => $wrongCode,
+            'code' => $wrongCode,
         ])->assertStatus(422)->assertJsonValidationErrors('code');
 
         // Step 2: valid OTP is accepted without consuming it yet
         $this->postJson('/api/v1/auth/password/verify-otp', [
             'email' => $user->email,
-            'code'  => $code,
+            'code' => $code,
         ])->assertOk();
     }
 
@@ -417,9 +421,9 @@ class AuthSecurityTest extends TestCase
 
         $newPassword = 'N3w!Secure#Pass';
         $this->postJson('/api/v1/auth/password/reset', [
-            'email'                 => $user->email,
-            'code'                  => $code,
-            'password'              => $newPassword,
+            'email' => $user->email,
+            'code' => $code,
+            'password' => $newPassword,
             'password_confirmation' => $newPassword,
         ])->assertOk();
 
@@ -435,9 +439,9 @@ class AuthSecurityTest extends TestCase
         $this->postJson('/api/v1/auth/password/forgot', ['email' => $user->email]);
 
         $this->postJson('/api/v1/auth/password/reset', [
-            'email'                 => $user->email,
-            'code'                  => '123456',
-            'password'              => 'N3w!Secure#Pass',
+            'email' => $user->email,
+            'code' => '123456',
+            'password' => 'N3w!Secure#Pass',
             'password_confirmation' => 'N3w!Secure#Pass',
         ])->assertStatus(422);
     }
@@ -449,8 +453,8 @@ class AuthSecurityTest extends TestCase
         $other = $this->tokensFor($user, 'Other');
 
         $this->bearer($current['access_token'])->postJson('/api/v1/auth/change-password', [
-            'current_password'          => self::STRONG_PASSWORD,
-            'new_password'              => 'An0ther!Strong1',
+            'current_password' => self::STRONG_PASSWORD,
+            'new_password' => 'An0ther!Strong1',
             'new_password_confirmation' => 'An0ther!Strong1',
         ])->assertOk();
 
@@ -459,7 +463,7 @@ class AuthSecurityTest extends TestCase
     }
 
     /* ----------------------------------------------------------------- */
-    /* Sessions                                                           */
+    /* Sessions */
     /* ----------------------------------------------------------------- */
 
     public function test_user_can_list_and_revoke_own_sessions_but_not_others(): void
@@ -497,11 +501,11 @@ class AuthSecurityTest extends TestCase
     public function test_new_user_does_not_require_supervisor_approval_and_activates_via_email_otp(): void
     {
         $res = $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'أستاذ محمد',
-            'email'                 => 'mohamed.teacher@motafawweq.test',
-            'password'              => self::STRONG_PASSWORD,
+            'name' => 'أستاذ محمد',
+            'email' => 'mohamed.teacher@motafawweq.test',
+            'password' => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
-            'role'                  => 'teacher',
+            'role' => 'teacher',
         ])->assertCreated();
 
         $token = $res->json('data.tokens.access_token');
@@ -526,24 +530,24 @@ class AuthSecurityTest extends TestCase
 
     public function test_auth_mail_notifications_implement_should_queue(): void
     {
-        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldQueue::class, new VerifyEmailOtpNotification('123456', 10));
-        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldQueue::class, new ResetPasswordOtpNotification('123456', 10));
-        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldQueue::class, new NewDeviceLoginNotification('127.0.0.1', 'Mozilla/5.0'));
-        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldQueue::class, new PasswordChangedNotification('127.0.0.1'));
+        $this->assertInstanceOf(ShouldQueue::class, new VerifyEmailOtpNotification('123456', 10));
+        $this->assertInstanceOf(ShouldQueue::class, new ResetPasswordOtpNotification('123456', 10));
+        $this->assertInstanceOf(ShouldQueue::class, new NewDeviceLoginNotification('127.0.0.1', 'Mozilla/5.0'));
+        $this->assertInstanceOf(ShouldQueue::class, new PasswordChangedNotification('127.0.0.1'));
     }
 
     /* ----------------------------------------------------------------- */
-    /* Student Code & Parent-Student Linking                              */
+    /* Student Code & Parent-Student Linking */
     /* ----------------------------------------------------------------- */
 
     public function test_student_registration_generates_unique_student_code(): void
     {
         $res = $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'عمر طارق',
-            'email'                 => 'omar.student@motafawweq.test',
-            'password'              => self::STRONG_PASSWORD,
+            'name' => 'عمر طارق',
+            'email' => 'omar.student@motafawweq.test',
+            'password' => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
-            'role'                  => 'student',
+            'role' => 'student',
         ])->assertCreated();
 
         $code = $res->json('data.user.student_code');
@@ -554,42 +558,42 @@ class AuthSecurityTest extends TestCase
     public function test_parent_registration_requires_valid_student_code_and_links_student(): void
     {
         $studentRes = $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'عمر طارق',
-            'email'                 => 'omar.child@motafawweq.test',
-            'password'              => self::STRONG_PASSWORD,
+            'name' => 'عمر طارق',
+            'email' => 'omar.child@motafawweq.test',
+            'password' => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
-            'role'                  => 'student',
+            'role' => 'student',
         ])->assertCreated();
 
         $studentCode = $studentRes->json('data.user.student_code');
 
         // 1) Missing student_code fails
         $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'طارق القاضي',
-            'email'                 => 'parent1@motafawweq.test',
-            'password'              => self::STRONG_PASSWORD,
+            'name' => 'طارق القاضي',
+            'email' => 'parent1@motafawweq.test',
+            'password' => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
-            'role'                  => 'parent',
+            'role' => 'parent',
         ])->assertStatus(422)->assertJsonValidationErrors('student_code');
 
         // 2) Invalid student_code fails
         $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'طارق القاضي',
-            'email'                 => 'parent2@motafawweq.test',
-            'password'              => self::STRONG_PASSWORD,
+            'name' => 'طارق القاضي',
+            'email' => 'parent2@motafawweq.test',
+            'password' => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
-            'role'                  => 'parent',
-            'student_code'          => 'WRONG-9999',
+            'role' => 'parent',
+            'student_code' => 'WRONG-9999',
         ])->assertStatus(422)->assertJsonValidationErrors('student_code');
 
         // 3) Valid student_code succeeds and links the child
         $parentRes = $this->postJson('/api/v1/auth/register', [
-            'name'                  => 'طارق القاضي',
-            'email'                 => 'parent3@motafawweq.test',
-            'password'              => self::STRONG_PASSWORD,
+            'name' => 'طارق القاضي',
+            'email' => 'parent3@motafawweq.test',
+            'password' => self::STRONG_PASSWORD,
             'password_confirmation' => self::STRONG_PASSWORD,
-            'role'                  => 'parent',
-            'student_code'          => strtolower($studentCode),
+            'role' => 'parent',
+            'student_code' => strtolower($studentCode),
         ])->assertCreated();
 
         $this->assertSame('parent', $parentRes->json('data.user.role'));
@@ -599,7 +603,7 @@ class AuthSecurityTest extends TestCase
     }
 
     /* ----------------------------------------------------------------- */
-    /* Bilingual Localization (ar / en) & Brevo API Transport             */
+    /* Bilingual Localization (ar / en) & Brevo API Transport */
     /* ----------------------------------------------------------------- */
 
     public function test_validation_and_error_messages_respect_accept_language_header(): void
@@ -627,7 +631,7 @@ class AuthSecurityTest extends TestCase
 
         $transport = new BrevoApiTransport('xkeysib-test-api-key');
 
-        $email = (new Email())
+        $email = (new Email)
             ->from('noreply@motafawweq.me')
             ->to('student@motafawweq.me')
             ->subject('Verify Email')
@@ -644,4 +648,3 @@ class AuthSecurityTest extends TestCase
         });
     }
 }
-

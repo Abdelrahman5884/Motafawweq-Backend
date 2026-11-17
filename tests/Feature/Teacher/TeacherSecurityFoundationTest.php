@@ -21,17 +21,18 @@ class DummyTeacherOwnedModel extends Model
     use BelongsToTeacher;
 
     protected $table = 'dummy_teacher_models';
+
     protected $guarded = [];
 }
 
 class TeacherSecurityFoundationTest extends TestCase
 {
-    use RefreshDatabase, HasSecurityAudit;
+    use HasSecurityAudit, RefreshDatabase;
 
     public function test_security_audit_log_is_persisted_and_immutable(): void
     {
         $teacher = User::factory()->create([
-            'role'   => UserRole::TEACHER,
+            'role' => UserRole::TEACHER,
             'status' => UserStatus::ACTIVE,
         ]);
 
@@ -68,17 +69,17 @@ class TeacherSecurityFoundationTest extends TestCase
     public function test_belongs_to_teacher_prevents_idor_and_logs_violation(): void
     {
         $teacherA = User::factory()->create([
-            'role'   => UserRole::TEACHER,
+            'role' => UserRole::TEACHER,
             'status' => UserStatus::ACTIVE,
         ]);
 
         $teacherB = User::factory()->create([
-            'role'   => UserRole::TEACHER,
+            'role' => UserRole::TEACHER,
             'status' => UserStatus::ACTIVE,
         ]);
 
         $resourceOwnedByA = new DummyTeacherOwnedModel([
-            'uuid'       => '11111111-2222-3333-4444-555555555555',
+            'uuid' => '11111111-2222-3333-4444-555555555555',
             'teacher_id' => $teacherA->id,
         ]);
 
@@ -115,4 +116,3 @@ class TeacherSecurityFoundationTest extends TestCase
         $this->assertContains('الصف الثالث الثانوي', StageType::allowedGradesAr());
     }
 }
-

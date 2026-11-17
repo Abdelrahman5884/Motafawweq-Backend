@@ -27,17 +27,16 @@ class GroupAttendanceRecordResource extends BaseJsonResource
         $student = $this->student;
 
         return [
-            'id'             => $this->uuid,
-            'enrollmentId'   => $this->enrollment?->uuid,
-            'studentId'      => $student?->id,
-            'studentCode'    => $student?->student_code,
-            'nameAr'         => $this->enrollment?->student_name_override ?: ($student?->name ?? 'طالب'),
-            'status'         => $status,
-            'statusAr'       => $this->status instanceof AttendanceStatus ? $this->status->labelAr() : $status,
+            'id' => $this->uuid,
+            'enrollmentId' => $this->enrollment?->uuid,
+            'studentId' => $student?->id,
+            'studentCode' => $student?->student_code,
+            'nameAr' => $this->enrollment?->student_name_override ?: ($student?->name ?? 'طالب'),
+            'status' => $status,
+            'statusAr' => $this->status instanceof AttendanceStatus ? $this->status->labelAr() : $status,
             'recordedMethod' => $method,
-            'scannedAt'      => $this->formatDate($this->scanned_at),
-            'notes'          => $this->notes,
+            'scannedAt' => $this->formatDate($this->scanned_at),
+            'notes' => $this->notes,
         ];
     }
 }
-

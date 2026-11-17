@@ -20,7 +20,7 @@ class GroupEnrollmentRepository extends BaseRepository implements GroupEnrollmen
             ->where('status', EnrollmentStatus::ENROLLED->value)
             ->with(['student']);
 
-        if (!empty($search)) {
+        if (! empty($search)) {
             $this->applySearchFilter($query, trim($search));
         }
 
@@ -33,7 +33,7 @@ class GroupEnrollmentRepository extends BaseRepository implements GroupEnrollmen
             ->where('status', EnrollmentStatus::PENDING->value)
             ->with(['student']);
 
-        if (!empty($search)) {
+        if (! empty($search)) {
             $this->applySearchFilter($query, trim($search));
         }
 
@@ -79,4 +79,3 @@ class GroupEnrollmentRepository extends BaseRepository implements GroupEnrollmen
         });
     }
 }
-

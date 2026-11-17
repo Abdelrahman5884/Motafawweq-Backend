@@ -24,10 +24,9 @@ class ReorderLessonAttachmentsRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'ordered_ids'   => ['required', 'array', 'min:1', 'max:100'],
+            'ordered_ids' => ['required', 'array', 'min:1', 'max:100'],
             'ordered_ids.*' => ['required', 'uuid'],
-            'type'          => ['nullable', 'string', Rule::in(LessonAttachmentType::values())],
+            'type' => ['nullable', 'string', Rule::in(LessonAttachmentType::values())],
         ];
     }
 }
-

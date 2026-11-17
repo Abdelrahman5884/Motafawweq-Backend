@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\HomeworkSubmissionStatus;
+use App\Traits\BelongsToStudent;
 use App\Traits\HasSecurityAudit;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,7 +13,7 @@ use Illuminate\Support\Str;
 
 class HomeworkSubmission extends Model
 {
-    use HasFactory, SoftDeletes, HasSecurityAudit;
+    use BelongsToStudent, HasFactory, HasSecurityAudit, SoftDeletes;
 
     protected $table = 'homework_submissions';
 
@@ -37,11 +38,11 @@ class HomeworkSubmission extends Model
     protected function casts(): array
     {
         return [
-            'status'       => HomeworkSubmissionStatus::class,
-            'score'        => 'float',
-            'max_score'    => 'integer',
+            'status' => HomeworkSubmissionStatus::class,
+            'score' => 'float',
+            'max_score' => 'integer',
             'submitted_at' => 'datetime',
-            'graded_at'    => 'datetime',
+            'graded_at' => 'datetime',
         ];
     }
 
@@ -69,4 +70,3 @@ class HomeworkSubmission extends Model
         return $this->belongsTo(User::class, 'graded_by');
     }
 }
-

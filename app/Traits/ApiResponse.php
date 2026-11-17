@@ -17,10 +17,10 @@ trait ApiResponse
         $response = [
             'success' => true,
             'message' => $message ?? __('messages.operation_success'),
-            'data'    => $data,
+            'data' => $data,
         ];
 
-        if (!empty($meta)) {
+        if (! empty($meta)) {
             $response['meta'] = $meta;
         }
 
@@ -86,13 +86,13 @@ trait ApiResponse
         return response()->json([
             'success' => true,
             'message' => $message ?? __('messages.data_retrieved'),
-            'data'    => $items,
-            'meta'    => [
+            'data' => $items,
+            'meta' => [
                 'current_page' => $paginator->currentPage(),
-                'per_page'     => $paginator->perPage(),
-                'total'        => $paginator->total(),
-                'last_page'    => $paginator->lastPage(),
-                'has_more'     => $paginator->hasMorePages(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+                'has_more' => $paginator->hasMorePages(),
             ],
         ], Response::HTTP_OK);
     }

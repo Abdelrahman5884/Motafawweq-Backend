@@ -40,7 +40,7 @@ class AuthService extends BaseService
         $role = UserRole::from($data['role'] ?? UserRole::STUDENT->value);
 
         // Defence in depth: request validation already restricts roles, re-check here
-        if (!in_array($role->value, config('auth_security.self_registration_roles'), true)) {
+        if (! in_array($role->value, config('auth_security.self_registration_roles'), true)) {
             throw ValidationException::withMessages(['role' => [__('messages.role_not_allowed')]]);
         }
 
@@ -52,7 +52,7 @@ class AuthService extends BaseService
         if ($role === UserRole::PARENT) {
             $linkedStudent = $this->userRepository->findStudentByCode((string) ($data['student_code'] ?? ''));
 
-            if (!$linkedStudent) {
+            if (! $linkedStudent) {
                 throw ValidationException::withMessages([
                     'student_code' => [__('messages.invalid_student_code')],
                 ]);
@@ -66,13 +66,13 @@ class AuthService extends BaseService
 
             /** @var User $user */
             $user = $this->userRepository->forceCreate([
-                'name'                => $data['name'],
-                'email'               => strtolower(trim($data['email'])),
-                'password'            => $data['password'], // hashed by the model cast
-                'phone'               => $data['phone'] ?? null,
-                'role'                => $role->value,
-                'student_code'        => $studentCode,
-                'status'              => $status->value,
+                'name' => $data['name'],
+                'email' => strtolower(trim($data['email'])),
+                'password' => $data['password'], // hashed by the model cast
+                'phone' => $data['phone'] ?? null,
+                'role' => $role->value,
+                'student_code' => $studentCode,
+                'status' => $status->value,
                 'password_changed_at' => now(),
             ]);
 
@@ -92,8 +92,8 @@ class AuthService extends BaseService
 
         $this->logSecurityEvent('USER_REGISTERED', [
             'user_id' => $user->id,
-            'role'    => $role->value,
-            'status'  => $status->value,
+            'role' => $role->value,
+            'status' => $status->value,
         ]);
 
         return ['user' => $user->fresh(), 'tokens' => $tokens];
@@ -103,6 +103,7 @@ class AuthService extends BaseService
      * Authenticate credentials with lockout, timing-attack mitigation and audit trail.
      *
      * @return array{user: User, tokens: array}
+     *
      * @throws AuthSecurityException
      */
     public function login(string $email, string $password, ?string $ip, ?string $userAgent): array
@@ -111,7 +112,7 @@ class AuthService extends BaseService
         $user = $this->userRepository->findByEmail($email);
 
         // 1) Unknown email: burn the same CPU time as a real check, answer generically
-        if (!$user) {
+        if (! $user) {
             Hash::check($password, self::dummyHash());
             $this->loginHistory->record(null, $email, LoginStatus::FAILED, $ip, $userAgent);
             $this->logSecurityEvent('FAILED_LOGIN_UNKNOWN_EMAIL', ['email' => $email], 'warning');
@@ -126,7 +127,7 @@ class AuthService extends BaseService
         }
 
         // 3) Wrong password -> count it, lock on threshold
-        if (!Hash::check($password, $user->password)) {
+        if (! Hash::check($password, $user->password)) {
             $lockedNow = $this->userRepository->registerFailedAttempt(
                 $user,
                 (int) config('auth_security.lockout.max_attempts'),
@@ -166,11 +167,11 @@ class AuthService extends BaseService
         $this->loginHistory->record($user, $email, LoginStatus::SUCCESS, $ip, $userAgent);
         $tokens = $this->tokenService->issuePair($user, $ip, $userAgent);
 
-        if ($hadPreviousLogins && !$knownDevice) {
+        if ($hadPreviousLogins && ! $knownDevice) {
             $this->safeNotify($user, new NewDeviceLoginNotification($ip, $userAgent));
         }
 
-        $this->logSecurityEvent('SUCCESSFUL_LOGIN', ['user_id' => $user->id, 'new_device' => !$knownDevice]);
+        $this->logSecurityEvent('SUCCESSFUL_LOGIN', ['user_id' => $user->id, 'new_device' => ! $knownDevice]);
 
         return ['user' => $user->fresh(), 'tokens' => $tokens];
     }
@@ -221,7 +222,7 @@ class AuthService extends BaseService
      */
     public function changePassword(User $user, string $currentPassword, string $newPassword, ?string $ip): void
     {
-        if (!Hash::check($currentPassword, $user->password)) {
+        if (! Hash::check($currentPassword, $user->password)) {
             $this->logSecurityEvent('FAILED_PASSWORD_CHANGE_ATTEMPT', ['user_id' => $user->id], 'warning');
 
             throw ValidationException::withMessages([
@@ -230,7 +231,7 @@ class AuthService extends BaseService
         }
 
         $this->userRepository->forceUpdate($user, [
-            'password'            => $newPassword,
+            'password' => $newPassword,
             'password_changed_at' => now(),
         ]);
 
@@ -248,6 +249,7 @@ class AuthService extends BaseService
     public function updateProfile(User $user, array $data): User
     {
         $allowed = array_intersect_key($data, array_flip(['name', 'phone', 'avatar']));
+
         return $this->userRepository->update($user->id, $allowed);
     }
 

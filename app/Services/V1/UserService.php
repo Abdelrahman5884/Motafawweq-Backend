@@ -43,7 +43,7 @@ class UserService extends BaseService
     public function deleteUser(int|string $id): bool
     {
         $this->logSecurityEvent('USER_DELETED', ['target_user_id' => $id], 'warning');
+
         return $this->userRepository->delete($id);
     }
 }
-

@@ -19,9 +19,9 @@ class LoginHistoryRepository extends BaseRepository implements LoginHistoryRepos
     public function record(?User $user, ?string $email, LoginStatus $status, ?string $ip, ?string $userAgent): void
     {
         $this->model->create([
-            'user_id'    => $user?->id,
-            'email'      => $email ? Str::limit(strtolower($email), 250, '') : null,
-            'status'     => $status->value,
+            'user_id' => $user?->id,
+            'email' => $email ? Str::limit(strtolower($email), 250, '') : null,
+            'status' => $status->value,
             'ip_address' => $ip,
             'user_agent' => $userAgent ? Str::limit($userAgent, 500, '') : null,
         ]);
@@ -45,4 +45,3 @@ class LoginHistoryRepository extends BaseRepository implements LoginHistoryRepos
             ->exists();
     }
 }
-

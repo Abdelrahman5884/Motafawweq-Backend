@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 
 class TeacherInvoice extends Model
 {
-    use HasFactory, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory;
 
     protected $fillable = [
         'invoice_number',
@@ -31,12 +31,12 @@ class TeacherInvoice extends Model
     protected function casts(): array
     {
         return [
-            'payment_method'      => PaymentMethod::class,
-            'status'              => InvoiceStatus::class,
-            'base_amount_egp'     => 'float',
+            'payment_method' => PaymentMethod::class,
+            'status' => InvoiceStatus::class,
+            'base_amount_egp' => 'float',
             'discount_amount_egp' => 'float',
-            'final_amount_egp'    => 'float',
-            'paid_at'             => 'datetime',
+            'final_amount_egp' => 'float',
+            'paid_at' => 'datetime',
         ];
     }
 
@@ -69,4 +69,3 @@ class TeacherInvoice extends Model
         return $this->belongsTo(TeacherSubscription::class, 'subscription_id');
     }
 }
-

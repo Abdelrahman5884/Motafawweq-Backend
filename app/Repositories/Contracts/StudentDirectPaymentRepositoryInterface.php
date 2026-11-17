@@ -13,4 +13,3 @@ interface StudentDirectPaymentRepositoryInterface extends BaseRepositoryInterfac
 
     public function getTeacherFinancialKPIs(int $teacherId): array;
 }
-

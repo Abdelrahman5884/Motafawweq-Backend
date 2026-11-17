@@ -26,18 +26,18 @@ class TeacherBillingService
     public const PRICING = [
         'free' => [
             'monthly' => 0.0,
-            'term'    => 0.0,
-            'annual'  => 0.0,
+            'term' => 0.0,
+            'annual' => 0.0,
         ],
         'plus' => [
             'monthly' => 120.0,
-            'term'    => 480.0,
-            'annual'  => 900.0,
+            'term' => 480.0,
+            'annual' => 900.0,
         ],
         'pro' => [
             'monthly' => 220.0,
-            'term'    => 880.0,
-            'annual'  => 1650.0,
+            'term' => 880.0,
+            'annual' => 1650.0,
         ],
     ];
 
@@ -55,19 +55,19 @@ class TeacherBillingService
             ->orderByDesc('renews_at')
             ->first();
 
-        if (!$activeSub) {
+        if (! $activeSub) {
             $period = BillingPeriod::TERM;
             $renewsAt = Carbon::now()->addDays($period->durationDays());
             $activeSub = TeacherSubscription::create([
-                'teacher_id'     => $teacher->id,
-                'plan_tier'      => $tier,
-                'plan_name_ar'   => 'باقة ' . ($tier === TeacherPlanTier::PRO ? 'المحترف (Pro)' : 'المعلم بلس (Plus)') . ' — الفصل الدراسي الأول',
-                'plan_name_en'   => 'Teacher ' . ucfirst($tier->value) . ' — Active Semester',
+                'teacher_id' => $teacher->id,
+                'plan_tier' => $tier,
+                'plan_name_ar' => 'باقة '.($tier === TeacherPlanTier::PRO ? 'المحترف (Pro)' : 'المعلم بلس (Plus)').' — الفصل الدراسي الأول',
+                'plan_name_en' => 'Teacher '.ucfirst($tier->value).' — Active Semester',
                 'billing_period' => $period,
-                'amount_egp'     => self::PRICING[$tier->value]['term'] ?? 480.0,
-                'starts_at'      => Carbon::now()->subDays(10),
-                'renews_at'      => $renewsAt,
-                'status'         => 'active',
+                'amount_egp' => self::PRICING[$tier->value]['term'] ?? 480.0,
+                'starts_at' => Carbon::now()->subDays(10),
+                'renews_at' => $renewsAt,
+                'status' => 'active',
             ]);
         }
 
@@ -78,34 +78,34 @@ class TeacherBillingService
             ->get()
             ->map(function (TeacherInvoice $inv) {
                 return [
-                    'id'            => $inv->uuid,
+                    'id' => $inv->uuid,
                     'invoiceNumber' => $inv->invoice_number,
                     'descriptionAr' => $inv->description_ar,
                     'descriptionEn' => $inv->description_en,
                     'baseAmountEgp' => $inv->base_amount_egp,
-                    'discountEgp'   => $inv->discount_amount_egp,
-                    'finalAmountEgp'=> $inv->final_amount_egp,
+                    'discountEgp' => $inv->discount_amount_egp,
+                    'finalAmountEgp' => $inv->final_amount_egp,
                     'paymentMethod' => $inv->payment_method?->value ?? 'vodafone',
                     'methodLabelAr' => $inv->payment_method?->label() ?? 'فودافون كاش',
-                    'status'        => $inv->status?->value ?? 'paid',
+                    'status' => $inv->status?->value ?? 'paid',
                     'statusLabelAr' => $inv->status?->label() ?? 'مدفوع',
-                    'paidAt'        => $inv->paid_at?->format('Y-m-d H:i') ?? $inv->created_at->format('Y-m-d H:i'),
+                    'paidAt' => $inv->paid_at?->format('Y-m-d H:i') ?? $inv->created_at->format('Y-m-d H:i'),
                 ];
             });
 
         return [
             'activeSub' => [
-                'planTier'      => $activeSub->plan_tier->value,
-                'planNameAr'    => $activeSub->plan_name_ar,
-                'planNameEn'    => $activeSub->plan_name_en,
+                'planTier' => $activeSub->plan_tier->value,
+                'planNameAr' => $activeSub->plan_name_ar,
+                'planNameEn' => $activeSub->plan_name_en,
                 'billingPeriod' => $activeSub->billing_period->value,
-                'status'        => $activeSub->status,
-                'renewalDate'   => $activeSub->renews_at->toDateString(),
+                'status' => $activeSub->status,
+                'renewalDate' => $activeSub->renews_at->toDateString(),
                 'daysRemaining' => $daysRemaining,
-                'amountEgp'     => $activeSub->amount_egp,
+                'amountEgp' => $activeSub->amount_egp,
             ],
             'pricingMatrix' => self::PRICING,
-            'invoices'      => $invoices,
+            'invoices' => $invoices,
         ];
     }
 
@@ -118,33 +118,33 @@ class TeacherBillingService
 
         if ($clean === '') {
             return [
-                'isValid'         => false,
-                'messageAr'       => 'يرجى إدخال كود الخصم',
+                'isValid' => false,
+                'messageAr' => 'يرجى إدخال كود الخصم',
                 'discountPercent' => 0,
-                'discountAmount'  => 0.0,
+                'discountAmount' => 0.0,
             ];
         }
 
         $coupon = DiscountCoupon::where('code', $clean)->first();
 
         if ($coupon) {
-            if (!$coupon->isValid($orderAmount)) {
+            if (! $coupon->isValid($orderAmount)) {
                 return [
-                    'isValid'         => false,
-                    'messageAr'       => 'كود الخصم غير صالح أو منتهي الصلاحية أو تجاوز الحد الأقصى للاستخدام',
+                    'isValid' => false,
+                    'messageAr' => 'كود الخصم غير صالح أو منتهي الصلاحية أو تجاوز الحد الأقصى للاستخدام',
                     'discountPercent' => 0,
-                    'discountAmount'  => 0.0,
+                    'discountAmount' => 0.0,
                 ];
             }
 
             $discountAmt = $coupon->calculateDiscount($orderAmount);
 
             return [
-                'isValid'         => true,
-                'couponCode'      => $coupon->code,
+                'isValid' => true,
+                'couponCode' => $coupon->code,
                 'discountPercent' => $coupon->discount_percent,
-                'discountAmount'  => $discountAmt,
-                'messageAr'       => "تم تطبيق كود الخصم بنجاح ({$coupon->discount_percent}%)",
+                'discountAmount' => $discountAmt,
+                'messageAr' => "تم تطبيق كود الخصم بنجاح ({$coupon->discount_percent}%)",
             ];
         }
 
@@ -155,19 +155,19 @@ class TeacherBillingService
             $discountAmt = round($orderAmount * 0.25, 2);
 
             return [
-                'isValid'         => true,
-                'couponCode'      => $clean,
+                'isValid' => true,
+                'couponCode' => $clean,
                 'discountPercent' => $discountPct,
-                'discountAmount'  => $discountAmt,
-                'messageAr'       => "تم تطبيق كود الخصم بنجاح ({$discountPct}%)",
+                'discountAmount' => $discountAmt,
+                'messageAr' => "تم تطبيق كود الخصم بنجاح ({$discountPct}%)",
             ];
         }
 
         return [
-            'isValid'         => false,
-            'messageAr'       => 'كود الخصم غير صحيح. جرب كود: TEACHER2026',
+            'isValid' => false,
+            'messageAr' => 'كود الخصم غير صحيح. جرب كود: TEACHER2026',
             'discountPercent' => 0,
-            'discountAmount'  => 0.0,
+            'discountAmount' => 0.0,
         ];
     }
 
@@ -179,7 +179,7 @@ class TeacherBillingService
         $rawTier = strtolower(trim((string) ($data['plan_tier'] ?? $data['planTier'] ?? 'plus')));
         $tier = TeacherPlanTier::tryFrom($rawTier);
 
-        if (!$tier) {
+        if (! $tier) {
             throw new InvalidArgumentException("الباقة المحددة '{$rawTier}' غير صالحة.");
         }
 
@@ -190,7 +190,7 @@ class TeacherBillingService
         $discountAmount = 0.0;
         $appliedCoupon = null;
 
-        if (!empty($data['coupon_code'])) {
+        if (! empty($data['coupon_code'])) {
             $couponResult = $this->validateCoupon((string) $data['coupon_code'], $basePrice);
             if ($couponResult['isValid']) {
                 $discountAmount = (float) $couponResult['discountAmount'];
@@ -204,8 +204,8 @@ class TeacherBillingService
 
         $periodLabelAr = match ($period) {
             BillingPeriod::MONTHLY => 'شهرياً',
-            BillingPeriod::TERM    => 'نصف سنوي (ترم دراسي)',
-            BillingPeriod::ANNUAL  => 'سنة دراسية كاملة',
+            BillingPeriod::TERM => 'نصف سنوي (ترم دراسي)',
+            BillingPeriod::ANNUAL => 'سنة دراسية كاملة',
         };
 
         $planNameAr = "باقة المعلم {$tier->label()} ({$periodLabelAr})";
@@ -227,15 +227,15 @@ class TeacherBillingService
 
             // Create new active subscription
             $sub = TeacherSubscription::create([
-                'teacher_id'     => $teacher->id,
-                'plan_tier'      => $tier,
-                'plan_name_ar'   => $planNameAr,
-                'plan_name_en'   => $planNameEn,
+                'teacher_id' => $teacher->id,
+                'plan_tier' => $tier,
+                'plan_name_ar' => $planNameAr,
+                'plan_name_en' => $planNameEn,
                 'billing_period' => $period,
-                'amount_egp'     => $finalPrice,
-                'starts_at'      => $startsAt,
-                'renews_at'      => $renewsAt,
-                'status'         => 'active',
+                'amount_egp' => $finalPrice,
+                'starts_at' => $startsAt,
+                'renews_at' => $renewsAt,
+                'status' => 'active',
             ]);
 
             // Update Teacher Profile plan_tier
@@ -245,17 +245,17 @@ class TeacherBillingService
 
             // Create official paid invoice
             $inv = TeacherInvoice::create([
-                'invoice_number'      => TeacherInvoice::generateUniqueInvoiceNumber(),
-                'teacher_id'          => $teacher->id,
-                'subscription_id'     => $sub->id,
-                'description_ar'      => "اشتراك {$planNameAr}",
-                'description_en'      => "Subscription: {$planNameEn}",
-                'base_amount_egp'     => $basePrice,
+                'invoice_number' => TeacherInvoice::generateUniqueInvoiceNumber(),
+                'teacher_id' => $teacher->id,
+                'subscription_id' => $sub->id,
+                'description_ar' => "اشتراك {$planNameAr}",
+                'description_en' => "Subscription: {$planNameEn}",
+                'base_amount_egp' => $basePrice,
                 'discount_amount_egp' => $discountAmount,
-                'final_amount_egp'    => $finalPrice,
-                'payment_method'      => $paymentMethod,
-                'status'              => InvoiceStatus::PAID,
-                'paid_at'             => now(),
+                'final_amount_egp' => $finalPrice,
+                'payment_method' => $paymentMethod,
+                'status' => InvoiceStatus::PAID,
+                'paid_at' => now(),
             ]);
 
             // If DB coupon model was used, increment usage
@@ -269,11 +269,11 @@ class TeacherBillingService
         $this->logSecurityEvent(
             'teacher.plan_subscribed',
             [
-                'teacher_id'     => $teacher->id,
-                'tier'           => $tier->value,
-                'period'         => $period->value,
+                'teacher_id' => $teacher->id,
+                'tier' => $tier->value,
+                'period' => $period->value,
                 'invoice_number' => $invoice->invoice_number,
-                'final_price'    => $finalPrice,
+                'final_price' => $finalPrice,
                 'payment_method' => $paymentMethod->value,
             ],
             'info',
@@ -282,10 +282,9 @@ class TeacherBillingService
 
         return [
             'subscription' => $subscription,
-            'invoice'      => $invoice,
-            'daysRemaining'=> $period->durationDays(),
-            'messageAr'    => 'تم ترقية وتفعيل الباقة بنوجاح وإصدار الفاتورة الرسمية.',
+            'invoice' => $invoice,
+            'daysRemaining' => $period->durationDays(),
+            'messageAr' => 'تم ترقية وتفعيل الباقة بنوجاح وإصدار الفاتورة الرسمية.',
         ];
     }
 }
-

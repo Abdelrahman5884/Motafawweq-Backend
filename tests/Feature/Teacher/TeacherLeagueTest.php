@@ -4,7 +4,6 @@ namespace Tests\Feature\Teacher;
 
 use App\Enums\EnrollmentStatus;
 use App\Enums\LeagueDuration;
-use App\Enums\LeagueTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
@@ -25,9 +24,9 @@ class TeacherLeagueTest extends TestCase
     protected function createTeacher(string $email = 'teacher.league@motafawweq.com'): User
     {
         return User::factory()->create([
-            'email'             => $email,
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'email' => $email,
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
@@ -35,10 +34,10 @@ class TeacherLeagueTest extends TestCase
     protected function createStudent(string $name, string $email): User
     {
         return User::factory()->create([
-            'name'              => $name,
-            'email'             => $email,
-            'role'              => UserRole::STUDENT,
-            'status'            => UserStatus::ACTIVE,
+            'name' => $name,
+            'email' => $email,
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
@@ -48,52 +47,52 @@ class TeacherLeagueTest extends TestCase
         $teacher = $this->createTeacher();
         $course = Course::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'ماستر كلاس الأحياء 3 ثانوي',
-            'stage'      => 'sec',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'title_ar' => 'ماستر كلاس الأحياء 3 ثانوي',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
         ]);
 
         $group = StudyGroup::create([
-            'teacher_id'       => $teacher->id,
-            'course_id'        => $course->id,
-            'name_ar'          => 'سنتر الدقي النخبة',
-            'stage'            => 'sec',
-            'grade_ar'         => 'الصف الثالث الثانوي',
-            'subject_ar'       => 'الأحياء',
-            'center_name'      => 'سنتر الدقي النخبة',
-            'governorate'      => 'الجيزة',
-            'area'             => 'الدقي',
-            'join_code'        => 'BIO-DK-01',
-            'max_capacity'     => 50,
-            'enrolled_count'   => 2,
-            'is_active'        => true,
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'name_ar' => 'سنتر الدقي النخبة',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'subject_ar' => 'الأحياء',
+            'center_name' => 'سنتر الدقي النخبة',
+            'governorate' => 'الجيزة',
+            'area' => 'الدقي',
+            'join_code' => 'BIO-DK-01',
+            'max_capacity' => 50,
+            'enrolled_count' => 2,
+            'is_active' => true,
         ]);
 
         $std1 = $this->createStudent('سارة خالد منصور', 'sara@motafawweq.com');
         $std2 = $this->createStudent('عمر طارق القاضي', 'omar@motafawweq.com');
 
         GroupEnrollment::create([
-            'study_group_id'  => $group->id,
-            'student_id'      => $std1->id,
-            'status'          => EnrollmentStatus::ENROLLED,
-            'streak_days'     => 10,
+            'study_group_id' => $group->id,
+            'student_id' => $std1->id,
+            'status' => EnrollmentStatus::ENROLLED,
+            'streak_days' => 10,
             'attendance_rate' => 100,
         ]);
 
         GroupEnrollment::create([
-            'study_group_id'  => $group->id,
-            'student_id'      => $std2->id,
-            'status'          => EnrollmentStatus::ENROLLED,
-            'streak_days'     => 5,
+            'study_group_id' => $group->id,
+            'student_id' => $std2->id,
+            'status' => EnrollmentStatus::ENROLLED,
+            'streak_days' => 5,
             'attendance_rate' => 95,
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $payload = [
-            'courseId'     => $course->uuid,
+            'courseId' => $course->uuid,
             'studyGroupId' => $group->uuid,
-            'duration'     => 'monthly',
+            'duration' => 'monthly',
         ];
 
         $response = $this->postJson('/api/v1/teacher/leagues', $payload);
@@ -107,12 +106,12 @@ class TeacherLeagueTest extends TestCase
 
         $this->assertDatabaseHas('course_leagues', [
             'teacher_id' => $teacher->id,
-            'course_id'  => $course->id,
+            'course_id' => $course->id,
         ]);
 
         $this->assertDatabaseHas('league_participants', [
             'student_id' => $std1->id,
-            'rank'       => 1,
+            'rank' => 1,
         ]);
     }
 
@@ -121,19 +120,19 @@ class TeacherLeagueTest extends TestCase
         $teacher = $this->createTeacher();
         $course = Course::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'كورس المراجعة النهائية',
-            'stage'      => 'sec',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'title_ar' => 'كورس المراجعة النهائية',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
         ]);
 
         $league = CourseLeague::create([
-            'teacher_id'        => $teacher->id,
-            'course_id'         => $course->id,
-            'title_ar'          => 'دوري معسكر المراجعة',
-            'course_name_ar'    => $course->title_ar,
-            'duration_type'     => LeagueDuration::MONTHLY,
-            'duration_days'     => 30,
-            'is_active'         => true,
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'دوري معسكر المراجعة',
+            'course_name_ar' => $course->title_ar,
+            'duration_type' => LeagueDuration::MONTHLY,
+            'duration_days' => 30,
+            'is_active' => true,
             'total_competitors' => 1,
         ]);
 
@@ -141,11 +140,11 @@ class TeacherLeagueTest extends TestCase
 
         LeagueParticipant::create([
             'course_league_id' => $league->id,
-            'student_id'       => $student->id,
-            'rank'             => 1,
-            'xp_points'        => 3500,
-            'tier'             => 'Diamond',
-            'badge_title_ar'   => 'بطلة الكورس',
+            'student_id' => $student->id,
+            'rank' => 1,
+            'xp_points' => 3500,
+            'tier' => 'Diamond',
+            'badge_title_ar' => 'بطلة الكورس',
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -170,18 +169,18 @@ class TeacherLeagueTest extends TestCase
         $teacher = $this->createTeacher();
         $course = Course::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'كورس الأحياء',
-            'stage'      => 'sec',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'title_ar' => 'كورس الأحياء',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
         ]);
 
         $league = CourseLeague::create([
-            'teacher_id'        => $teacher->id,
-            'course_id'         => $course->id,
-            'title_ar'          => 'دوري التحدي',
-            'duration_type'     => LeagueDuration::MONTHLY,
-            'duration_days'     => 30,
-            'is_active'         => true,
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'دوري التحدي',
+            'duration_type' => LeagueDuration::MONTHLY,
+            'duration_days' => 30,
+            'is_active' => true,
             'total_competitors' => 2,
         ]);
 
@@ -190,18 +189,18 @@ class TeacherLeagueTest extends TestCase
 
         LeagueParticipant::create([
             'course_league_id' => $league->id,
-            'student_id'       => $stdA->id,
-            'rank'             => 1,
-            'xp_points'        => 2000,
-            'tier'             => 'Silver',
+            'student_id' => $stdA->id,
+            'rank' => 1,
+            'xp_points' => 2000,
+            'tier' => 'Silver',
         ]);
 
         LeagueParticipant::create([
             'course_league_id' => $league->id,
-            'student_id'       => $stdB->id,
-            'rank'             => 2,
-            'xp_points'        => 1500,
-            'tier'             => 'Bronze',
+            'student_id' => $stdB->id,
+            'rank' => 2,
+            'xp_points' => 1500,
+            'tier' => 'Bronze',
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -209,8 +208,8 @@ class TeacherLeagueTest extends TestCase
         // Award 1800 XP to Student B so their total becomes 3300 (> 2000 of Student A)
         $payload = [
             'studentId' => $stdB->id,
-            'xpAmount'  => 1800,
-            'reasonAr'  => 'جائزة التميز في الواجب والامتحان',
+            'xpAmount' => 1800,
+            'reasonAr' => 'جائزة التميز في الواجب والامتحان',
         ];
 
         $response = $this->postJson("/api/v1/teacher/leagues/{$league->uuid}/award-xp", $payload);
@@ -221,22 +220,22 @@ class TeacherLeagueTest extends TestCase
         // Student B is now rank 1!
         $this->assertDatabaseHas('league_participants', [
             'course_league_id' => $league->id,
-            'student_id'       => $stdB->id,
-            'rank'             => 1,
-            'previous_rank'    => 2,
-            'movement'         => 'up',
-            'tier'             => 'Diamond',
-            'badge_title_ar'   => 'بطل الكورس',
+            'student_id' => $stdB->id,
+            'rank' => 1,
+            'previous_rank' => 2,
+            'movement' => 'up',
+            'tier' => 'Diamond',
+            'badge_title_ar' => 'بطل الكورس',
         ]);
 
         // Student A moved down to rank 2!
         $this->assertDatabaseHas('league_participants', [
             'course_league_id' => $league->id,
-            'student_id'       => $stdA->id,
-            'rank'             => 2,
-            'movement'         => 'down',
-            'tier'             => 'Silver',
-            'badge_title_ar'   => 'وصيف الكورس',
+            'student_id' => $stdA->id,
+            'rank' => 2,
+            'movement' => 'down',
+            'tier' => 'Silver',
+            'badge_title_ar' => 'وصيف الكورس',
         ]);
     }
 
@@ -245,18 +244,18 @@ class TeacherLeagueTest extends TestCase
         $teacher = $this->createTeacher();
         $course = Course::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'كورس الحذف',
-            'stage'      => 'sec',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'title_ar' => 'كورس الحذف',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
         ]);
 
         $league = CourseLeague::create([
-            'teacher_id'    => $teacher->id,
-            'course_id'     => $course->id,
-            'title_ar'      => 'دوري للحذف',
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'دوري للحذف',
             'duration_type' => LeagueDuration::WEEKLY,
             'duration_days' => 7,
-            'is_active'     => true,
+            'is_active' => true,
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -281,18 +280,18 @@ class TeacherLeagueTest extends TestCase
 
         $courseA = Course::create([
             'teacher_id' => $teacherA->id,
-            'title_ar'   => 'كورس المدرس أ',
-            'stage'      => 'sec',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'title_ar' => 'كورس المدرس أ',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
         ]);
 
         $leagueA = CourseLeague::create([
-            'teacher_id'    => $teacherA->id,
-            'course_id'     => $courseA->id,
-            'title_ar'      => 'دوري أ',
+            'teacher_id' => $teacherA->id,
+            'course_id' => $courseA->id,
+            'title_ar' => 'دوري أ',
             'duration_type' => LeagueDuration::MONTHLY,
             'duration_days' => 30,
-            'is_active'     => true,
+            'is_active' => true,
         ]);
 
         Sanctum::actingAs($teacherB, [TokenType::ACCESS->value]);
@@ -304,7 +303,7 @@ class TeacherLeagueTest extends TestCase
         // Attempt award XP
         $awardResponse = $this->postJson("/api/v1/teacher/leagues/{$leagueA->uuid}/award-xp", [
             'studentId' => 1,
-            'xpAmount'  => 500,
+            'xpAmount' => 500,
         ]);
         $awardResponse->assertForbidden();
 
@@ -314,7 +313,7 @@ class TeacherLeagueTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
+            'event' => 'teacher.idor_attempt_blocked',
         ]);
     }
 
@@ -323,26 +322,26 @@ class TeacherLeagueTest extends TestCase
         $teacher = $this->createTeacher();
         $course = Course::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'كورس الأحياء',
-            'stage'      => 'sec',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'title_ar' => 'كورس الأحياء',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
         ]);
 
         $league = CourseLeague::create([
-            'teacher_id'    => $teacher->id,
-            'course_id'     => $course->id,
-            'title_ar'      => 'دوري قديم',
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'دوري قديم',
             'group_name_ar' => 'جميع المجموعات (دوري موحد)',
             'duration_type' => LeagueDuration::MONTHLY,
             'duration_days' => 30,
-            'is_active'     => true,
+            'is_active' => true,
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $response = $this->putJson("/api/v1/teacher/leagues/{$league->uuid}", [
-            'title_ar'  => 'دوري الأحياء المعدل',
-            'duration'  => 'weekly',
+            'title_ar' => 'دوري الأحياء المعدل',
+            'duration' => 'weekly',
             'is_active' => false,
         ]);
 
@@ -353,10 +352,10 @@ class TeacherLeagueTest extends TestCase
             ->assertJsonPath('data.isActive', false);
 
         $this->assertDatabaseHas('course_leagues', [
-            'id'            => $league->id,
-            'title_ar'      => 'دوري الأحياء المعدل',
+            'id' => $league->id,
+            'title_ar' => 'دوري الأحياء المعدل',
             'duration_type' => 'weekly',
-            'is_active'     => false,
+            'is_active' => false,
         ]);
     }
 
@@ -365,19 +364,19 @@ class TeacherLeagueTest extends TestCase
         $teacher = $this->createTeacher();
         $course = Course::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'كورس الأحياء',
-            'stage'      => 'sec',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'title_ar' => 'كورس الأحياء',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
         ]);
 
         $league = CourseLeague::create([
-            'teacher_id'        => $teacher->id,
-            'course_id'         => $course->id,
-            'title_ar'          => 'دوري الأحياء',
-            'group_name_ar'     => 'جميع المجموعات (دوري موحد)',
-            'duration_type'     => LeagueDuration::MONTHLY,
-            'duration_days'     => 30,
-            'is_active'         => true,
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'دوري الأحياء',
+            'group_name_ar' => 'جميع المجموعات (دوري موحد)',
+            'duration_type' => LeagueDuration::MONTHLY,
+            'duration_days' => 30,
+            'is_active' => true,
             'total_competitors' => 0,
         ]);
 
@@ -398,8 +397,8 @@ class TeacherLeagueTest extends TestCase
 
         $this->assertDatabaseHas('league_participants', [
             'course_league_id' => $league->id,
-            'student_id'       => $lateStudent->id,
-            'xp_points'        => 1250,
+            'student_id' => $lateStudent->id,
+            'xp_points' => 1250,
         ]);
     }
 }

@@ -2,7 +2,6 @@
 
 namespace App\Services\V1\Teacher;
 
-use App\Enums\AttendanceStatus;
 use App\Enums\ExamSubmissionStatus;
 use App\Enums\HomeworkSubmissionStatus;
 use App\Enums\RiskLevel;
@@ -15,7 +14,6 @@ use App\Models\ExamSubmissionAnswer;
 use App\Models\GroupAttendanceRecord;
 use App\Models\GroupEnrollment;
 use App\Models\GroupScheduleSlot;
-use App\Models\Homework;
 use App\Models\HomeworkSubmission;
 use App\Models\Lesson;
 use App\Models\StudentRiskSignal;
@@ -76,7 +74,7 @@ class TeacherAnalyticsService extends BaseService
         foreach ($studyGroups as $group) {
             $centerName = $group->center_name ?: $group->name_ar;
             $count = $enrollments->where('study_group_id', $group->id)->count();
-            if (!isset($centerBreakdown[$centerName])) {
+            if (! isset($centerBreakdown[$centerName])) {
                 $centerBreakdown[$centerName] = 0;
             }
             $centerBreakdown[$centerName] += $count;
@@ -96,13 +94,13 @@ class TeacherAnalyticsService extends BaseService
             ->count();
 
         return [
-            'overallGpa'           => $overallGpa . '%',
-            'overallGpaNum'        => $overallGpa,
+            'overallGpa' => $overallGpa.'%',
+            'overallGpaNum' => $overallGpa,
             'totalStudentsAudited' => $totalStudents,
             'averageAttendancePct' => $avgAttendance,
-            'atRiskCount'          => $atRiskCount,
-            'revenueTotalEgp'      => $totalRevenue,
-            'centerDistribution'   => $centerBreakdown,
+            'atRiskCount' => $atRiskCount,
+            'revenueTotalEgp' => $totalRevenue,
+            'centerDistribution' => $centerBreakdown,
         ];
     }
 
@@ -139,11 +137,11 @@ class TeacherAnalyticsService extends BaseService
             $errorRate = round(($incorrectAnswers / $totalAnswers) * 100, 1);
 
             $results[] = [
-                'id'                 => $question->uuid,
-                'questionAr'         => $question->question_ar,
-                'topicAr'            => $question->exam?->title_ar ?: 'المقرر الدراسي',
-                'errorRatePct'       => $errorRate,
-                'commonMistakeAr'    => $question->explanation_ar ?: 'الخلط في التطبيق المباشر للمفهوم أثناء الإجابة',
+                'id' => $question->uuid,
+                'questionAr' => $question->question_ar,
+                'topicAr' => $question->exam?->title_ar ?: 'المقرر الدراسي',
+                'errorRatePct' => $errorRate,
+                'commonMistakeAr' => $question->explanation_ar ?: 'الخلط في التطبيق المباشر للمفهوم أثناء الإجابة',
                 'aiRecommendationAr' => 'تخصيص تدريب سريع ومراجعة المفهوم في مستهل الحصة القادمة.',
             ];
         }
@@ -155,19 +153,19 @@ class TeacherAnalyticsService extends BaseService
         if (empty($results)) {
             $results = [
                 [
-                    'id'                 => 'wa-seed-1',
-                    'questionAr'         => 'تأثير درجة الحرارة والضوء الحرج على نشاط إنزيم روبيسكو في تثبيت CO2',
-                    'topicAr'            => 'التفاعلات اللاضوئية - دورة كالفن',
-                    'errorRatePct'       => 46.0,
-                    'commonMistakeAr'    => 'الخلط بين العوامل المحددة لسرعة التفاعلات الضوئية واللاضوئية',
+                    'id' => 'wa-seed-1',
+                    'questionAr' => 'تأثير درجة الحرارة والضوء الحرج على نشاط إنزيم روبيسكو في تثبيت CO2',
+                    'topicAr' => 'التفاعلات اللاضوئية - دورة كالفن',
+                    'errorRatePct' => 46.0,
+                    'commonMistakeAr' => 'الخلط بين العوامل المحددة لسرعة التفاعلات الضوئية واللاضوئية',
                     'aiRecommendationAr' => 'تخصيص أول 10 دقائق في المحاضرة القادمة لشرح منحنى Q10 الحراري وعلاقته بالنشاط الإنزيمي.',
                 ],
                 [
-                    'id'                 => 'wa-seed-2',
-                    'questionAr'         => 'حساب عدد جزيئات ATP و NADPH اللازمة لتكوين جزيء جلوكوز واحد من PGAL',
-                    'topicAr'            => 'حسابات الطاقة الكيميائية',
-                    'errorRatePct'       => 38.0,
-                    'commonMistakeAr'    => 'نسيان أن تكوين جزيء جلوكوز يتطلب دورتين كاملتين من كالفن',
+                    'id' => 'wa-seed-2',
+                    'questionAr' => 'حساب عدد جزيئات ATP و NADPH اللازمة لتكوين جزيء جلوكوز واحد من PGAL',
+                    'topicAr' => 'حسابات الطاقة الكيميائية',
+                    'errorRatePct' => 38.0,
+                    'commonMistakeAr' => 'نسيان أن تكوين جزيء جلوكوز يتطلب دورتين كاملتين من كالفن',
                     'aiRecommendationAr' => 'إضافة تدريب تفاعلي مصور ومسائل خطوات بالأرقام في بنك الأسئلة.',
                 ],
             ];
@@ -210,11 +208,11 @@ class TeacherAnalyticsService extends BaseService
                     ],
                     [
                         'study_group_id' => $enrollment->study_group_id,
-                        'risk_level'     => $level,
-                        'risk_reasons_ar'=> implode('، و', $reasons),
+                        'risk_level' => $level,
+                        'risk_reasons_ar' => implode('، و', $reasons),
                         'attendance_pct' => $attRate,
                         'avg_exam_score' => $avgQuiz,
-                        'status'         => RiskSignalStatus::DETECTED,
+                        'status' => RiskSignalStatus::DETECTED,
                         'last_active_at' => Carbon::now()->subDays(2),
                     ]
                 );
@@ -249,8 +247,8 @@ class TeacherAnalyticsService extends BaseService
             ->with(['student', 'studyGroup'])
             ->first();
 
-        if (!$signal) {
-            throw (new ModelNotFoundException())->setModel(StudentRiskSignal::class, [$uuid]);
+        if (! $signal) {
+            throw (new ModelNotFoundException)->setModel(StudentRiskSignal::class, [$uuid]);
         }
 
         $action = strtolower(trim((string) ($data['action'] ?? 'resolve')));
@@ -266,9 +264,9 @@ class TeacherAnalyticsService extends BaseService
             'student_risk_signal_action',
             [
                 'teacher_id' => $teacher->id,
-                'signal_uuid'=> $signal->uuid,
+                'signal_uuid' => $signal->uuid,
                 'student_id' => $signal->student_id,
-                'action'     => $action,
+                'action' => $action,
                 'new_status' => $newStatus->value,
             ],
             'info',
@@ -299,11 +297,11 @@ class TeacherAnalyticsService extends BaseService
         for ($i = 0; $i < 7; $i++) {
             $day = $start->copy()->addDays($i);
             $result[] = [
-                'date'     => $day->toDateString(),
-                'dayAr'    => $daysAr[$day->dayOfWeek],
-                'dayEn'    => $day->format('D'),
+                'date' => $day->toDateString(),
+                'dayAr' => $daysAr[$day->dayOfWeek],
+                'dayEn' => $day->format('D'),
                 'students' => (int) ($counts[$day->toDateString()] ?? 0),
-                'isToday'  => $day->isToday(),
+                'isToday' => $day->isToday(),
             ];
         }
 
@@ -326,9 +324,9 @@ class TeacherAnalyticsService extends BaseService
             ->limit(5)
             ->get()
             ->map(fn ($row) => [
-                'nameAr'   => $row->name_ar,
-                'nameEn'   => $row->name_en ?: $row->name_ar,
-                'pct'      => round((float) $row->pct, 1),
+                'nameAr' => $row->name_ar,
+                'nameEn' => $row->name_en ?: $row->name_ar,
+                'pct' => round((float) $row->pct, 1),
                 'students' => (int) $row->students,
             ])
             ->values()
@@ -350,13 +348,13 @@ class TeacherAnalyticsService extends BaseService
             ->filter(fn ($g) => $g->enrolled_enrollments_count > 0)
             ->sortByDesc('enrolled_enrollments_count')
             ->map(fn ($g) => [
-                'id'         => $g->uuid,
-                'titleAr'    => $g->name_ar,
-                'titleEn'    => $g->name_en ?: $g->name_ar,
+                'id' => $g->uuid,
+                'titleAr' => $g->name_ar,
+                'titleEn' => $g->name_en ?: $g->name_ar,
                 'categoryAr' => $g->center_name ?: 'أونلاين',
                 'categoryEn' => $g->center_name ?: 'Online',
-                'count'      => (int) $g->enrolled_enrollments_count,
-                'pct'        => $total > 0 ? (int) round($g->enrolled_enrollments_count / $total * 100) : 0,
+                'count' => (int) $g->enrolled_enrollments_count,
+                'pct' => $total > 0 ? (int) round($g->enrolled_enrollments_count / $total * 100) : 0,
             ])
             ->values()
             ->all();
@@ -387,12 +385,12 @@ class TeacherAnalyticsService extends BaseService
             ->get()
             ->map(function ($slot) {
                 return [
-                    'id'          => $slot->id,
+                    'id' => $slot->id,
                     'groupNameAr' => $slot->studyGroup?->name_ar,
-                    'centerName'  => $slot->studyGroup?->center_name,
-                    'dayOfWeek'   => $slot->day_of_week?->value ?? (string)$slot->day_of_week,
-                    'startTime'   => $slot->start_time,
-                    'endTime'     => $slot->end_time,
+                    'centerName' => $slot->studyGroup?->center_name,
+                    'dayOfWeek' => $slot->day_of_week?->value ?? (string) $slot->day_of_week,
+                    'startTime' => $slot->start_time,
+                    'endTime' => $slot->end_time,
                 ];
             });
 
@@ -408,15 +406,15 @@ class TeacherAnalyticsService extends BaseService
                     : 0;
 
                 return [
-                    'id'                => $lesson->uuid,
-                    'titleAr'           => $lesson->title_ar,
-                    'titleEn'           => $lesson->title_en,
+                    'id' => $lesson->uuid,
+                    'titleAr' => $lesson->title_ar,
+                    'titleEn' => $lesson->title_en,
                     'durationFormatted' => $lesson->duration_label ?? '40:00',
-                    'recordedDate'      => $lesson->published_at?->toDateString() ?? $lesson->created_at?->toDateString(),
-                    'stats'             => [
-                        'conceptsCount'  => $conceptsCount,
+                    'recordedDate' => $lesson->published_at?->toDateString() ?? $lesson->created_at?->toDateString(),
+                    'stats' => [
+                        'conceptsCount' => $conceptsCount,
                         'completionRate' => null,
-                        'avgQuizScore'   => null,
+                        'avgQuizScore' => null,
                     ],
                 ];
             });
@@ -429,35 +427,35 @@ class TeacherAnalyticsService extends BaseService
             ->get()
             ->map(function ($grp) {
                 return [
-                    'id'            => $grp->uuid,
-                    'nameAr'        => $grp->name_ar,
-                    'centerName'    => $grp->center_name,
+                    'id' => $grp->uuid,
+                    'nameAr' => $grp->name_ar,
+                    'centerName' => $grp->center_name,
                     'enrolledCount' => (int) $grp->enrolled_enrollments_count,
-                    'maxCapacity'   => (int) $grp->max_students,
+                    'maxCapacity' => (int) $grp->max_students,
                 ];
             });
 
         return [
             'welcome' => [
                 'teacherName' => $teacher->name,
-                'avatar'      => $teacher->avatar,
-                'teacherCode' => 'TCH-' . str_pad((string) $teacher->id, 4, '0', STR_PAD_LEFT),
-                'planTier'    => $teacher->teacherProfile?->plan_tier?->value ?? 'plus',
+                'avatar' => $teacher->avatar,
+                'teacherCode' => 'TCH-'.str_pad((string) $teacher->id, 4, '0', STR_PAD_LEFT),
+                'planTier' => $teacher->teacherProfile?->plan_tier?->value ?? 'plus',
             ],
             'statCards' => [
-                'totalStudents'       => (int) $overview['totalStudentsAudited'],
-                'revenueEgp'          => (float) $overview['revenueTotalEgp'],
-                'attendanceRate'      => (float) $overview['averageAttendancePct'],
-                'classMastery'        => (float) $overview['overallGpaNum'],
+                'totalStudents' => (int) $overview['totalStudentsAudited'],
+                'revenueEgp' => (float) $overview['revenueTotalEgp'],
+                'attendanceRate' => (float) $overview['averageAttendancePct'],
+                'classMastery' => (float) $overview['overallGpaNum'],
                 'pendingGradingCount' => $pendingHw + $pendingExams,
             ],
             'centerDistribution' => $overview['centerDistribution'],
-            'weeklyActivity'     => $this->getWeeklyActivity($teacher),
-            'subjectMastery'     => $this->getSubjectMastery($teacher),
-            'groupDistribution'  => $this->getGroupDistribution($teacher),
-            'upcomingSessions'   => $upcomingSlots,
-            'recentLessons'      => $recentLessons,
-            'activeClasses'      => $activeClasses,
+            'weeklyActivity' => $this->getWeeklyActivity($teacher),
+            'subjectMastery' => $this->getSubjectMastery($teacher),
+            'groupDistribution' => $this->getGroupDistribution($teacher),
+            'upcomingSessions' => $upcomingSlots,
+            'recentLessons' => $recentLessons,
+            'activeClasses' => $activeClasses,
         ];
     }
 }

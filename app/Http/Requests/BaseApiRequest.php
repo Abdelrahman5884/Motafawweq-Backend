@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Middleware\SanitizeInput;
 use App\Traits\ApiResponse;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -25,8 +26,8 @@ abstract class BaseApiRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
-        $secrets = $this->only(\App\Http\Middleware\SanitizeInput::EXCEPT);
-        $sanitized = $this->sanitizeInput($this->except(\App\Http\Middleware\SanitizeInput::EXCEPT));
+        $secrets = $this->only(SanitizeInput::EXCEPT);
+        $sanitized = $this->sanitizeInput($this->except(SanitizeInput::EXCEPT));
         $this->replace(array_merge($sanitized, $secrets));
     }
 

@@ -32,30 +32,29 @@ class TeacherHomeworkSubmissionResource extends BaseJsonResource
         }
 
         return [
-            'id'                 => $this->uuid,
-            'homeworkId'         => $this->whenLoaded('homework', fn () => $this->homework?->uuid),
-            'studentId'          => $student ? (string) ($student->id) : null,
-            'studentNameAr'      => $student?->name ?? 'طالب مجهول',
-            'studentAvatar'      => $student?->avatar,
-            'studentCode'        => $student?->student_code ?? null,
-            'locationAr'         => $this->location_ar ?? 'أونلاين',
-            'submittedAt'        => $this->formatDate($this->submitted_at),
-            'type'               => $this->submission_type ?? 'file',
-            'attachmentName'     => $this->attachment_name,
-            'attachmentUrl'      => $attachmentUrl,
-            'solutionText'       => $this->solution_text,
+            'id' => $this->uuid,
+            'homeworkId' => $this->whenLoaded('homework', fn () => $this->homework?->uuid),
+            'studentId' => $student ? (string) ($student->id) : null,
+            'studentNameAr' => $student?->name ?? 'طالب مجهول',
+            'studentAvatar' => $student?->avatar,
+            'studentCode' => $student?->student_code ?? null,
+            'locationAr' => $this->location_ar ?? 'أونلاين',
+            'submittedAt' => $this->formatDate($this->submitted_at),
+            'type' => $this->submission_type ?? 'file',
+            'attachmentName' => $this->attachment_name,
+            'attachmentUrl' => $attachmentUrl,
+            'solutionText' => $this->solution_text,
             'sampleSolutionText' => $this->solution_text,
-            'status'             => $status,
-            'statusLabelAr'      => $statusLabelAr,
-            'score'              => $this->score !== null ? (float) $this->score : null,
-            'maxScore'           => (int) $this->max_score,
-            'feedbackAr'         => $this->feedback_ar ?? '',
-            'gradedAt'           => $this->formatDate($this->graded_at),
-            'grader'             => $this->whenLoaded('grader', fn () => [
-                'id'   => $this->grader?->id,
+            'status' => $status,
+            'statusLabelAr' => $statusLabelAr,
+            'score' => $this->score !== null ? (float) $this->score : null,
+            'maxScore' => (int) $this->max_score,
+            'feedbackAr' => $this->feedback_ar ?? '',
+            'gradedAt' => $this->formatDate($this->graded_at),
+            'grader' => $this->whenLoaded('grader', fn () => [
+                'id' => $this->grader?->id,
                 'name' => $this->grader?->name,
             ]),
         ];
     }
 }
-

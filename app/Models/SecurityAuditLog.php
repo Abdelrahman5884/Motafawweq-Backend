@@ -31,7 +31,7 @@ class SecurityAuditLog extends Model
     protected function casts(): array
     {
         return [
-            'context'    => 'array',
+            'context' => 'array',
             'created_at' => 'datetime',
         ];
     }
@@ -61,4 +61,3 @@ class SecurityAuditLog extends Model
         return $this->belongsTo(User::class);
     }
 }
-

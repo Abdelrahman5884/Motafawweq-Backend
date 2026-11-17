@@ -6,16 +6,16 @@ enum PayoutAccountType: string
 {
     case INSTAPAY = 'instapay';
     case VODAFONE = 'vodafone';
-    case CIB      = 'cib';
-    case CARD     = 'card';
+    case CIB = 'cib';
+    case CARD = 'card';
 
     public function defaultLabelAr(): string
     {
         return match ($this) {
             self::INSTAPAY => 'عنوان إنستاباي الفوري (InstaPay)',
             self::VODAFONE => 'محفظة فودافون كاش ومحافظ المحمول',
-            self::CIB      => 'حساب بنكي (CIB / IBAN)',
-            self::CARD     => 'بطاقة بنكية / فيزا للاستلام',
+            self::CIB => 'حساب بنكي (CIB / IBAN)',
+            self::CARD => 'بطاقة بنكية / فيزا للاستلام',
         };
     }
 
@@ -24,8 +24,8 @@ enum PayoutAccountType: string
         return match ($this) {
             self::INSTAPAY => 'InstaPay Direct IPA',
             self::VODAFONE => 'Vodafone Cash & Mobile Wallet',
-            self::CIB      => 'Bank Account (CIB / IBAN)',
-            self::CARD     => 'Bank / Debit Card',
+            self::CIB => 'Bank Account (CIB / IBAN)',
+            self::CARD => 'Bank / Debit Card',
         };
     }
 
@@ -34,4 +34,3 @@ enum PayoutAccountType: string
         return array_column(self::cases(), 'value');
     }
 }
-

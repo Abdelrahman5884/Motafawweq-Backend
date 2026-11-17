@@ -12,7 +12,6 @@ use App\Enums\UserStatus;
 use App\Models\GroupAttendanceRecord;
 use App\Models\GroupAttendanceSession;
 use App\Models\GroupEnrollment;
-use App\Models\SecurityAuditLog;
 use App\Models\StudyGroup;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -26,9 +25,9 @@ class TeacherAttendanceTest extends TestCase
     protected function createTeacher(string $email = 'teacher.attend@motafawweq.com'): User
     {
         return User::factory()->create([
-            'email'             => $email,
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'email' => $email,
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
@@ -36,12 +35,12 @@ class TeacherAttendanceTest extends TestCase
     protected function createStudent(string $name = 'أحمد محمد فتحي', string $email = 'student.fathy@motafawweq.com'): User
     {
         return User::factory()->create([
-            'name'              => $name,
-            'email'             => $email,
-            'phone'             => '012' . random_int(10000000, 99999999),
-            'role'              => UserRole::STUDENT,
-            'status'            => UserStatus::ACTIVE,
-            'student_code'      => 'STD-' . random_int(100000, 999999),
+            'name' => $name,
+            'email' => $email,
+            'phone' => '012'.random_int(10000000, 99999999),
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
+            'student_code' => 'STD-'.random_int(100000, 999999),
             'email_verified_at' => now(),
         ]);
     }
@@ -49,30 +48,30 @@ class TeacherAttendanceTest extends TestCase
     protected function createGroup(User $teacher): StudyGroup
     {
         return StudyGroup::create([
-            'teacher_id'   => $teacher->id,
-            'name_ar'      => 'فيزياء الثانوية العامة — سنتر الرواد',
-            'subject_ar'   => 'الفيزياء',
-            'grade_ar'     => 'الصف الثالث الثانوي',
-            'center_name'  => 'سنتر الرواد — مدينة نصر',
+            'teacher_id' => $teacher->id,
+            'name_ar' => 'فيزياء الثانوية العامة — سنتر الرواد',
+            'subject_ar' => 'الفيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'center_name' => 'سنتر الرواد — مدينة نصر',
             'max_students' => 50,
-            'price_egp'    => 500,
-            'join_code'    => 'PHY-ROWAAD-26',
+            'price_egp' => 500,
+            'join_code' => 'PHY-ROWAAD-26',
         ]);
     }
 
     protected function enrollStudent(StudyGroup $group, User $student, string $barcode = 'STD-001-0001-BC1', string $passcode = '4821'): GroupEnrollment
     {
         return GroupEnrollment::create([
-            'study_group_id'   => $group->id,
-            'student_id'       => $student->id,
-            'status'           => EnrollmentStatus::ENROLLED->value,
-            'join_method'      => JoinMethod::QR_SCAN->value,
-            'student_barcode'  => $barcode,
+            'study_group_id' => $group->id,
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::ENROLLED->value,
+            'join_method' => JoinMethod::QR_SCAN->value,
+            'student_barcode' => $barcode,
             'student_passcode' => $passcode,
-            'attendance_rate'  => 100,
+            'attendance_rate' => 100,
             'attended_sessions' => 0,
-            'total_sessions'   => 0,
-            'enrolled_at'      => now(),
+            'total_sessions' => 0,
+            'enrolled_at' => now(),
         ]);
     }
 
@@ -87,7 +86,7 @@ class TeacherAttendanceTest extends TestCase
 
         // First scan
         $response1 = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/attendance/scan", [
-            'code'   => 'STD-BC-12345',
+            'code' => 'STD-BC-12345',
             'method' => AttendanceRecordMethod::BARCODE_INPUT->value,
         ]);
 
@@ -99,10 +98,10 @@ class TeacherAttendanceTest extends TestCase
             ->assertJsonPath('data.session.attendanceRate', fn ($rate) => (float) $rate === 100.0);
 
         $this->assertDatabaseHas('group_attendance_records', [
-            'study_group_id'      => $group->id,
+            'study_group_id' => $group->id,
             'group_enrollment_id' => $enrollment->id,
-            'student_id'          => $student->id,
-            'status'              => AttendanceStatus::PRESENT->value,
+            'student_id' => $student->id,
+            'status' => AttendanceStatus::PRESENT->value,
         ]);
 
         $this->assertEquals(1, $enrollment->fresh()->attended_sessions);
@@ -110,7 +109,7 @@ class TeacherAttendanceTest extends TestCase
 
         // Second scan (idempotent duplicate within same session)
         $response2 = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/attendance/scan", [
-            'code'   => 'STD-BC-12345',
+            'code' => 'STD-BC-12345',
             'method' => AttendanceRecordMethod::BARCODE_INPUT->value,
         ]);
 
@@ -120,7 +119,7 @@ class TeacherAttendanceTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacher->id,
-            'event'   => 'teacher.attendance.scanned',
+            'event' => 'teacher.attendance.scanned',
         ]);
     }
 
@@ -134,7 +133,7 @@ class TeacherAttendanceTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $response = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/attendance/scan", [
-            'code'   => '5544',
+            'code' => '5544',
             'method' => AttendanceRecordMethod::PASSCODE->value,
         ]);
 
@@ -158,7 +157,7 @@ class TeacherAttendanceTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $response = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/attendance/scan", [
-            'code'   => $validQrToken,
+            'code' => $validQrToken,
             'method' => AttendanceRecordMethod::QR_SCAN->value,
         ]);
 
@@ -215,24 +214,24 @@ class TeacherAttendanceTest extends TestCase
 
         $session = GroupAttendanceSession::create([
             'study_group_id' => $group->id,
-            'teacher_id'     => $teacher->id,
-            'session_date'   => now()->toDateString(),
-            'title_ar'       => 'حصة المراجعة النهائية',
-            'status'         => 'open',
+            'teacher_id' => $teacher->id,
+            'session_date' => now()->toDateString(),
+            'title_ar' => 'حصة المراجعة النهائية',
+            'status' => 'open',
             'total_enrolled' => 1,
-            'present_count'  => 1,
+            'present_count' => 1,
             'attendance_rate' => 100.0,
         ]);
 
         GroupAttendanceRecord::create([
             'attendance_session_id' => $session->id,
-            'study_group_id'        => $group->id,
-            'group_enrollment_id'   => $enrollment->id,
-            'student_id'            => $student->id,
-            'status'                => AttendanceStatus::PRESENT->value,
-            'recorded_method'       => AttendanceRecordMethod::QR_SCAN->value,
-            'scanned_at'            => now(),
-            'recorded_by'           => $teacher->id,
+            'study_group_id' => $group->id,
+            'group_enrollment_id' => $enrollment->id,
+            'student_id' => $student->id,
+            'status' => AttendanceStatus::PRESENT->value,
+            'recorded_method' => AttendanceRecordMethod::QR_SCAN->value,
+            'scanned_at' => now(),
+            'recorded_by' => $teacher->id,
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -279,8 +278,8 @@ class TeacherAttendanceTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
-            'level'   => 'warning',
+            'event' => 'teacher.idor_attempt_blocked',
+            'level' => 'warning',
         ]);
     }
 }

@@ -26,30 +26,29 @@ class TeacherExamSubmissionResource extends BaseJsonResource
         $student = $this->whenLoaded('student');
 
         return [
-            'id'              => $this->uuid,
-            'status'          => $status,
-            'statusLabelAr'   => $statusLabelAr,
-            'score'           => (float) $this->score,
-            'fullMark'        => (int) $this->full_mark,
-            'percentage'      => (float) $this->percentage,
-            'isPassed'        => (bool) $this->is_passed,
-            'isFullMark'      => (bool) $this->is_full_mark,
+            'id' => $this->uuid,
+            'status' => $status,
+            'statusLabelAr' => $statusLabelAr,
+            'score' => (float) $this->score,
+            'fullMark' => (int) $this->full_mark,
+            'percentage' => (float) $this->percentage,
+            'isPassed' => (bool) $this->is_passed,
+            'isFullMark' => (bool) $this->is_full_mark,
             'teacherFeedback' => $this->teacher_feedback,
-            'startedAt'       => $this->formatDate($this->started_at),
-            'submittedAt'     => $this->formatDate($this->submitted_at),
-            'gradedAt'        => $this->formatDate($this->graded_at),
-            'student'         => $student ? [
-                'id'          => $student->id,
-                'name'        => $student->name,
-                'email'       => $student->email,
+            'startedAt' => $this->formatDate($this->started_at),
+            'submittedAt' => $this->formatDate($this->submitted_at),
+            'gradedAt' => $this->formatDate($this->graded_at),
+            'student' => $student ? [
+                'id' => $student->id,
+                'name' => $student->name,
+                'email' => $student->email,
                 'studentCode' => $student->student_code ?? null,
-                'avatar'      => $student->avatar,
+                'avatar' => $student->avatar,
             ] : null,
-            'grader'          => $this->whenLoaded('grader', fn () => [
-                'id'          => $this->grader?->id,
-                'name'        => $this->grader?->name,
+            'grader' => $this->whenLoaded('grader', fn () => [
+                'id' => $this->grader?->id,
+                'name' => $this->grader?->name,
             ]),
         ];
     }
 }
-

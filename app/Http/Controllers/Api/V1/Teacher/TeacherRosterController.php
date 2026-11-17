@@ -33,10 +33,10 @@ class TeacherRosterController extends BaseApiController
 
         return $this->successResponse(
             [
-                'group'    => new StudyGroupResource($roster['group']),
+                'group' => new StudyGroupResource($roster['group']),
                 'enrolled' => EnrolledStudentResource::collection($roster['enrolled'])->resolve($request),
-                'pending'  => PendingStudentResource::collection($roster['pending'])->resolve($request),
-                'stats'    => $roster['stats'],
+                'pending' => PendingStudentResource::collection($roster['pending'])->resolve($request),
+                'stats' => $roster['stats'],
             ],
             __('messages.roster_fetched')
         );
@@ -150,4 +150,3 @@ class TeacherRosterController extends BaseApiController
         );
     }
 }
-

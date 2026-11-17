@@ -5,11 +5,9 @@ namespace Tests\Feature\Storage;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
-use App\Models\Course;
 use App\Models\Lesson;
 use App\Models\StoredFile;
 use App\Models\User;
-use App\Services\V1\Storage\SupabaseStorageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -28,11 +26,11 @@ class SupabaseStorageTest extends TestCase
     private function createUser(UserRole $role, string $email): array
     {
         $user = User::factory()->create([
-            'name'              => 'مستخدم اختباري',
-            'email'             => $email,
-            'phone'             => '010' . random_int(10000000, 99999999),
-            'role'              => $role,
-            'status'            => UserStatus::ACTIVE,
+            'name' => 'مستخدم اختباري',
+            'email' => $email,
+            'phone' => '010'.random_int(10000000, 99999999),
+            'role' => $role,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
 
@@ -47,19 +45,19 @@ class SupabaseStorageTest extends TestCase
 
         $lesson = Lesson::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'حصة الهضم والامتصاص',
+            'title_ar' => 'حصة الهضم والامتصاص',
             'subject_ar' => 'الأحياء',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'media_mode' => 'audio',
         ]);
 
         $response = $this->withToken($token)
             ->postJson('/api/v1/storage/presign-upload', [
                 'entity_type' => 'lesson_media',
-                'entity_id'   => $lesson->uuid,
-                'filename'    => 'lecture_audio.webm',
-                'mime_type'   => 'audio/webm',
-                'file_size'   => 15000000, // 15 MB
+                'entity_id' => $lesson->uuid,
+                'filename' => 'lecture_audio.webm',
+                'mime_type' => 'audio/webm',
+                'file_size' => 15000000, // 15 MB
             ]);
 
         $response->assertOk()
@@ -77,13 +75,13 @@ class SupabaseStorageTest extends TestCase
         $fileId = $response->json('data.file_id');
 
         $this->assertDatabaseHas('stored_files', [
-            'uuid'              => $fileId,
-            'user_id'           => $teacher->id,
-            'entity_type'       => 'lesson_media',
-            'entity_id'         => $lesson->uuid,
-            'upload_status'     => 'pending',
-            'mime_type'         => 'audio/webm',
-            'file_size_bytes'   => 15000000,
+            'uuid' => $fileId,
+            'user_id' => $teacher->id,
+            'entity_type' => 'lesson_media',
+            'entity_id' => $lesson->uuid,
+            'upload_status' => 'pending',
+            'mime_type' => 'audio/webm',
+            'file_size_bytes' => 15000000,
         ]);
     }
 
@@ -94,9 +92,9 @@ class SupabaseStorageTest extends TestCase
         $response = $this->withToken($token)
             ->postJson('/api/v1/storage/presign-upload', [
                 'entity_type' => 'lesson_media',
-                'filename'    => 'hack.mp3',
-                'mime_type'   => 'audio/mpeg',
-                'file_size'   => 2000000,
+                'filename' => 'hack.mp3',
+                'mime_type' => 'audio/mpeg',
+                'file_size' => 2000000,
             ]);
 
         $response->assertStatus(422)
@@ -110,17 +108,17 @@ class SupabaseStorageTest extends TestCase
 
         $lesson = Lesson::create([
             'teacher_id' => $teacherA->id,
-            'title_ar'   => 'حصة خاصة بالمعلم أ',
+            'title_ar' => 'حصة خاصة بالمعلم أ',
             'subject_ar' => 'الأحياء',
         ]);
 
         $response = $this->withToken($tokenB)
             ->postJson('/api/v1/storage/presign-upload', [
                 'entity_type' => 'lesson_media',
-                'entity_id'   => $lesson->uuid,
-                'filename'    => 'intruder.mp3',
-                'mime_type'   => 'audio/mpeg',
-                'file_size'   => 1000000,
+                'entity_id' => $lesson->uuid,
+                'filename' => 'intruder.mp3',
+                'mime_type' => 'audio/mpeg',
+                'file_size' => 1000000,
             ]);
 
         $response->assertStatus(422)
@@ -134,9 +132,9 @@ class SupabaseStorageTest extends TestCase
         $response = $this->withToken($token)
             ->postJson('/api/v1/storage/presign-upload', [
                 'entity_type' => 'lesson_attachment',
-                'filename'    => 'exploit.exe',
-                'mime_type'   => 'application/x-msdownload',
-                'file_size'   => 500000,
+                'filename' => 'exploit.exe',
+                'mime_type' => 'application/x-msdownload',
+                'file_size' => 500000,
             ]);
 
         $response->assertStatus(422)
@@ -151,9 +149,9 @@ class SupabaseStorageTest extends TestCase
         $response = $this->withToken($token)
             ->postJson('/api/v1/storage/presign-upload', [
                 'entity_type' => 'lesson_media',
-                'filename'    => 'huge_lecture.mp3',
-                'mime_type'   => 'audio/mpeg',
-                'file_size'   => 55000000, // 55 MB
+                'filename' => 'huge_lecture.mp3',
+                'mime_type' => 'audio/mpeg',
+                'file_size' => 55000000, // 55 MB
             ]);
 
         $response->assertStatus(422)
@@ -166,17 +164,17 @@ class SupabaseStorageTest extends TestCase
 
         $lesson = Lesson::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'حصة المناعة',
+            'title_ar' => 'حصة المناعة',
             'subject_ar' => 'الأحياء',
         ]);
 
         $presignRes = $this->withToken($token)
             ->postJson('/api/v1/storage/presign-upload', [
                 'entity_type' => 'lesson_media',
-                'entity_id'   => $lesson->uuid,
-                'filename'    => 'immunity_audio.mp3',
-                'mime_type'   => 'audio/mpeg',
-                'file_size'   => 8000000,
+                'entity_id' => $lesson->uuid,
+                'filename' => 'immunity_audio.mp3',
+                'mime_type' => 'audio/mpeg',
+                'file_size' => 8000000,
             ]);
 
         $fileId = $presignRes->json('data.file_id');
@@ -195,7 +193,7 @@ class SupabaseStorageTest extends TestCase
             ->assertJsonPath('data.status', 'completed');
 
         $this->assertDatabaseHas('stored_files', [
-            'uuid'          => $fileId,
+            'uuid' => $fileId,
             'upload_status' => 'completed',
         ]);
 
@@ -212,9 +210,9 @@ class SupabaseStorageTest extends TestCase
         $presignRes = $this->withToken($token)
             ->postJson('/api/v1/storage/presign-upload', [
                 'entity_type' => 'user_avatar',
-                'filename'    => 'my_photo.jpg',
-                'mime_type'   => 'image/jpeg',
-                'file_size'   => 500000,
+                'filename' => 'my_photo.jpg',
+                'mime_type' => 'image/jpeg',
+                'file_size' => 500000,
             ]);
 
         $fileId = $presignRes->json('data.file_id');
@@ -230,7 +228,7 @@ class SupabaseStorageTest extends TestCase
             ->assertJsonValidationErrors(['file_id']);
 
         $this->assertDatabaseHas('stored_files', [
-            'uuid'          => $fileId,
+            'uuid' => $fileId,
             'upload_status' => 'failed',
         ]);
     }
@@ -240,15 +238,15 @@ class SupabaseStorageTest extends TestCase
         [$teacher, $token] = $this->createUser(UserRole::TEACHER, 'teacher_dl_owner@motafawweq.com');
 
         $file = StoredFile::create([
-            'uuid'              => '11111111-2222-3333-4444-555555555555',
-            'user_id'           => $teacher->id,
-            'entity_type'       => 'user_avatar',
+            'uuid' => '11111111-2222-3333-4444-555555555555',
+            'user_id' => $teacher->id,
+            'entity_type' => 'user_avatar',
             'original_filename' => 'avatar.jpg',
-            'storage_disk'      => 'supabase',
-            'storage_path'      => 'users/profiles/avatar.jpg',
-            'mime_type'         => 'image/jpeg',
-            'file_size_bytes'   => 120000,
-            'upload_status'     => 'completed',
+            'storage_disk' => 'supabase',
+            'storage_path' => 'users/profiles/avatar.jpg',
+            'mime_type' => 'image/jpeg',
+            'file_size_bytes' => 120000,
+            'upload_status' => 'completed',
         ]);
 
         Storage::disk('supabase')->put('users/profiles/avatar.jpg', 'avatar content');
@@ -267,15 +265,15 @@ class SupabaseStorageTest extends TestCase
         [$teacherB, $tokenB] = $this->createUser(UserRole::TEACHER, 'teacher_dlB@motafawweq.com');
 
         $file = StoredFile::create([
-            'uuid'              => '22222222-3333-4444-5555-666666666666',
-            'user_id'           => $teacherA->id,
-            'entity_type'       => 'user_avatar',
+            'uuid' => '22222222-3333-4444-5555-666666666666',
+            'user_id' => $teacherA->id,
+            'entity_type' => 'user_avatar',
             'original_filename' => 'avatar.jpg',
-            'storage_disk'      => 'supabase',
-            'storage_path'      => 'users/profiles/avatar_b.jpg',
-            'mime_type'         => 'image/jpeg',
-            'file_size_bytes'   => 120000,
-            'upload_status'     => 'completed',
+            'storage_disk' => 'supabase',
+            'storage_path' => 'users/profiles/avatar_b.jpg',
+            'mime_type' => 'image/jpeg',
+            'file_size_bytes' => 120000,
+            'upload_status' => 'completed',
         ]);
 
         Storage::disk('supabase')->put('users/profiles/avatar_b.jpg', 'avatar content');
@@ -293,15 +291,15 @@ class SupabaseStorageTest extends TestCase
         [$teacherB, $tokenB] = $this->createUser(UserRole::TEACHER, 'teacher_delB@motafawweq.com');
 
         $file = StoredFile::create([
-            'uuid'              => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-            'user_id'           => $teacherA->id,
-            'entity_type'       => 'course_resource',
+            'uuid' => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+            'user_id' => $teacherA->id,
+            'entity_type' => 'course_resource',
             'original_filename' => 'exam.pdf',
-            'storage_disk'      => 'supabase',
-            'storage_path'      => 'courses/resources/exam.pdf',
-            'mime_type'         => 'application/pdf',
-            'file_size_bytes'   => 500000,
-            'upload_status'     => 'completed',
+            'storage_disk' => 'supabase',
+            'storage_path' => 'courses/resources/exam.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 500000,
+            'upload_status' => 'completed',
         ]);
 
         $res = $this->withToken($tokenB)
@@ -319,15 +317,15 @@ class SupabaseStorageTest extends TestCase
         Storage::disk('supabase')->put($path, 'pdf data');
 
         $file = StoredFile::create([
-            'uuid'              => '99999999-8888-7777-6666-555555555555',
-            'user_id'           => $teacher->id,
-            'entity_type'       => 'course_resource',
+            'uuid' => '99999999-8888-7777-6666-555555555555',
+            'user_id' => $teacher->id,
+            'entity_type' => 'course_resource',
             'original_filename' => 'notes.pdf',
-            'storage_disk'      => 'supabase',
-            'storage_path'      => $path,
-            'mime_type'         => 'application/pdf',
-            'file_size_bytes'   => 300000,
-            'upload_status'     => 'completed',
+            'storage_disk' => 'supabase',
+            'storage_path' => $path,
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 300000,
+            'upload_status' => 'completed',
         ]);
 
         $this->assertTrue(Storage::disk('supabase')->exists($path));

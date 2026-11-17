@@ -33,4 +33,3 @@ return new class extends Migration
         Schema::dropIfExists('lesson_concept_graphs');
     }
 };
-

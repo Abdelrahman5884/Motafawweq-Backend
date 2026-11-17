@@ -7,6 +7,7 @@ use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\Course;
 use App\Models\Lesson;
+use App\Models\TeacherProfile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -20,11 +21,11 @@ class TeacherStudioTest extends TestCase
     private function createAuthenticatedTeacher(string $email = 'studio.teacher@motafawweq.com'): array
     {
         $teacher = User::factory()->create([
-            'name'              => 'د. سلمى السيد',
-            'email'             => $email,
-            'phone'             => '010' . random_int(10000000, 99999999),
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'name' => 'د. سلمى السيد',
+            'email' => $email,
+            'phone' => '010'.random_int(10000000, 99999999),
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
 
@@ -38,33 +39,33 @@ class TeacherStudioTest extends TestCase
         [$teacher, $token] = $this->createAuthenticatedTeacher();
 
         $course = Course::create([
-            'teacher_id'    => $teacher->id,
-            'title_ar'      => 'ماستر كلاس الأحياء',
-            'stage_id'      => 'sec',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'ماستر كلاس الأحياء',
+            'stage_id' => 'sec',
             'stage_name_ar' => 'المرحلة الثانوية',
-            'grade_ar'      => 'الصف الثالث الثانوي',
-            'subject_ar'    => 'الأحياء',
-            'price_egp'     => 350,
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'subject_ar' => 'الأحياء',
+            'price_egp' => 350,
         ]);
 
-        \App\Models\TeacherProfile::updateOrCreate(
+        TeacherProfile::updateOrCreate(
             ['user_id' => $teacher->id],
             ['name_ar' => $teacher->name, 'plan_tier' => 'pro']
         )->forceFill(['plan_tier' => 'pro'])->save();
 
         $response = $this->withToken($token)
             ->postJson('/api/v1/teacher/lessons', [
-                'courseId'    => $course->uuid,
-                'title'       => 'البناء الضوئي وحركية الطاقة في النبات',
+                'courseId' => $course->uuid,
+                'title' => 'البناء الضوئي وحركية الطاقة في النبات',
                 'description' => 'شرح مفصل لتركيب البلاستيدة الخضراء والتفاعلات الضوئية واللاضوئية.',
-                'subject'     => 'الأحياء',
-                'grade'       => '3rd Secondary',
-                'classGroup'  => 'cls-dokki-301',
-                'mode'        => 'video',
-                'videoUrl'    => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-                'aiFeatures'  => [
-                    'speechToText'    => true,
-                    'conceptGraph'    => true,
+                'subject' => 'الأحياء',
+                'grade' => '3rd Secondary',
+                'classGroup' => 'cls-dokki-301',
+                'mode' => 'video',
+                'videoUrl' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                'aiFeatures' => [
+                    'speechToText' => true,
+                    'conceptGraph' => true,
                     'chapterIndexing' => false,
                 ],
             ]);
@@ -87,9 +88,9 @@ class TeacherStudioTest extends TestCase
 
         $lesson = Lesson::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'حصة التفاعلات الضوئية',
+            'title_ar' => 'حصة التفاعلات الضوئية',
             'subject_ar' => 'الأحياء',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'media_mode' => 'video',
         ]);
 
@@ -99,8 +100,8 @@ class TeacherStudioTest extends TestCase
 
         $pdfRes = $this->withToken($token)
             ->postJson("/api/v1/teacher/lessons/{$lesson->uuid}/attachments/pdfs", [
-                'file'       => $pdfFile,
-                'title'      => 'مذكرة شرح البناء الضوئي',
+                'file' => $pdfFile,
+                'title' => 'مذكرة شرح البناء الضوئي',
                 'pagesCount' => 24,
             ]);
 
@@ -128,19 +129,19 @@ class TeacherStudioTest extends TestCase
 
         $img1 = $this->withToken($token)
             ->postJson("/api/v1/teacher/lessons/{$lesson->uuid}/attachments/images", [
-                'file'  => UploadedFile::fake()->createWithContent('board1.png', $validPngBytes),
+                'file' => UploadedFile::fake()->createWithContent('board1.png', $validPngBytes),
                 'title' => 'سبورة 1: تشريح البلاستيدة',
             ])->assertCreated()->json('data');
 
         $img2 = $this->withToken($token)
             ->postJson("/api/v1/teacher/lessons/{$lesson->uuid}/attachments/images", [
-                'file'  => UploadedFile::fake()->createWithContent('board2.png', $validPngBytes),
+                'file' => UploadedFile::fake()->createWithContent('board2.png', $validPngBytes),
                 'title' => 'سبورة 2: الفسفرة الضوئية',
             ])->assertCreated()->json('data');
 
         $img3 = $this->withToken($token)
             ->postJson("/api/v1/teacher/lessons/{$lesson->uuid}/attachments/images", [
-                'file'  => UploadedFile::fake()->createWithContent('board3.png', $validPngBytes),
+                'file' => UploadedFile::fake()->createWithContent('board3.png', $validPngBytes),
                 'title' => 'سبورة 3: دورة كالفن',
             ])->assertCreated()->json('data');
 
@@ -151,7 +152,7 @@ class TeacherStudioTest extends TestCase
         // Reorder images: move img3 to #1, img1 to #2, img2 to #3
         $reorderRes = $this->withToken($token)
             ->putJson("/api/v1/teacher/lessons/{$lesson->uuid}/attachments/reorder", [
-                'type'        => 'whiteboard_image',
+                'type' => 'whiteboard_image',
                 'ordered_ids' => [$img3['id'], $img1['id'], $img2['id']],
             ]);
 
@@ -186,9 +187,9 @@ class TeacherStudioTest extends TestCase
 
         $lesson = Lesson::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'حصة محمية',
+            'title_ar' => 'حصة محمية',
             'subject_ar' => 'الأحياء',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'grade_ar' => 'الصف الثالث الثانوي',
         ]);
 
         // Plain text file disguised with .pdf extension (missing %PDF- magic header)
@@ -203,8 +204,8 @@ class TeacherStudioTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacher->id,
-            'event'   => 'teacher.upload.malicious_signature_blocked',
-            'level'   => 'warning',
+            'event' => 'teacher.upload.malicious_signature_blocked',
+            'level' => 'warning',
         ]);
     }
 
@@ -215,9 +216,9 @@ class TeacherStudioTest extends TestCase
 
         $lessonA = Lesson::create([
             'teacher_id' => $teacherA->id,
-            'title_ar'   => 'حصة خاصة بالمعلم أ',
+            'title_ar' => 'حصة خاصة بالمعلم أ',
             'subject_ar' => 'الأحياء',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'grade_ar' => 'الصف الثالث الثانوي',
         ]);
 
         $this->withToken($tokenB)
@@ -230,8 +231,8 @@ class TeacherStudioTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
-            'level'   => 'warning',
+            'event' => 'teacher.idor_attempt_blocked',
+            'level' => 'warning',
         ]);
     }
 
@@ -239,18 +240,18 @@ class TeacherStudioTest extends TestCase
     {
         [$teacher, $token] = $this->createAuthenticatedTeacher('teacher.course.sync@motafawweq.com');
 
-        $course = \App\Models\Course::create([
-            'teacher_id'    => $teacher->id,
-            'title_ar'      => 'مقرر الأحياء',
-            'grade_ar'      => 'الصف الثالث الثانوي',
-            'subject_ar'    => 'الأحياء',
+        $course = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'مقرر الأحياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'subject_ar' => 'الأحياء',
             'lessons_count' => 0,
         ]);
 
         $res = $this->withToken($token)->postJson('/api/v1/teacher/lessons', [
-            'title_ar'    => 'الحصة الأولى',
+            'title_ar' => 'الحصة الأولى',
             'course_uuid' => $course->uuid,
-            'media_mode'  => 'audio',
+            'media_mode' => 'audio',
         ]);
 
         $res->assertStatus(201);
@@ -267,18 +268,18 @@ class TeacherStudioTest extends TestCase
     public function test_ai_features_are_gated_to_pro_plan_only(): void
     {
         [$freeTeacher, $freeToken] = $this->createAuthenticatedTeacher('teacher.free.ai@motafawweq.com');
-        $freeProfile = \App\Models\TeacherProfile::create([
+        $freeProfile = TeacherProfile::create([
             'user_id' => $freeTeacher->id,
             'name_ar' => $freeTeacher->name,
         ]);
         $freeProfile->forceFill(['plan_tier' => 'plus'])->save();
 
         $freeRes = $this->withToken($freeToken)->postJson('/api/v1/teacher/lessons', [
-            'title_ar'              => 'حصة بدون برو',
-            'media_mode'            => 'audio',
+            'title_ar' => 'حصة بدون برو',
+            'media_mode' => 'audio',
             'ai_features_requested' => [
-                'speechToText'    => true,
-                'conceptGraph'    => true,
+                'speechToText' => true,
+                'conceptGraph' => true,
                 'chapterIndexing' => true,
             ],
         ]);
@@ -291,18 +292,18 @@ class TeacherStudioTest extends TestCase
         $this->app['auth']->forgetGuards();
 
         [$proTeacher, $proToken] = $this->createAuthenticatedTeacher('teacher.pro.ai@motafawweq.com');
-        $proProfile = \App\Models\TeacherProfile::create([
+        $proProfile = TeacherProfile::create([
             'user_id' => $proTeacher->id,
             'name_ar' => $proTeacher->name,
         ]);
         $proProfile->forceFill(['plan_tier' => 'pro'])->save();
 
         $proRes = $this->withToken($proToken)->postJson('/api/v1/teacher/lessons', [
-            'title_ar'              => 'حصة مع برو',
-            'media_mode'            => 'audio',
+            'title_ar' => 'حصة مع برو',
+            'media_mode' => 'audio',
             'ai_features_requested' => [
-                'speechToText'    => true,
-                'conceptGraph'    => false,
+                'speechToText' => true,
+                'conceptGraph' => false,
                 'chapterIndexing' => true,
             ],
         ]);
@@ -313,4 +314,3 @@ class TeacherStudioTest extends TestCase
             ->assertJsonPath('data.aiFeatures.chapterIndexing', true);
     }
 }
-

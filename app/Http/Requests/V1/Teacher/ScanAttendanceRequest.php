@@ -30,7 +30,7 @@ class ScanAttendanceRequest extends BaseApiRequest
             $merged['notes'] = trim(strip_tags((string) $notes));
         }
 
-        if (!empty($merged)) {
+        if (! empty($merged)) {
             $this->merge($merged);
         }
     }
@@ -38,10 +38,9 @@ class ScanAttendanceRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'code'   => ['required', 'string', 'min:1', 'max:255'],
+            'code' => ['required', 'string', 'min:1', 'max:255'],
             'method' => ['nullable', 'string', Rule::in(AttendanceRecordMethod::values())],
-            'notes'  => ['nullable', 'string', 'max:255'],
+            'notes' => ['nullable', 'string', 'max:255'],
         ];
     }
 }
-

@@ -49,11 +49,10 @@ class HomeworkSubmissionRepository extends BaseRepository implements HomeworkSub
             ->with(['student', 'grader', 'homework'])
             ->first();
 
-        if (!$submission) {
-            throw (new ModelNotFoundException())->setModel(HomeworkSubmission::class, [$uuid]);
+        if (! $submission) {
+            throw (new ModelNotFoundException)->setModel(HomeworkSubmission::class, [$uuid]);
         }
 
         return $submission;
     }
 }
-

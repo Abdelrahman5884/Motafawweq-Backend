@@ -28,7 +28,7 @@ class TeacherCertificateService
     public function issueCertificate(User $teacher, array $data): CourseCertificate
     {
         $courseId = null;
-        if (!empty($data['course_id'])) {
+        if (! empty($data['course_id'])) {
             $course = Course::where('teacher_id', $teacher->id)
                 ->where(function ($q) use ($data) {
                     $q->where('id', $data['course_id'])
@@ -39,7 +39,7 @@ class TeacherCertificateService
         }
 
         $studentId = null;
-        if (!empty($data['student_id'])) {
+        if (! empty($data['student_id'])) {
             $student = User::find($data['student_id']);
             $studentId = $student?->id;
         }
@@ -47,7 +47,7 @@ class TeacherCertificateService
         $certNumber = CourseCertificate::generateUniqueCertNumber();
         $studentNameAr = trim((string) ($data['student_name_ar'] ?? $data['studentNameAr'] ?? ''));
         $gradePercent = (float) ($data['grade_percent'] ?? $data['gradePercent'] ?? 100.0);
-        $issueDate = !empty($data['issue_date']) ? (string) $data['issue_date'] : now()->toDateString();
+        $issueDate = ! empty($data['issue_date']) ? (string) $data['issue_date'] : now()->toDateString();
 
         $signatureHash = CourseCertificate::computeSignatureHash(
             $certNumber,
@@ -60,31 +60,31 @@ class TeacherCertificateService
         /** @var CourseCertificate $certificate */
         $certificate = CourseCertificate::create([
             'certificate_number' => $certNumber,
-            'signature_hash'     => $signatureHash,
-            'teacher_id'         => $teacher->id,
-            'student_id'         => $studentId,
-            'course_id'          => $courseId,
-            'student_name_ar'    => $studentNameAr,
-            'student_name_en'    => $data['student_name_en'] ?? $data['studentNameEn'] ?? null,
-            'student_email'      => $data['student_email'] ?? $data['studentEmail'] ?? null,
-            'student_phone'      => $data['student_phone'] ?? $data['studentPhone'] ?? null,
-            'course_name_ar'     => trim((string) ($data['course_name_ar'] ?? $data['courseNameAr'] ?? 'المقرر الدراسي المعتمد')),
-            'course_name_en'     => $data['course_name_en'] ?? $data['courseNameEn'] ?? null,
-            'grade_ar'           => $data['grade_ar'] ?? $data['gradeAr'] ?? 'الصف الثالث الثانوي',
-            'grade_percent'      => $gradePercent,
-            'honors_title_ar'    => trim((string) ($data['honors_title_ar'] ?? $data['honorsTitleAr'] ?? 'شهادة تميز وتفوق بالدرجة النهائية (Full Mark)')),
-            'honors_title_en'    => $data['honors_title_en'] ?? $data['honorsTitleEn'] ?? 'Certificate of Academic Excellence',
-            'issue_date'         => $issueDate,
-            'status'             => CertificateStatus::VERIFIED,
+            'signature_hash' => $signatureHash,
+            'teacher_id' => $teacher->id,
+            'student_id' => $studentId,
+            'course_id' => $courseId,
+            'student_name_ar' => $studentNameAr,
+            'student_name_en' => $data['student_name_en'] ?? $data['studentNameEn'] ?? null,
+            'student_email' => $data['student_email'] ?? $data['studentEmail'] ?? null,
+            'student_phone' => $data['student_phone'] ?? $data['studentPhone'] ?? null,
+            'course_name_ar' => trim((string) ($data['course_name_ar'] ?? $data['courseNameAr'] ?? 'المقرر الدراسي المعتمد')),
+            'course_name_en' => $data['course_name_en'] ?? $data['courseNameEn'] ?? null,
+            'grade_ar' => $data['grade_ar'] ?? $data['gradeAr'] ?? 'الصف الثالث الثانوي',
+            'grade_percent' => $gradePercent,
+            'honors_title_ar' => trim((string) ($data['honors_title_ar'] ?? $data['honorsTitleAr'] ?? 'شهادة تميز وتفوق بالدرجة النهائية (Full Mark)')),
+            'honors_title_en' => $data['honors_title_en'] ?? $data['honorsTitleEn'] ?? 'Certificate of Academic Excellence',
+            'issue_date' => $issueDate,
+            'status' => CertificateStatus::VERIFIED,
         ]);
 
         $this->logSecurityEvent(
             'teacher.certificate_issued',
             [
-                'teacher_id'         => $teacher->id,
+                'teacher_id' => $teacher->id,
                 'certificate_number' => $certNumber,
-                'student_name_ar'    => $studentNameAr,
-                'signature_hash'     => $signatureHash,
+                'student_name_ar' => $studentNameAr,
+                'signature_hash' => $signatureHash,
             ],
             'info',
             $certificate
@@ -112,33 +112,33 @@ class TeacherCertificateService
     {
         $cert = $this->certificateRepository->findByUuidForTeacher($uuid, $teacher->id);
 
-        if (!$cert) {
+        if (! $cert) {
             $this->logSecurityEvent(
                 'teacher.idor_attempt_blocked',
                 [
                     'target_type' => 'CourseCertificate',
                     'target_uuid' => $uuid,
-                    'actor_id'    => $teacher->id,
-                    'action'      => 'revoke',
+                    'actor_id' => $teacher->id,
+                    'action' => 'revoke',
                 ],
                 'warning'
             );
 
-            throw (new ModelNotFoundException())->setModel(CourseCertificate::class, [$uuid]);
+            throw (new ModelNotFoundException)->setModel(CourseCertificate::class, [$uuid]);
         }
 
         $cert->update([
-            'status'            => CertificateStatus::REVOKED,
-            'revoked_at'        => now(),
+            'status' => CertificateStatus::REVOKED,
+            'revoked_at' => now(),
             'revocation_reason' => $reason ?: 'تم إلغاء الشهادة بواسطة المعلم المسؤول',
         ]);
 
         $this->logSecurityEvent(
             'teacher.certificate_revoked',
             [
-                'teacher_id'         => $teacher->id,
+                'teacher_id' => $teacher->id,
                 'certificate_number' => $cert->certificate_number,
-                'reason'             => $reason,
+                'reason' => $reason,
             ],
             'warning',
             $cert
@@ -152,13 +152,13 @@ class TeacherCertificateService
         $cleanNumber = trim(strtoupper($certNumber));
         $cert = $this->certificateRepository->findByCertNumber($cleanNumber);
 
-        if (!$cert) {
+        if (! $cert) {
             return [
-                'isValid'       => false,
-                'status'        => 'not_found',
-                'certNumber'    => $cleanNumber,
-                'messageAr'     => 'الشهادة المطلوبة غير مسجلة بقاعدة بيانات منصة متفوق الرسمية',
-                'messageEn'     => 'The requested certificate was not found in the official registry.',
+                'isValid' => false,
+                'status' => 'not_found',
+                'certNumber' => $cleanNumber,
+                'messageAr' => 'الشهادة المطلوبة غير مسجلة بقاعدة بيانات منصة متفوق الرسمية',
+                'messageEn' => 'The requested certificate was not found in the official registry.',
             ];
         }
 
@@ -170,30 +170,29 @@ class TeacherCertificateService
         $teacherTitle = $teacherProfile?->title_ar ?? 'كبير معلمي المادة ومؤلف سلسلة التفوق';
 
         return [
-            'isValid'          => $signatureValid && !$isRevoked,
-            'status'           => $isRevoked ? 'revoked' : ($signatureValid ? 'verified' : 'tampered'),
-            'certNumber'       => $cert->certificate_number,
-            'serialId'         => $cert->certificate_number,
-            'signatureHash'    => $cert->signature_hash,
-            'issuerType'       => 'teacher',
-            'issuerNameAr'     => $teacherName,
-            'issuerNameEn'     => $teacherProfile?->name_en ?? $teacherName,
-            'instructorAr'     => $teacherName,
-            'instructorEn'     => $teacherProfile?->name_en ?? $teacherName,
-            'instructorTitleAr'=> $teacherTitle,
-            'instructorTitleEn'=> $teacherProfile?->title_en ?? 'Senior Lecturer',
-            'studentNameAr'    => $cert->student_name_ar,
-            'studentNameEn'    => $cert->student_name_en ?: $cert->student_name_ar,
-            'courseNameAr'     => $cert->course_name_ar,
-            'courseNameEn'     => $cert->course_name_en ?: $cert->course_name_ar,
-            'gradeAr'          => $cert->grade_ar ?: 'الصف الثالث الثانوي',
-            'score'            => "{$cert->grade_percent}%",
-            'completionDate'   => $cert->issue_date ? $cert->issue_date->format('Y-m-d') : null,
-            'honorsTitleAr'    => $cert->honors_title_ar,
-            'revokedAt'        => $cert->revoked_at?->toIso8601String(),
+            'isValid' => $signatureValid && ! $isRevoked,
+            'status' => $isRevoked ? 'revoked' : ($signatureValid ? 'verified' : 'tampered'),
+            'certNumber' => $cert->certificate_number,
+            'serialId' => $cert->certificate_number,
+            'signatureHash' => $cert->signature_hash,
+            'issuerType' => 'teacher',
+            'issuerNameAr' => $teacherName,
+            'issuerNameEn' => $teacherProfile?->name_en ?? $teacherName,
+            'instructorAr' => $teacherName,
+            'instructorEn' => $teacherProfile?->name_en ?? $teacherName,
+            'instructorTitleAr' => $teacherTitle,
+            'instructorTitleEn' => $teacherProfile?->title_en ?? 'Senior Lecturer',
+            'studentNameAr' => $cert->student_name_ar,
+            'studentNameEn' => $cert->student_name_en ?: $cert->student_name_ar,
+            'courseNameAr' => $cert->course_name_ar,
+            'courseNameEn' => $cert->course_name_en ?: $cert->course_name_ar,
+            'gradeAr' => $cert->grade_ar ?: 'الصف الثالث الثانوي',
+            'score' => "{$cert->grade_percent}%",
+            'completionDate' => $cert->issue_date ? $cert->issue_date->format('Y-m-d') : null,
+            'honorsTitleAr' => $cert->honors_title_ar,
+            'revokedAt' => $cert->revoked_at?->toIso8601String(),
             'revocationReason' => $cert->revocation_reason,
-            'tampered'         => !$signatureValid,
+            'tampered' => ! $signatureValid,
         ];
     }
 }
-

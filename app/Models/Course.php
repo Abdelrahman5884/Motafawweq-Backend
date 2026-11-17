@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Course extends Model
 {
-    use HasFactory, SoftDeletes, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory, SoftDeletes;
 
     /**
      * SECURITY:
@@ -41,11 +41,11 @@ class Course extends Model
     protected function casts(): array
     {
         return [
-            'status'          => CourseStatus::class,
-            'price_egp'       => 'float',
-            'revenue_egp'     => 'float',
-            'lessons_count'   => 'integer',
-            'students_count'  => 'integer',
+            'status' => CourseStatus::class,
+            'price_egp' => 'float',
+            'revenue_egp' => 'float',
+            'lessons_count' => 'integer',
+            'students_count' => 'integer',
             'completion_rate' => 'integer',
         ];
     }

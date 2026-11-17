@@ -85,25 +85,25 @@ class AppServiceProvider extends ServiceProvider
             $response = $tooMany('messages.rate_limit_auth');
 
             return [
-                Limit::perMinute(5)->by('auth:' . $email . '|' . $request->ip())->response($response),
-                Limit::perMinute(20)->by('auth-ip:' . $request->ip())->response($response),
+                Limit::perMinute(5)->by('auth:'.$email.'|'.$request->ip())->response($response),
+                Limit::perMinute(20)->by('auth-ip:'.$request->ip())->response($response),
             ];
         });
 
         // OTP sending / verification: 15 per minute, 100 per hour per user (or IP)
         RateLimiter::for('otp', function (Request $request) use ($tooMany) {
-            $key = $request->user()?->id ?: strtolower((string) $request->input('email')) . '|' . $request->ip();
+            $key = $request->user()?->id ?: strtolower((string) $request->input('email')).'|'.$request->ip();
             $response = $tooMany('messages.rate_limit_otp');
 
             return [
-                Limit::perMinute(15)->by('otp-m:' . $key)->response($response),
-                Limit::perHour(100)->by('otp-h:' . $key)->response($response),
+                Limit::perMinute(15)->by('otp-m:'.$key)->response($response),
+                Limit::perHour(100)->by('otp-h:'.$key)->response($response),
             ];
         });
 
         // Token refresh: 10 per minute per IP
         RateLimiter::for('refresh', function (Request $request) use ($tooMany) {
-            return Limit::perMinute(10)->by('refresh:' . $request->ip())
+            return Limit::perMinute(10)->by('refresh:'.$request->ip())
                 ->response($tooMany('messages.rate_limit_refresh'));
         });
 
@@ -115,36 +115,71 @@ class AppServiceProvider extends ServiceProvider
         // Teacher media & file uploads: 15 uploads per minute per teacher
         RateLimiter::for('teacher-uploads', function (Request $request) use ($tooMany) {
             return Limit::perMinute(15)
-                ->by('teacher-upload:' . ($request->user()?->id ?: $request->ip()))
+                ->by('teacher-upload:'.($request->user()?->id ?: $request->ip()))
                 ->response($tooMany('messages.rate_limit_teacher_uploads'));
         });
 
         // Classroom QR / Barcode attendance scanning: 45 scans per minute per teacher
         RateLimiter::for('qr-scan', function (Request $request) use ($tooMany) {
             return Limit::perMinute(45)
-                ->by('qr-scan:' . ($request->user()?->id ?: $request->ip()))
+                ->by('qr-scan:'.($request->user()?->id ?: $request->ip()))
                 ->response($tooMany('messages.rate_limit_qr_scan'));
         });
 
         // Sensitive financial & payout mutations: 10 per minute per teacher
         RateLimiter::for('financial-mutation', function (Request $request) use ($tooMany) {
             return Limit::perMinute(10)
-                ->by('fin-mut:' . ($request->user()?->id ?: $request->ip()))
+                ->by('fin-mut:'.($request->user()?->id ?: $request->ip()))
                 ->response($tooMany('messages.rate_limit_financial'));
         });
 
         // Group join code attempts: 8 per minute per user/IP (anti-brute-force)
         RateLimiter::for('join-code', function (Request $request) use ($tooMany) {
             return Limit::perMinute(8)
-                ->by('join-code:' . ($request->user()?->id ?: $request->ip()))
+                ->by('join-code:'.($request->user()?->id ?: $request->ip()))
                 ->response($tooMany('messages.rate_limit_join_code'));
         });
 
         // Exam submission attempts: 10 per minute per student/IP
         RateLimiter::for('exam-submit', function (Request $request) use ($tooMany) {
             return Limit::perMinute(10)
-                ->by('exam-sub:' . ($request->user()?->id ?: $request->ip()))
+                ->by('exam-sub:'.($request->user()?->id ?: $request->ip()))
                 ->response($tooMany('messages.rate_limit_exam_submit'));
+        });
+
+        // Student read endpoints: 120 per minute per student
+        RateLimiter::for('student-read', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(120)
+                ->by('std-read:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // Student write mutations: 30 per minute per student
+        RateLimiter::for('student-write', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(30)
+                ->by('std-write:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // Student lesson progress heartbeat: 12 per minute per student
+        RateLimiter::for('progress-heartbeat', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(12)
+                ->by('prog-hb:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // Student homework/receipt uploads: 10 per minute per student
+        RateLimiter::for('student-uploads', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(10)
+                ->by('std-upload:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_teacher_uploads'));
+        });
+
+        // Student checkout & coupon verification: 8 per minute per student
+        RateLimiter::for('student-checkout', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(8)
+                ->by('std-checkout:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_financial'));
         });
     }
 }

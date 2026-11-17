@@ -30,7 +30,7 @@ class TeacherExamGradingService extends BaseService
         $submissions = $this->submissionRepository->getSubmissionsForExam($exam->id, $filters);
 
         return [
-            'exam'        => $exam,
+            'exam' => $exam,
             'submissions' => $submissions,
         ];
     }
@@ -74,14 +74,14 @@ class TeacherExamGradingService extends BaseService
                     $feedback = isset($gradedItem['teacher_feedback']) ? trim(strip_tags((string) $gradedItem['teacher_feedback'])) : null;
 
                     $answer->update([
-                        'points_awarded'   => $awarded,
-                        'is_correct'       => $awarded >= $maxPoints ? true : ($awarded > 0 ? null : false),
+                        'points_awarded' => $awarded,
+                        'is_correct' => $awarded >= $maxPoints ? true : ($awarded > 0 ? null : false),
                         'teacher_feedback' => $feedback ?: $answer->teacher_feedback,
                     ]);
                 }
             }
 
-            if (!empty($data['teacher_feedback'])) {
+            if (! empty($data['teacher_feedback'])) {
                 $submission->teacher_feedback = trim(strip_tags((string) $data['teacher_feedback']));
             }
 
@@ -100,11 +100,11 @@ class TeacherExamGradingService extends BaseService
             $submission->logSecurityEvent(
                 'exam_submission_graded',
                 [
-                    'exam_uuid'       => $exam->uuid,
+                    'exam_uuid' => $exam->uuid,
                     'submission_uuid' => $submission->uuid,
-                    'score'           => $submission->score,
-                    'percentage'      => $submission->percentage,
-                    'is_passed'       => $submission->is_passed,
+                    'score' => $submission->score,
+                    'percentage' => $submission->percentage,
+                    'is_passed' => $submission->is_passed,
                 ],
                 'info',
                 $submission

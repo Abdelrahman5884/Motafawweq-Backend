@@ -20,14 +20,13 @@ class GroupScheduleSlotResource extends BaseJsonResource
             : DayOfWeek::tryFrom((string) $this->day_of_week);
 
         return [
-            'id'        => $this->uuid,
-            'day'       => $dayEnum ? $dayEnum->value : (string) $this->day_of_week,
-            'dayAr'     => $dayEnum ? $dayEnum->labelAr() : (string) $this->day_of_week,
-            'dayEn'     => $dayEnum ? $dayEnum->labelEn() : (string) $this->day_of_week,
+            'id' => $this->uuid,
+            'day' => $dayEnum ? $dayEnum->value : (string) $this->day_of_week,
+            'dayAr' => $dayEnum ? $dayEnum->labelAr() : (string) $this->day_of_week,
+            'dayEn' => $dayEnum ? $dayEnum->labelEn() : (string) $this->day_of_week,
             'startTime' => $this->start_time,
-            'endTime'   => $this->end_time,
-            'hall'      => $this->hall_name,
+            'endTime' => $this->end_time,
+            'hall' => $this->hall_name,
         ];
     }
 }
-

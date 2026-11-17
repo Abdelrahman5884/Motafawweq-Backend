@@ -7,13 +7,12 @@ use App\Enums\TeacherPlanTier;
 use App\Traits\BelongsToTeacher;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 class TeacherSubscription extends Model
 {
-    use HasFactory, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory;
 
     protected $fillable = [
         'teacher_id',
@@ -30,11 +29,11 @@ class TeacherSubscription extends Model
     protected function casts(): array
     {
         return [
-            'plan_tier'      => TeacherPlanTier::class,
+            'plan_tier' => TeacherPlanTier::class,
             'billing_period' => BillingPeriod::class,
-            'amount_egp'     => 'float',
-            'starts_at'      => 'datetime',
-            'renews_at'      => 'datetime',
+            'amount_egp' => 'float',
+            'starts_at' => 'datetime',
+            'renews_at' => 'datetime',
         ];
     }
 
@@ -52,4 +51,3 @@ class TeacherSubscription extends Model
         return $this->hasMany(TeacherInvoice::class, 'subscription_id');
     }
 }
-

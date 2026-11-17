@@ -7,7 +7,6 @@ use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\GroupScheduleSlot;
-use App\Models\SecurityAuditLog;
 use App\Models\StudyGroup;
 use App\Models\TeacherScheduleNote;
 use App\Models\User;
@@ -22,9 +21,9 @@ class TeacherStudyGroupTest extends TestCase
     protected function createTeacher(string $email = 'teacher.groups@motafawweq.com'): User
     {
         return User::factory()->create([
-            'email'             => $email,
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'email' => $email,
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
@@ -35,27 +34,27 @@ class TeacherStudyGroupTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $payload = [
-            'nameAr'        => 'أحياء 3 ثانوي 2026 — مجموعة النخبة',
-            'nameEn'        => 'Thanawya Amma Biology 2026 — Elite Cohort',
-            'subjectAr'     => 'الأحياء (الثانوية العامة)',
-            'gradeAr'       => 'الصف الثالث الثانوي',
-            'centerName'    => 'سنتر الرواد التعليمي — فرع الدقي',
-            'hallName'      => 'قاعة 1 (المحاضرات الكبرى)',
-            'priceEgp'      => 450,
-            'maxStudents'   => 60,
-            'joinCode'      => 'BIO-DK-2026',
+            'nameAr' => 'أحياء 3 ثانوي 2026 — مجموعة النخبة',
+            'nameEn' => 'Thanawya Amma Biology 2026 — Elite Cohort',
+            'subjectAr' => 'الأحياء (الثانوية العامة)',
+            'gradeAr' => 'الصف الثالث الثانوي',
+            'centerName' => 'سنتر الرواد التعليمي — فرع الدقي',
+            'hallName' => 'قاعة 1 (المحاضرات الكبرى)',
+            'priceEgp' => 450,
+            'maxStudents' => 60,
+            'joinCode' => 'BIO-DK-2026',
             'scheduleSlots' => [
                 [
-                    'day'       => DayOfWeek::SUNDAY->value,
+                    'day' => DayOfWeek::SUNDAY->value,
                     'startTime' => '16:00',
-                    'endTime'   => '18:00',
-                    'hall'      => 'قاعة 1 (المحاضرات الكبرى)',
+                    'endTime' => '18:00',
+                    'hall' => 'قاعة 1 (المحاضرات الكبرى)',
                 ],
                 [
-                    'day'       => DayOfWeek::WEDNESDAY->value,
+                    'day' => DayOfWeek::WEDNESDAY->value,
                     'startTime' => '16:00',
-                    'endTime'   => '18:00',
-                    'hall'      => 'قاعة 1 (المحاضرات الكبرى)',
+                    'endTime' => '18:00',
+                    'hall' => 'قاعة 1 (المحاضرات الكبرى)',
                 ],
             ],
         ];
@@ -74,20 +73,20 @@ class TeacherStudyGroupTest extends TestCase
 
         $this->assertDatabaseHas('study_groups', [
             'teacher_id' => $teacher->id,
-            'join_code'  => 'BIO-DK-2026',
+            'join_code' => 'BIO-DK-2026',
             'center_name' => 'سنتر الرواد التعليمي — فرع الدقي',
         ]);
 
         $this->assertDatabaseHas('group_schedule_slots', [
-            'teacher_id'  => $teacher->id,
+            'teacher_id' => $teacher->id,
             'day_of_week' => DayOfWeek::SUNDAY->value,
-            'start_time'  => '16:00',
-            'end_time'    => '18:00',
+            'start_time' => '16:00',
+            'end_time' => '18:00',
         ]);
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacher->id,
-            'event'   => 'teacher.group.created',
+            'event' => 'teacher.group.created',
         ]);
     }
 
@@ -97,21 +96,21 @@ class TeacherStudyGroupTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $group1 = StudyGroup::create([
-            'teacher_id'  => $teacher->id,
-            'name_ar'     => 'مجموعة الدقي',
-            'subject_ar'  => 'فيزياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
+            'teacher_id' => $teacher->id,
+            'name_ar' => 'مجموعة الدقي',
+            'subject_ar' => 'فيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'center_name' => 'سنتر الدقي',
-            'join_code'   => 'PHY-DK-01',
+            'join_code' => 'PHY-DK-01',
         ]);
 
         $group2 = StudyGroup::create([
-            'teacher_id'  => $teacher->id,
-            'name_ar'     => 'مجموعة المعادي',
-            'subject_ar'  => 'فيزياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
+            'teacher_id' => $teacher->id,
+            'name_ar' => 'مجموعة المعادي',
+            'subject_ar' => 'فيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'center_name' => 'سنتر المعادي',
-            'join_code'   => 'PHY-MD-02',
+            'join_code' => 'PHY-MD-02',
         ]);
 
         $allResponse = $this->getJson('/api/v1/teacher/groups');
@@ -130,24 +129,24 @@ class TeacherStudyGroupTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $group = StudyGroup::create([
-            'teacher_id'  => $teacher->id,
-            'name_ar'     => 'مجموعة الكيمياء',
-            'subject_ar'  => 'كيمياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
+            'teacher_id' => $teacher->id,
+            'name_ar' => 'مجموعة الكيمياء',
+            'subject_ar' => 'كيمياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'center_name' => 'سنتر النور',
-            'price_egp'   => 400,
-            'join_code'   => 'CHM-NOOR-01',
+            'price_egp' => 400,
+            'join_code' => 'CHM-NOOR-01',
         ]);
 
         $response = $this->putJson("/api/v1/teacher/groups/{$group->uuid}", [
-            'nameAr'        => 'مجموعة الكيمياء المتقدمة (معدلة)',
-            'priceEgp'      => 480,
+            'nameAr' => 'مجموعة الكيمياء المتقدمة (معدلة)',
+            'priceEgp' => 480,
             'scheduleSlots' => [
                 [
-                    'day'       => DayOfWeek::MONDAY->value,
+                    'day' => DayOfWeek::MONDAY->value,
                     'startTime' => '17:00',
-                    'endTime'   => '19:00',
-                    'hall'      => 'قاعة فاراداي',
+                    'endTime' => '19:00',
+                    'hall' => 'قاعة فاراداي',
                 ],
             ],
         ]);
@@ -159,8 +158,8 @@ class TeacherStudyGroupTest extends TestCase
             ->assertJsonPath('data.scheduleSlots.0.day', DayOfWeek::MONDAY->value);
 
         $this->assertDatabaseHas('study_groups', [
-            'id'       => $group->id,
-            'name_ar'  => 'مجموعة الكيمياء المتقدمة (معدلة)',
+            'id' => $group->id,
+            'name_ar' => 'مجموعة الكيمياء المتقدمة (معدلة)',
             'price_egp' => 480,
         ]);
     }
@@ -171,12 +170,12 @@ class TeacherStudyGroupTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $group = StudyGroup::create([
-            'teacher_id'  => $teacher->id,
-            'name_ar'     => 'مجموعة تجريبية',
-            'subject_ar'  => 'الأحياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
+            'teacher_id' => $teacher->id,
+            'name_ar' => 'مجموعة تجريبية',
+            'subject_ar' => 'الأحياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'center_name' => 'سنتر الرواد',
-            'join_code'   => 'OLD-LEAKED-CODE-1',
+            'join_code' => 'OLD-LEAKED-CODE-1',
         ]);
 
         $response = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/regenerate-code");
@@ -188,13 +187,13 @@ class TeacherStudyGroupTest extends TestCase
         $this->assertNotEquals('OLD-LEAKED-CODE-1', $newCode);
 
         $this->assertDatabaseHas('study_groups', [
-            'id'        => $group->id,
+            'id' => $group->id,
             'join_code' => $newCode,
         ]);
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacher->id,
-            'event'   => 'teacher.group.code_regenerated',
+            'event' => 'teacher.group.code_regenerated',
         ]);
     }
 
@@ -204,28 +203,28 @@ class TeacherStudyGroupTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $group = StudyGroup::create([
-            'teacher_id'  => $teacher->id,
-            'name_ar'     => 'مجموعة الفيزياء 1',
-            'subject_ar'  => 'الفيزياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
+            'teacher_id' => $teacher->id,
+            'name_ar' => 'مجموعة الفيزياء 1',
+            'subject_ar' => 'الفيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'center_name' => 'سنتر العباقرة',
-            'join_code'   => 'PHY-GEN-01',
+            'join_code' => 'PHY-GEN-01',
         ]);
 
         GroupScheduleSlot::create([
             'study_group_id' => $group->id,
-            'teacher_id'     => $teacher->id,
-            'day_of_week'    => DayOfWeek::TUESDAY->value,
-            'start_time'     => '14:00',
-            'end_time'       => '16:00',
-            'hall_name'      => 'مدرج 2',
+            'teacher_id' => $teacher->id,
+            'day_of_week' => DayOfWeek::TUESDAY->value,
+            'start_time' => '14:00',
+            'end_time' => '16:00',
+            'hall_name' => 'مدرج 2',
         ]);
 
         // Add a note for Tuesday
         $this->postJson('/api/v1/teacher/schedule/notes', [
-            'day'      => DayOfWeek::TUESDAY->value,
-            'text'     => 'إحضار نماذج امتحانات البابل شيت وتوزيعها على الطلاب',
-            'time'     => '13:45',
+            'day' => DayOfWeek::TUESDAY->value,
+            'text' => 'إحضار نماذج امتحانات البابل شيت وتوزيعها على الطلاب',
+            'time' => '13:45',
             'priority' => 'high',
         ])->assertCreated();
 
@@ -249,12 +248,12 @@ class TeacherStudyGroupTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $note = TeacherScheduleNote::create([
-            'teacher_id'  => $teacher->id,
+            'teacher_id' => $teacher->id,
             'day_of_week' => DayOfWeek::WEDNESDAY->value,
-            'note_text'   => 'مراجعة واجب الفصل الأول',
-            'note_time'   => '16:00',
-            'priority'    => 'normal',
-            'is_done'     => false,
+            'note_text' => 'مراجعة واجب الفصل الأول',
+            'note_time' => '16:00',
+            'priority' => 'normal',
+            'is_done' => false,
         ]);
 
         // Toggle to true
@@ -277,12 +276,12 @@ class TeacherStudyGroupTest extends TestCase
         $teacherB = $this->createTeacher('teacher.b.groups@motafawweq.com');
 
         $groupA = StudyGroup::create([
-            'teacher_id'  => $teacherA->id,
-            'name_ar'     => 'مجموعة المعلم أ السرية',
-            'subject_ar'  => 'أحياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
+            'teacher_id' => $teacherA->id,
+            'name_ar' => 'مجموعة المعلم أ السرية',
+            'subject_ar' => 'أحياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'center_name' => 'سنتر أ',
-            'join_code'   => 'SECRET-GRP-A',
+            'join_code' => 'SECRET-GRP-A',
         ]);
 
         Sanctum::actingAs($teacherB, [TokenType::ACCESS->value]);
@@ -306,8 +305,8 @@ class TeacherStudyGroupTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
-            'level'   => 'warning',
+            'event' => 'teacher.idor_attempt_blocked',
+            'level' => 'warning',
         ]);
     }
 
@@ -317,11 +316,11 @@ class TeacherStudyGroupTest extends TestCase
         $teacherB = $this->createTeacher('teacher.b.notes@motafawweq.com');
 
         $noteA = TeacherScheduleNote::create([
-            'teacher_id'  => $teacherA->id,
+            'teacher_id' => $teacherA->id,
             'day_of_week' => DayOfWeek::THURSDAY->value,
-            'note_text'   => 'ملاحظة خاصة بالمعلم أ',
-            'note_time'   => '18:00',
-            'is_done'     => false,
+            'note_text' => 'ملاحظة خاصة بالمعلم أ',
+            'note_time' => '18:00',
+            'is_done' => false,
         ]);
 
         Sanctum::actingAs($teacherB, [TokenType::ACCESS->value]);
@@ -336,8 +335,8 @@ class TeacherStudyGroupTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
-            'level'   => 'warning',
+            'event' => 'teacher.idor_attempt_blocked',
+            'level' => 'warning',
         ]);
     }
 
@@ -348,11 +347,11 @@ class TeacherStudyGroupTest extends TestCase
 
         // Create Group 1 on Sunday 16:00 - 18:00
         $res1 = $this->postJson('/api/v1/teacher/groups', [
-            'name_ar'     => 'المجموعة الأولى',
-            'subject_ar'  => 'فيزياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
+            'name_ar' => 'المجموعة الأولى',
+            'subject_ar' => 'فيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'center_name' => 'سنتر الدقي',
-            'slots'       => [
+            'slots' => [
                 ['day_of_week' => DayOfWeek::SUNDAY->value, 'start_time' => '16:00', 'end_time' => '18:00'],
             ],
         ]);
@@ -361,36 +360,36 @@ class TeacherStudyGroupTest extends TestCase
 
         // Overlap against Group 1 (Sunday 17:00 - 19:00) -> 422
         $this->postJson('/api/v1/teacher/groups', [
-            'name_ar'     => 'المجموعة المتداخلة',
-            'subject_ar'  => 'فيزياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
+            'name_ar' => 'المجموعة المتداخلة',
+            'subject_ar' => 'فيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'center_name' => 'سنتر الدقي',
-            'slots'       => [
+            'slots' => [
                 ['day_of_week' => DayOfWeek::SUNDAY->value, 'start_time' => '17:00', 'end_time' => '19:00'],
             ],
         ])->assertStatus(422)
-          ->assertJsonValidationErrors(['slots']);
+            ->assertJsonValidationErrors(['slots']);
 
         // Intra-group overlap (two sessions on Monday overlapping) -> 422
         $this->postJson('/api/v1/teacher/groups', [
-            'name_ar'     => 'تداخل داخلي',
-            'subject_ar'  => 'فيزياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
+            'name_ar' => 'تداخل داخلي',
+            'subject_ar' => 'فيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'center_name' => 'سنتر الدقي',
-            'slots'       => [
+            'slots' => [
                 ['day_of_week' => DayOfWeek::MONDAY->value, 'start_time' => '14:00', 'end_time' => '16:00'],
                 ['day_of_week' => DayOfWeek::MONDAY->value, 'start_time' => '15:30', 'end_time' => '17:30'],
             ],
         ])->assertStatus(422)
-          ->assertJsonValidationErrors(['slots']);
+            ->assertJsonValidationErrors(['slots']);
 
         // Back-to-back session on Sunday 18:00 - 20:00 -> allowed!
         $res2 = $this->postJson('/api/v1/teacher/groups', [
-            'name_ar'     => 'المجموعة الثانية',
-            'subject_ar'  => 'فيزياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
+            'name_ar' => 'المجموعة الثانية',
+            'subject_ar' => 'فيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
             'center_name' => 'سنتر الدقي',
-            'slots'       => [
+            'slots' => [
                 ['day_of_week' => DayOfWeek::SUNDAY->value, 'start_time' => '18:00', 'end_time' => '20:00'],
             ],
         ]);
@@ -408,7 +407,7 @@ class TeacherStudyGroupTest extends TestCase
                 ['day_of_week' => DayOfWeek::SUNDAY->value, 'start_time' => '18:30', 'end_time' => '19:30'],
             ],
         ])->assertStatus(422)
-          ->assertJsonValidationErrors(['slots']);
+            ->assertJsonValidationErrors(['slots']);
     }
 
     public function test_teacher_can_create_schedule_note_with_note_time_and_fetch_it(): void
@@ -418,9 +417,9 @@ class TeacherStudyGroupTest extends TestCase
 
         $createRes = $this->postJson('/api/v1/teacher/schedule/notes', [
             'day_of_week' => DayOfWeek::SUNDAY->value,
-            'note_text'   => 'تجهيز أوراق الامتحان',
-            'note_time'   => '14:30',
-            'priority'    => 'high',
+            'note_text' => 'تجهيز أوراق الامتحان',
+            'note_time' => '14:30',
+            'priority' => 'high',
         ]);
 
         $createRes->assertCreated()
@@ -433,4 +432,3 @@ class TeacherStudyGroupTest extends TestCase
             ->assertJsonPath('data.days.sunday.notes.0.time', '14:30');
     }
 }
-

@@ -40,16 +40,16 @@ class ArchitectureAndSecurityTest extends TestCase
     public function test_input_sanitization_removes_harmful_tags(): void
     {
         $response = $this->postJson('/api/v1/auth/register', [
-            'name'                  => '<b>أحمد</b> <script></script>علي',
-            'email'                 => 'ahmed@motafawweq.test',
-            'password'              => 'Password123!',
+            'name' => '<b>أحمد</b> <script></script>علي',
+            'email' => 'ahmed@motafawweq.test',
+            'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
         ]);
 
         $response->assertStatus(201);
         $this->assertDatabaseHas('users', [
             'email' => 'ahmed@motafawweq.test',
-            'name'  => 'أحمد علي', // tags stripped
+            'name' => 'أحمد علي', // tags stripped
         ]);
     }
 
@@ -59,17 +59,17 @@ class ArchitectureAndSecurityTest extends TestCase
     public function test_registration_validation_fails_with_standard_json(): void
     {
         $response = $this->postJson('/api/v1/auth/register', [
-            'name'  => '',
+            'name' => '',
             'email' => 'invalid-email',
         ]);
 
         $response->assertStatus(422)
-                 ->assertJson(['success' => false])
-                 ->assertJsonStructure([
-                     'success',
-                     'message',
-                     'errors' => ['name', 'email', 'password'],
-                 ]);
+            ->assertJson(['success' => false])
+            ->assertJsonStructure([
+                'success',
+                'message',
+                'errors' => ['name', 'email', 'password'],
+            ]);
     }
 
     /**
@@ -78,24 +78,24 @@ class ArchitectureAndSecurityTest extends TestCase
     public function test_user_can_login_and_receive_token(): void
     {
         User::factory()->create([
-            'email'    => 'student@motafawweq.test',
+            'email' => 'student@motafawweq.test',
             'password' => 'StrongPass123!',
-            'role'     => UserRole::STUDENT,
+            'role' => UserRole::STUDENT,
         ]);
 
         $response = $this->postJson('/api/v1/auth/login', [
-            'email'    => 'student@motafawweq.test',
+            'email' => 'student@motafawweq.test',
             'password' => 'StrongPass123!',
         ]);
 
         $response->assertStatus(200)
-                 ->assertJson(['success' => true])
-                 ->assertJsonStructure([
-                     'data' => [
-                         'user'   => ['id', 'name', 'email', 'role', 'role_label'],
-                         'tokens' => ['access_token', 'refresh_token'],
-                     ],
-                 ]);
+            ->assertJson(['success' => true])
+            ->assertJsonStructure([
+                'data' => [
+                    'user' => ['id', 'name', 'email', 'role', 'role_label'],
+                    'tokens' => ['access_token', 'refresh_token'],
+                ],
+            ]);
     }
 
     /**
@@ -104,8 +104,8 @@ class ArchitectureAndSecurityTest extends TestCase
     public function test_unauthenticated_request_returns_401(): void
     {
         $this->getJson('/api/v1/auth/me')
-             ->assertStatus(401)
-             ->assertJson(['success' => false]);
+            ->assertStatus(401)
+            ->assertJson(['success' => false]);
     }
 
     /**
@@ -116,8 +116,8 @@ class ArchitectureAndSecurityTest extends TestCase
         Sanctum::actingAs(User::factory()->create(['role' => UserRole::STUDENT]), ['access']);
 
         $this->getJson('/api/v1/admin/users')
-             ->assertStatus(403)
-             ->assertJson(['success' => false]);
+            ->assertStatus(403)
+            ->assertJson(['success' => false]);
     }
 
     /**
@@ -128,8 +128,8 @@ class ArchitectureAndSecurityTest extends TestCase
         Sanctum::actingAs(User::factory()->admin()->create(), ['access']);
 
         $this->getJson('/api/v1/admin/users')
-             ->assertStatus(200)
-             ->assertJson(['success' => true]);
+            ->assertStatus(200)
+            ->assertJson(['success' => true]);
     }
 
     /**
@@ -141,9 +141,9 @@ class ArchitectureAndSecurityTest extends TestCase
         $token = $user->createToken('test-token', ['access'])->plainTextToken;
 
         $this->withHeader('Authorization', "Bearer $token")
-             ->postJson('/api/v1/auth/logout')
-             ->assertStatus(200)
-             ->assertJson(['success' => true]);
+            ->postJson('/api/v1/auth/logout')
+            ->assertStatus(200)
+            ->assertJson(['success' => true]);
 
         $this->assertDatabaseCount('personal_access_tokens', 0);
     }
@@ -157,8 +157,8 @@ class ArchitectureAndSecurityTest extends TestCase
         Sanctum::actingAs($user, ['access']);
 
         $this->postJson('/api/v1/auth/change-password', [
-            'current_password'          => 'OldPassword123!',
-            'new_password'              => 'NewStrongPass123!',
+            'current_password' => 'OldPassword123!',
+            'new_password' => 'NewStrongPass123!',
             'new_password_confirmation' => 'NewStrongPass123!',
         ])->assertStatus(200);
 

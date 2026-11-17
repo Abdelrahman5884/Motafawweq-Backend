@@ -4,6 +4,7 @@ namespace App\Services\V1\Auth;
 
 use App\Enums\VerificationCodeType;
 use App\Models\User;
+use App\Models\VerificationCode;
 use App\Repositories\Contracts\VerificationCodeRepositoryInterface;
 use App\Services\BaseService;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
@@ -43,9 +44,9 @@ class OtpService extends BaseService
         $code = str_pad((string) random_int(0, (10 ** $length) - 1), $length, '0', STR_PAD_LEFT);
 
         $this->codes->create([
-            'user_id'    => $user->id,
-            'type'       => $type->value,
-            'code_hash'  => $this->hash($user, $type, $code),
+            'user_id' => $user->id,
+            'type' => $type->value,
+            'code_hash' => $this->hash($user, $type, $code),
             'expires_at' => now()->addMinutes((int) config('auth_security.otp.ttl_minutes')),
             'ip_address' => $ip,
         ]);
@@ -58,12 +59,12 @@ class OtpService extends BaseService
      *
      * @throws ValidationException
      */
-    public function check(User $user, VerificationCodeType $type, string $code): \App\Models\VerificationCode
+    public function check(User $user, VerificationCodeType $type, string $code): VerificationCode
     {
         $record = $this->codes->findActive($user, $type);
         $maxAttempts = (int) config('auth_security.otp.max_attempts');
 
-        if (!$record) {
+        if (! $record) {
             $this->fail(__('messages.otp_invalid'));
         }
 
@@ -72,13 +73,13 @@ class OtpService extends BaseService
             $this->fail(__('messages.otp_max_attempts'));
         }
 
-        if (!hash_equals($record->code_hash, $this->hash($user, $type, $code))) {
+        if (! hash_equals($record->code_hash, $this->hash($user, $type, $code))) {
             $record->increment('attempts');
             $remaining = max(0, $maxAttempts - $record->attempts);
 
             $this->logSecurityEvent('OTP_VERIFICATION_FAILED', [
-                'user_id'   => $user->id,
-                'type'      => $type->value,
+                'user_id' => $user->id,
+                'type' => $type->value,
                 'remaining' => $remaining,
             ], 'warning');
 
@@ -117,4 +118,3 @@ class OtpService extends BaseService
         throw ValidationException::withMessages(['code' => [$message]]);
     }
 }
-

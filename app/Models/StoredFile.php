@@ -35,7 +35,7 @@ class StoredFile extends Model
     {
         return [
             'file_size_bytes' => 'integer',
-            'metadata'        => 'array',
+            'metadata' => 'array',
         ];
     }
 
@@ -59,4 +59,3 @@ class StoredFile extends Model
         return $this->belongsTo(User::class);
     }
 }
-

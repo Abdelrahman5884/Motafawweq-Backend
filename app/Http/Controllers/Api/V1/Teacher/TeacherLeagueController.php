@@ -159,4 +159,3 @@ class TeacherLeagueController extends BaseApiController
         );
     }
 }
-

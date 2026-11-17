@@ -23,8 +23,7 @@ class SaveLessonConceptGraphRequest extends BaseApiRequest
     {
         return [
             'tree_data' => ['required', 'array'],
-            'source'    => ['nullable', 'string', 'in:manual,ai'],
+            'source' => ['nullable', 'string', 'in:manual,ai'],
         ];
     }
 }
-

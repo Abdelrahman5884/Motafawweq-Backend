@@ -33,8 +33,8 @@ class TeacherPayoutAccountRepository extends BaseRepository implements TeacherPa
         /** @var TeacherPayoutAccount|null $account */
         $account = $this->model->where('uuid', $uuid)->first();
 
-        if (!$account) {
-            throw (new ModelNotFoundException())->setModel(TeacherPayoutAccount::class, [$uuid]);
+        if (! $account) {
+            throw (new ModelNotFoundException)->setModel(TeacherPayoutAccount::class, [$uuid]);
         }
 
         // Strict anti-IDOR check (logs security warning & throws AuthorizationException if owned by another teacher)
@@ -57,26 +57,25 @@ class TeacherPayoutAccountRepository extends BaseRepository implements TeacherPa
         $phone = $teacher->phone ?: '01012345678';
 
         $this->model->create([
-            'teacher_id'         => $teacher->id,
-            'type'               => PayoutAccountType::INSTAPAY,
-            'label_ar'           => 'عنوان إنستاباي الفوري (InstaPay)',
-            'label_en'           => 'InstaPay Direct IPA',
+            'teacher_id' => $teacher->id,
+            'type' => PayoutAccountType::INSTAPAY,
+            'label_ar' => 'عنوان إنستاباي الفوري (InstaPay)',
+            'label_en' => 'InstaPay Direct IPA',
             'account_identifier' => "{$emailPrefix}@instapay",
-            'is_default'         => true,
-            'is_active'          => true,
+            'is_default' => true,
+            'is_active' => true,
         ]);
 
         $this->model->create([
-            'teacher_id'         => $teacher->id,
-            'type'               => PayoutAccountType::VODAFONE,
-            'label_ar'           => 'محفظة فودافون كاش ومحافظ المحمول',
-            'label_en'           => 'Vodafone Cash & Mobile Wallet',
+            'teacher_id' => $teacher->id,
+            'type' => PayoutAccountType::VODAFONE,
+            'label_ar' => 'محفظة فودافون كاش ومحافظ المحمول',
+            'label_en' => 'Vodafone Cash & Mobile Wallet',
             'account_identifier' => $phone,
-            'is_default'         => false,
-            'is_active'          => true,
+            'is_default' => false,
+            'is_active' => true,
         ]);
 
         return $this->getAllForTeacher($teacher->id);
     }
 }
-

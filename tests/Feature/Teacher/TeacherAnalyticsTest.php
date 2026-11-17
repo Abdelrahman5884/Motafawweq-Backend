@@ -18,6 +18,7 @@ use App\Models\ExamSubmission;
 use App\Models\ExamSubmissionAnswer;
 use App\Models\GroupEnrollment;
 use App\Models\Lesson;
+use App\Models\LessonConceptGraph;
 use App\Models\StudentRiskSignal;
 use App\Models\StudyGroup;
 use App\Models\TeacherProfile;
@@ -33,18 +34,18 @@ class TeacherAnalyticsTest extends TestCase
     protected function createTeacher(string $email = 'teacher.analytics@motafawweq.com'): User
     {
         $teacher = User::factory()->create([
-            'email'             => $email,
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'email' => $email,
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
 
         TeacherProfile::create([
-            'user_id'      => $teacher->id,
-            'name_ar'      => $teacher->name,
+            'user_id' => $teacher->id,
+            'name_ar' => $teacher->name,
             'teacher_code' => 'TCH-9922',
-            'headline_ar'  => 'خبير أول الأحياء',
-            'subject_ar'   => 'الأحياء',
+            'headline_ar' => 'خبير أول الأحياء',
+            'subject_ar' => 'الأحياء',
         ]);
 
         return $teacher;
@@ -53,10 +54,10 @@ class TeacherAnalyticsTest extends TestCase
     protected function createStudent(string $name, string $email): User
     {
         return User::factory()->create([
-            'name'              => $name,
-            'email'             => $email,
-            'role'              => UserRole::STUDENT,
-            'status'            => UserStatus::ACTIVE,
+            'name' => $name,
+            'email' => $email,
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
@@ -66,39 +67,39 @@ class TeacherAnalyticsTest extends TestCase
         $teacher = $this->createTeacher();
         $course = Course::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'كورس الأحياء العام',
-            'stage'      => 'sec',
-            'grade_ar'   => 'الصف الثالث الثانوي',
+            'title_ar' => 'كورس الأحياء العام',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
         ]);
 
         $group = StudyGroup::create([
-            'teacher_id'       => $teacher->id,
-            'course_id'        => $course->id,
-            'name_ar'          => 'مجموعة الدقي',
-            'stage'            => 'sec',
-            'grade_ar'         => 'الصف الثالث الثانوي',
-            'subject_ar'       => 'الأحياء',
-            'center_name'      => 'سنتر الدقي النخبة',
-            'governorate'      => 'الجيزة',
-            'area'             => 'الدقي',
-            'price_egp'        => 350.00,
-            'is_active'        => true,
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'name_ar' => 'مجموعة الدقي',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'subject_ar' => 'الأحياء',
+            'center_name' => 'سنتر الدقي النخبة',
+            'governorate' => 'الجيزة',
+            'area' => 'الدقي',
+            'price_egp' => 350.00,
+            'is_active' => true,
         ]);
 
         $s1 = $this->createStudent('طالب 1', 's1@motafawweq.com');
         $s2 = $this->createStudent('طالب 2', 's2@motafawweq.com');
 
         GroupEnrollment::create([
-            'study_group_id'  => $group->id,
-            'student_id'      => $s1->id,
-            'status'          => EnrollmentStatus::ENROLLED,
+            'study_group_id' => $group->id,
+            'student_id' => $s1->id,
+            'status' => EnrollmentStatus::ENROLLED,
             'attendance_rate' => 90,
         ]);
 
         GroupEnrollment::create([
-            'study_group_id'  => $group->id,
-            'student_id'      => $s2->id,
-            'status'          => EnrollmentStatus::ENROLLED,
+            'study_group_id' => $group->id,
+            'student_id' => $s2->id,
+            'status' => EnrollmentStatus::ENROLLED,
             'attendance_rate' => 100,
         ]);
 
@@ -118,38 +119,38 @@ class TeacherAnalyticsTest extends TestCase
     {
         $teacher = $this->createTeacher();
         $exam = Exam::create([
-            'teacher_id'       => $teacher->id,
-            'title_ar'         => 'امتحان الباب الأول',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان الباب الأول',
             'duration_minutes' => 30,
-            'full_mark'        => 10,
-            'status'           => ExamStatus::ACTIVE,
+            'full_mark' => 10,
+            'status' => ExamStatus::ACTIVE,
         ]);
 
         $q = ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 1,
-            'type'            => ExamQuestionType::MCQ,
-            'points'          => 10,
-            'question_ar'     => 'ما هو ناتج التحلل السكري النهائي؟',
-            'options_ar'      => ['أ', 'ب'],
-            'correct_index'   => 0,
-            'explanation_ar'  => 'حمض البيروفيك هو الناتج النهائي.',
+            'type' => ExamQuestionType::MCQ,
+            'points' => 10,
+            'question_ar' => 'ما هو ناتج التحلل السكري النهائي؟',
+            'options_ar' => ['أ', 'ب'],
+            'correct_index' => 0,
+            'explanation_ar' => 'حمض البيروفيك هو الناتج النهائي.',
         ]);
 
         $sub = ExamSubmission::create([
-            'exam_id'      => $exam->id,
-            'student_id'   => $this->createStudent('طالب مجرب', 'try@motafawweq.com')->id,
-            'status'       => ExamSubmissionStatus::GRADED,
+            'exam_id' => $exam->id,
+            'student_id' => $this->createStudent('طالب مجرب', 'try@motafawweq.com')->id,
+            'status' => ExamSubmissionStatus::GRADED,
             'submitted_at' => now(),
         ]);
 
         // Wrong answer
         ExamSubmissionAnswer::create([
             'exam_submission_id' => $sub->id,
-            'exam_question_id'   => $q->id,
-            'selected_index'     => 1,
-            'points_awarded'     => 0,
-            'is_correct'         => false,
+            'exam_question_id' => $q->id,
+            'selected_index' => 1,
+            'points_awarded' => 0,
+            'is_correct' => false,
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -166,26 +167,26 @@ class TeacherAnalyticsTest extends TestCase
     {
         $teacher = $this->createTeacher();
         $group = StudyGroup::create([
-            'teacher_id'  => $teacher->id,
-            'name_ar'     => 'مجموعة الإنذار',
-            'stage'       => 'sec',
-            'grade_ar'    => 'الصف الثالث الثانوي',
-            'subject_ar'  => 'الأحياء',
+            'teacher_id' => $teacher->id,
+            'name_ar' => 'مجموعة الإنذار',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'subject_ar' => 'الأحياء',
             'center_name' => 'سنتر الرواد',
             'governorate' => 'القاهرة',
-            'area'        => 'مدينة نصر',
-            'is_active'   => true,
+            'area' => 'مدينة نصر',
+            'is_active' => true,
         ]);
 
         $strugglingStudent = $this->createStudent('ماجد كمال نصار', 'maged@motafawweq.com');
 
         // Low attendance (50%) & low quiz (40%) triggers high risk
         GroupEnrollment::create([
-            'study_group_id'  => $group->id,
-            'student_id'      => $strugglingStudent->id,
-            'status'          => EnrollmentStatus::ENROLLED,
+            'study_group_id' => $group->id,
+            'student_id' => $strugglingStudent->id,
+            'status' => EnrollmentStatus::ENROLLED,
             'attendance_rate' => 50,
-            'avg_quiz_score'  => 40,
+            'avg_quiz_score' => 40,
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -220,15 +221,15 @@ class TeacherAnalyticsTest extends TestCase
     {
         $teacher = $this->createTeacher();
         $lesson = Lesson::create([
-            'teacher_id'       => $teacher->id,
-            'title_ar'         => 'حصة البناء الضوئي',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'حصة البناء الضوئي',
             'duration_seconds' => 2400,
         ]);
 
-        \App\Models\LessonConceptGraph::create([
-            'lesson_id'  => $lesson->id,
+        LessonConceptGraph::create([
+            'lesson_id' => $lesson->id,
             'teacher_id' => $teacher->id,
-            'tree_data'  => array_fill(0, 12, ['concept' => 'node']),
+            'tree_data' => array_fill(0, 12, ['concept' => 'node']),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -238,7 +239,7 @@ class TeacherAnalyticsTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.welcome.teacherName', $teacher->name)
-            ->assertJsonPath('data.welcome.teacherCode', 'TCH-' . str_pad((string) $teacher->id, 4, '0', STR_PAD_LEFT))
+            ->assertJsonPath('data.welcome.teacherCode', 'TCH-'.str_pad((string) $teacher->id, 4, '0', STR_PAD_LEFT))
             ->assertJsonPath('data.recentLessons.0.titleAr', 'حصة البناء الضوئي')
             ->assertJsonPath('data.recentLessons.0.stats.conceptsCount', 12);
     }
@@ -250,11 +251,11 @@ class TeacherAnalyticsTest extends TestCase
         $student = $this->createStudent('طالب محايد', 'std.ana@motafawweq.com');
 
         $signal = StudentRiskSignal::create([
-            'teacher_id'      => $teacherA->id,
-            'student_id'      => $student->id,
-            'risk_level'      => RiskLevel::HIGH,
+            'teacher_id' => $teacherA->id,
+            'student_id' => $student->id,
+            'risk_level' => RiskLevel::HIGH,
             'risk_reasons_ar' => 'غياب متكرر',
-            'status'          => RiskSignalStatus::DETECTED,
+            'status' => RiskSignalStatus::DETECTED,
         ]);
 
         Sanctum::actingAs($teacherB, [TokenType::ACCESS->value]);

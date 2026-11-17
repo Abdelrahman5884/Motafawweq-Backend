@@ -41,14 +41,14 @@ class TeacherRosterService extends BaseService
         $pending = $this->enrollmentRepository->getPendingForGroup($group->id, $search);
 
         return [
-            'group'    => $group,
+            'group' => $group,
             'enrolled' => $enrolled,
-            'pending'  => $pending,
-            'stats'    => [
+            'pending' => $pending,
+            'stats' => [
                 'enrolledCount' => $enrolled->count(),
-                'pendingCount'  => $pending->count(),
-                'maxStudents'   => (int) $group->max_students,
-                'isFull'        => $enrolled->count() >= $group->max_students,
+                'pendingCount' => $pending->count(),
+                'maxStudents' => (int) $group->max_students,
+                'isFull' => $enrolled->count() >= $group->max_students,
             ],
         ];
     }
@@ -60,7 +60,7 @@ class TeacherRosterService extends BaseService
     {
         $clean = trim($query);
         if ($clean === '') {
-            return new Collection();
+            return new Collection;
         }
 
         return User::query()
@@ -99,7 +99,7 @@ class TeacherRosterService extends BaseService
         // Resolve target student user
         $studentUser = $this->resolveStudentUser($data);
 
-        return $this->transaction(function () use ($teacher, $group, $studentUser, $data) {
+        return $this->transaction(function () use ($group, $studentUser, $data) {
             /** @var GroupEnrollment|null $existing */
             $existing = GroupEnrollment::withTrashed()
                 ->where('study_group_id', $group->id)
@@ -121,33 +121,33 @@ class TeacherRosterService extends BaseService
                 // Restore soft-deleted or rejected enrollment back to pending
                 $existing->restore();
                 $existing->update([
-                    'status'                 => EnrollmentStatus::PENDING,
-                    'join_method'            => JoinMethod::TEACHER_INVITE,
-                    'student_name_override'  => $data['name_ar'] ?? $studentUser->name,
+                    'status' => EnrollmentStatus::PENDING,
+                    'join_method' => JoinMethod::TEACHER_INVITE,
+                    'student_name_override' => $data['name_ar'] ?? $studentUser->name,
                     'student_phone_override' => $data['phone'] ?? $studentUser->phone,
-                    'parent_name_ar'         => $data['parent_name_ar'] ?? $existing->parent_name_ar,
-                    'parent_phone'           => $data['parent_phone'] ?? $existing->parent_phone,
-                    'requested_at'           => now(),
+                    'parent_name_ar' => $data['parent_name_ar'] ?? $existing->parent_name_ar,
+                    'parent_phone' => $data['parent_phone'] ?? $existing->parent_phone,
+                    'requested_at' => now(),
                 ]);
 
                 $enrollment = $existing;
             } else {
                 $enrollment = GroupEnrollment::create([
-                    'study_group_id'         => $group->id,
-                    'student_id'             => $studentUser->id,
-                    'status'                 => EnrollmentStatus::PENDING,
-                    'join_method'            => JoinMethod::TEACHER_INVITE,
-                    'student_name_override'  => $data['name_ar'] ?? $studentUser->name,
+                    'study_group_id' => $group->id,
+                    'student_id' => $studentUser->id,
+                    'status' => EnrollmentStatus::PENDING,
+                    'join_method' => JoinMethod::TEACHER_INVITE,
+                    'student_name_override' => $data['name_ar'] ?? $studentUser->name,
                     'student_phone_override' => $data['phone'] ?? $studentUser->phone,
-                    'parent_name_ar'         => $data['parent_name_ar'] ?? null,
-                    'parent_phone'           => $data['parent_phone'] ?? null,
-                    'requested_at'           => now(),
+                    'parent_name_ar' => $data['parent_name_ar'] ?? null,
+                    'parent_phone' => $data['parent_phone'] ?? null,
+                    'requested_at' => now(),
                 ]);
             }
 
             $this->logSecurityEvent('teacher.roster.student_invited', [
-                'group_uuid'   => $group->uuid,
-                'student_id'   => $studentUser->id,
+                'group_uuid' => $group->uuid,
+                'student_id' => $studentUser->id,
                 'student_code' => $studentUser->student_code,
             ], 'info', $enrollment);
 
@@ -164,8 +164,8 @@ class TeacherRosterService extends BaseService
         $group = $this->groupRepository->findByUuidForTeacher($groupUuid, $teacher);
 
         $enrollment = $this->enrollmentRepository->findInGroup($group->id, $enrollmentUuid);
-        if (!$enrollment) {
-            throw (new ModelNotFoundException())->setModel(GroupEnrollment::class, [$enrollmentUuid]);
+        if (! $enrollment) {
+            throw (new ModelNotFoundException)->setModel(GroupEnrollment::class, [$enrollmentUuid]);
         }
 
         // Check group capacity
@@ -179,23 +179,23 @@ class TeacherRosterService extends BaseService
         // Check teacher plan quota
         $this->assertTeacherPlanStudentQuota($teacher);
 
-        return $this->transaction(function () use ($teacher, $group, $enrollment) {
+        return $this->transaction(function () use ($group, $enrollment) {
             $barcode = GroupEnrollment::generateUniqueBarcode($group->id, $enrollment->student_id);
             $passcode = GroupEnrollment::generatePasscode();
 
             $enrollment->update([
-                'status'            => EnrollmentStatus::ENROLLED,
-                'student_barcode'   => $barcode,
-                'student_passcode'  => $passcode,
-                'enrolled_at'       => now(),
-                'attendance_rate'   => 100,
+                'status' => EnrollmentStatus::ENROLLED,
+                'student_barcode' => $barcode,
+                'student_passcode' => $passcode,
+                'enrolled_at' => now(),
+                'attendance_rate' => 100,
                 'attended_sessions' => 0,
-                'total_sessions'    => 0,
-                'academic_status'   => AcademicStatus::GOOD,
+                'total_sessions' => 0,
+                'academic_status' => AcademicStatus::GOOD,
             ]);
 
             $this->logSecurityEvent('teacher.roster.student_accepted', [
-                'group_uuid'      => $group->uuid,
+                'group_uuid' => $group->uuid,
                 'enrollment_uuid' => $enrollment->uuid,
                 'student_barcode' => $barcode,
             ], 'info', $enrollment);
@@ -213,17 +213,17 @@ class TeacherRosterService extends BaseService
         $group = $this->groupRepository->findByUuidForTeacher($groupUuid, $teacher);
 
         $enrollment = $this->enrollmentRepository->findInGroup($group->id, $enrollmentUuid);
-        if (!$enrollment) {
-            throw (new ModelNotFoundException())->setModel(GroupEnrollment::class, [$enrollmentUuid]);
+        if (! $enrollment) {
+            throw (new ModelNotFoundException)->setModel(GroupEnrollment::class, [$enrollmentUuid]);
         }
 
-        return $this->transaction(function () use ($teacher, $group, $enrollment) {
+        return $this->transaction(function () use ($group, $enrollment) {
             $enrollment->update([
                 'status' => EnrollmentStatus::REJECTED,
             ]);
 
             $this->logSecurityEvent('teacher.roster.student_rejected', [
-                'group_uuid'      => $group->uuid,
+                'group_uuid' => $group->uuid,
                 'enrollment_uuid' => $enrollment->uuid,
             ], 'info', $enrollment);
 
@@ -240,18 +240,18 @@ class TeacherRosterService extends BaseService
         $group = $this->groupRepository->findByUuidForTeacher($groupUuid, $teacher);
 
         $enrollment = $this->enrollmentRepository->findInGroup($group->id, $enrollmentUuid);
-        if (!$enrollment) {
-            throw (new ModelNotFoundException())->setModel(GroupEnrollment::class, [$enrollmentUuid]);
+        if (! $enrollment) {
+            throw (new ModelNotFoundException)->setModel(GroupEnrollment::class, [$enrollmentUuid]);
         }
 
-        return $this->transaction(function () use ($teacher, $group, $enrollment) {
+        return $this->transaction(function () use ($group, $enrollment) {
             $enrollment->update([
                 'status' => EnrollmentStatus::REMOVED,
             ]);
             $enrollment->delete();
 
             $this->logSecurityEvent('teacher.roster.student_removed', [
-                'group_uuid'      => $group->uuid,
+                'group_uuid' => $group->uuid,
                 'enrollment_uuid' => $enrollment->uuid,
             ], 'warning', $enrollment);
 
@@ -271,7 +271,7 @@ class TeacherRosterService extends BaseService
             ->where('status', 'active')
             ->first();
 
-        if (!$group) {
+        if (! $group) {
             throw ValidationException::withMessages([
                 'join_code' => [__('messages.invalid_join_code')],
             ]);
@@ -306,35 +306,35 @@ class TeacherRosterService extends BaseService
 
                 $existing->restore();
                 $existing->update([
-                    'status'                 => EnrollmentStatus::PENDING,
-                    'join_method'            => JoinMethod::JOIN_CODE,
-                    'student_name_override'  => $student->name,
+                    'status' => EnrollmentStatus::PENDING,
+                    'join_method' => JoinMethod::JOIN_CODE,
+                    'student_name_override' => $student->name,
                     'student_phone_override' => $student->phone,
-                    'parent_name_ar'         => $extraData['parent_name_ar'] ?? $existing->parent_name_ar,
-                    'parent_phone'           => $extraData['parent_phone'] ?? $existing->parent_phone,
-                    'requested_at'           => now(),
+                    'parent_name_ar' => $extraData['parent_name_ar'] ?? $existing->parent_name_ar,
+                    'parent_phone' => $extraData['parent_phone'] ?? $existing->parent_phone,
+                    'requested_at' => now(),
                 ]);
 
                 $enrollment = $existing;
             } else {
                 $enrollment = GroupEnrollment::create([
-                    'study_group_id'         => $group->id,
-                    'student_id'             => $student->id,
-                    'status'                 => EnrollmentStatus::PENDING,
-                    'join_method'            => JoinMethod::JOIN_CODE,
-                    'student_name_override'  => $student->name,
+                    'study_group_id' => $group->id,
+                    'student_id' => $student->id,
+                    'status' => EnrollmentStatus::PENDING,
+                    'join_method' => JoinMethod::JOIN_CODE,
+                    'student_name_override' => $student->name,
                     'student_phone_override' => $student->phone,
-                    'parent_name_ar'         => $extraData['parent_name_ar'] ?? null,
-                    'parent_phone'           => $extraData['parent_phone'] ?? null,
-                    'requested_at'           => now(),
+                    'parent_name_ar' => $extraData['parent_name_ar'] ?? null,
+                    'parent_phone' => $extraData['parent_phone'] ?? null,
+                    'requested_at' => now(),
                 ]);
             }
 
             $this->logSecurityEvent('student.group_join_requested', [
-                'group_uuid'   => $group->uuid,
-                'student_id'   => $student->id,
+                'group_uuid' => $group->uuid,
+                'student_id' => $student->id,
                 'student_code' => $student->student_code,
-                'join_code'    => $group->join_code,
+                'join_code' => $group->join_code,
             ], 'info', $enrollment);
 
             return $enrollment;
@@ -367,16 +367,16 @@ class TeacherRosterService extends BaseService
 
         // If no user exists, auto-provision a platform student account for them
         $name = trim((string) ($data['name_ar'] ?? 'طالب جديد'));
-        $safeEmail = 'std_' . time() . '_' . Str::random(5) . '@student.motafawweq.local';
+        $safeEmail = 'std_'.time().'_'.Str::random(5).'@student.motafawweq.local';
 
         return User::create([
-            'name'              => $name,
-            'email'             => $safeEmail,
-            'phone'             => $phone !== '' ? $phone : '010' . random_int(10000000, 99999999),
-            'password'          => Hash::make(Str::random(16)),
-            'role'              => UserRole::STUDENT,
-            'status'            => UserStatus::ACTIVE,
-            'student_code'      => 'STD-' . random_int(100000, 999999),
+            'name' => $name,
+            'email' => $safeEmail,
+            'phone' => $phone !== '' ? $phone : '010'.random_int(10000000, 99999999),
+            'password' => Hash::make(Str::random(16)),
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
+            'student_code' => 'STD-'.random_int(100000, 999999),
             'email_verified_at' => now(),
         ]);
     }
@@ -403,11 +403,10 @@ class TeacherRosterService extends BaseService
         if ($totalEnrolled >= $maxStudents) {
             throw ValidationException::withMessages([
                 'quota' => [__('messages.quota_students_exceeded', [
-                    'max'  => $maxStudents,
+                    'max' => $maxStudents,
                     'plan' => $tier->label(),
                 ])],
             ]);
         }
     }
 }
-

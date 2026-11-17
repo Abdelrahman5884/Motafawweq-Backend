@@ -51,11 +51,10 @@ class ExamSubmissionRepository extends BaseRepository implements ExamSubmissionR
             ->with(['student', 'grader', 'answers.question'])
             ->first();
 
-        if (!$submission) {
-            throw (new ModelNotFoundException())->setModel(ExamSubmission::class, [$uuid]);
+        if (! $submission) {
+            throw (new ModelNotFoundException)->setModel(ExamSubmission::class, [$uuid]);
         }
 
         return $submission;
     }
 }
-

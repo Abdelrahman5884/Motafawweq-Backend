@@ -9,4 +9,3 @@ enum LoginStatus: string
     case LOCKED = 'locked';
     case BLOCKED = 'blocked';
 }
-

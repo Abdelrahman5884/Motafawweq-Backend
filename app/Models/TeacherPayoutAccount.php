@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class TeacherPayoutAccount extends Model
 {
-    use HasFactory, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory;
 
     protected $fillable = [
         'teacher_id',
@@ -33,10 +33,10 @@ class TeacherPayoutAccount extends Model
     protected function casts(): array
     {
         return [
-            'type'               => PayoutAccountType::class,
+            'type' => PayoutAccountType::class,
             'account_identifier' => 'encrypted',
-            'is_default'         => 'boolean',
-            'is_active'          => 'boolean',
+            'is_default' => 'boolean',
+            'is_active' => 'boolean',
         ];
     }
 
@@ -52,7 +52,6 @@ class TeacherPayoutAccount extends Model
             return str_repeat('*', $len);
         }
 
-        return mb_substr($plain, 0, 3) . str_repeat('*', max(3, $len - 6)) . mb_substr($plain, -3);
+        return mb_substr($plain, 0, 3).str_repeat('*', max(3, $len - 6)).mb_substr($plain, -3);
     }
 }
-

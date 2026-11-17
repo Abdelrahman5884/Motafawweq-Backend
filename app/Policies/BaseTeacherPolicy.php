@@ -35,20 +35,20 @@ abstract class BaseTeacherPolicy
      */
     protected function ownsResource(User $user, Model $resource): bool
     {
-        if (!$this->isAuthorizedTeacher($user)) {
+        if (! $this->isAuthorizedTeacher($user)) {
             return false;
         }
 
         $owned = (int) ($resource->teacher_id ?? $resource->user_id ?? 0) === (int) $user->id;
 
-        if (!$owned) {
+        if (! $owned) {
             $this->logSecurityEvent(
                 'teacher.policy_ownership_denied',
                 [
                     'attempted_by_user_id' => $user->id,
-                    'resource_owner_id'    => $resource->teacher_id ?? $resource->user_id ?? null,
-                    'resource_class'       => get_class($resource),
-                    'resource_key'         => $resource->uuid ?? $resource->getKey(),
+                    'resource_owner_id' => $resource->teacher_id ?? $resource->user_id ?? null,
+                    'resource_class' => get_class($resource),
+                    'resource_key' => $resource->uuid ?? $resource->getKey(),
                 ],
                 'warning',
                 $resource
@@ -83,4 +83,3 @@ abstract class BaseTeacherPolicy
         return $this->ownsResource($user, $resource);
     }
 }
-

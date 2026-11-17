@@ -13,4 +13,3 @@ interface CourseCertificateRepositoryInterface extends BaseRepositoryInterface
 
     public function findByUuidForTeacher(string $uuid, int $teacherId): ?CourseCertificate;
 }
-

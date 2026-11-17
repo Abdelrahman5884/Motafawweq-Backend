@@ -16,11 +16,10 @@ class EnsureEmailIsVerified
     {
         $user = $request->user();
 
-        if (!$user || !$user->hasVerifiedEmail()) {
+        if (! $user || ! $user->hasVerifiedEmail()) {
             throw AuthSecurityException::emailNotVerified();
         }
 
         return $next($request);
     }
 }
-

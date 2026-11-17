@@ -72,7 +72,7 @@ class StoreHomeworkRequest extends BaseApiRequest
             $merged['total_assigned'] = (int) $totalAssigned;
         }
 
-        if (!empty($merged)) {
+        if (! empty($merged)) {
             $this->merge($merged);
         }
     }
@@ -80,22 +80,21 @@ class StoreHomeworkRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'title_ar'           => ['required', 'string', 'min:3', 'max:250'],
-            'course_id'          => ['nullable'],
-            'course_title_ar'    => ['nullable', 'string', 'max:200'],
-            'lesson_id'          => ['nullable'],
-            'lesson_title_ar'    => ['nullable', 'string', 'max:200'],
+            'title_ar' => ['required', 'string', 'min:3', 'max:250'],
+            'course_id' => ['nullable'],
+            'course_title_ar' => ['nullable', 'string', 'max:200'],
+            'lesson_id' => ['nullable'],
+            'lesson_title_ar' => ['nullable', 'string', 'max:200'],
             'target_location_id' => ['nullable', 'string', 'max:50'],
             'target_location_ar' => ['nullable', 'string', 'max:150'],
-            'type'               => ['nullable', 'string', Rule::in(HomeworkType::values())],
-            'text_content'       => ['nullable', 'string'],
-            'due_date'           => ['nullable', 'date'],
-            'due_time'           => ['nullable', 'string', 'max:10'],
-            'max_grade'          => ['nullable', 'numeric', 'min:1', 'max:500'],
-            'total_assigned'     => ['nullable', 'integer', 'min:0'],
-            'file'               => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
-            'attachment'         => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
+            'type' => ['nullable', 'string', Rule::in(HomeworkType::values())],
+            'text_content' => ['nullable', 'string'],
+            'due_date' => ['nullable', 'date'],
+            'due_time' => ['nullable', 'string', 'max:10'],
+            'max_grade' => ['nullable', 'numeric', 'min:1', 'max:500'],
+            'total_assigned' => ['nullable', 'integer', 'min:0'],
+            'file' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
         ];
     }
 }
-

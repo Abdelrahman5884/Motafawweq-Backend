@@ -14,7 +14,7 @@ use Illuminate\Support\Str;
 
 class GroupEnrollment extends Model
 {
-    use HasFactory, SoftDeletes, HasSecurityAudit;
+    use HasFactory, HasSecurityAudit, SoftDeletes;
 
     protected $fillable = [
         'uuid',
@@ -41,16 +41,16 @@ class GroupEnrollment extends Model
     protected function casts(): array
     {
         return [
-            'status'            => EnrollmentStatus::class,
-            'join_method'       => JoinMethod::class,
-            'academic_status'   => AcademicStatus::class,
-            'attendance_rate'   => 'integer',
+            'status' => EnrollmentStatus::class,
+            'join_method' => JoinMethod::class,
+            'academic_status' => AcademicStatus::class,
+            'attendance_rate' => 'integer',
             'attended_sessions' => 'integer',
-            'total_sessions'    => 'integer',
-            'avg_quiz_score'    => 'integer',
-            'streak_days'       => 'integer',
-            'requested_at'      => 'datetime',
-            'enrolled_at'       => 'datetime',
+            'total_sessions' => 'integer',
+            'avg_quiz_score' => 'integer',
+            'streak_days' => 'integer',
+            'requested_at' => 'datetime',
+            'enrolled_at' => 'datetime',
         ];
     }
 
@@ -99,4 +99,3 @@ class GroupEnrollment extends Model
         return (string) random_int(1000, 9999);
     }
 }
-

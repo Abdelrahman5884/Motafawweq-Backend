@@ -27,9 +27,9 @@ class ExamSubmissionAnswer extends Model
     {
         return [
             'selected_index' => 'integer',
-            'selected_bool'  => 'boolean',
+            'selected_bool' => 'boolean',
             'points_awarded' => 'float',
-            'is_correct'     => 'boolean',
+            'is_correct' => 'boolean',
         ];
     }
 
@@ -52,4 +52,3 @@ class ExamSubmissionAnswer extends Model
         return $this->belongsTo(ExamQuestion::class, 'exam_question_id');
     }
 }
-

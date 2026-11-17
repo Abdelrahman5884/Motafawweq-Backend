@@ -36,11 +36,11 @@ class StudyGroupRepository extends BaseRepository implements StudyGroupRepositor
             });
         }
 
-        if (!empty($filters['center_name']) && $filters['center_name'] !== 'all') {
+        if (! empty($filters['center_name']) && $filters['center_name'] !== 'all') {
             $query->where('center_name', $filters['center_name']);
         }
 
-        if (!empty($filters['status'])) {
+        if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
 
@@ -58,8 +58,8 @@ class StudyGroupRepository extends BaseRepository implements StudyGroupRepositor
             ])
             ->first();
 
-        if (!$group) {
-            throw (new ModelNotFoundException())->setModel(StudyGroup::class, [$uuid]);
+        if (! $group) {
+            throw (new ModelNotFoundException)->setModel(StudyGroup::class, [$uuid]);
         }
 
         $group->assertOwnedBy($teacher);
@@ -81,4 +81,3 @@ class StudyGroupRepository extends BaseRepository implements StudyGroupRepositor
             ->count();
     }
 }
-

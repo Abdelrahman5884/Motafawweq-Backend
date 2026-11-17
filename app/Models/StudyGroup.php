@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 
 class StudyGroup extends Model
 {
-    use HasFactory, SoftDeletes, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'teacher_id',
@@ -37,7 +37,7 @@ class StudyGroup extends Model
     {
         return [
             'max_students' => 'integer',
-            'price_egp'    => 'float',
+            'price_egp' => 'float',
         ];
     }
 
@@ -45,7 +45,7 @@ class StudyGroup extends Model
     {
         static::creating(function (self $model) {
             if (empty($model->uuid)) {
-                $model->uuid = (string) \Illuminate\Support\Str::uuid();
+                $model->uuid = (string) Str::uuid();
             }
             if (empty($model->join_code)) {
                 $model->join_code = static::generateUniqueJoinCode();
@@ -99,4 +99,3 @@ class StudyGroup extends Model
         return $code;
     }
 }
-

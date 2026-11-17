@@ -11,4 +11,3 @@ interface TeacherProfileRepositoryInterface extends BaseRepositoryInterface
 
     public function firstOrCreateForTeacher(User $teacher, array $defaults = []): TeacherProfile;
 }
-

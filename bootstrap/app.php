@@ -4,12 +4,13 @@ use App\Http\Middleware\CheckRole;
 use App\Http\Middleware\CheckTeacherPlanQuota;
 use App\Http\Middleware\EnsureAccountIsActive;
 use App\Http\Middleware\EnsureEmailIsVerified;
+use App\Http\Middleware\EnsureIdempotency;
 use App\Http\Middleware\ForceJsonResponse;
 use App\Http\Middleware\SanitizeInput;
 use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\SetLocale;
-use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -45,12 +46,14 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Register custom middleware aliases
         $middleware->alias([
-            'role'           => CheckRole::class,
-            'abilities'      => CheckAbilities::class,
-            'ability'        => CheckForAnyAbility::class,
+            'role' => CheckRole::class,
+            'abilities' => CheckAbilities::class,
+            'ability' => CheckForAnyAbility::class,
             'email.verified' => EnsureEmailIsVerified::class,
             'account.active' => EnsureAccountIsActive::class,
-            'teacher.quota'  => CheckTeacherPlanQuota::class,
+            'teacher.quota' => CheckTeacherPlanQuota::class,
+            'idempotent' => EnsureIdempotency::class,
+            'idempotent'     => EnsureIdempotency::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -62,7 +65,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 return response()->json([
                     'success' => false,
                     'message' => __('messages.validation_failed'),
-                    'errors'  => $e->errors(),
+                    'errors' => $e->errors(),
                 ], 422);
             }
         });
@@ -70,8 +73,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(function (AuthenticationException $e, Request $request) use ($isApi) {
             if ($isApi($request)) {
                 return response()->json([
-                    'success'    => false,
-                    'message'    => __('messages.unauthenticated'),
+                    'success' => false,
+                    'message' => __('messages.unauthenticated'),
                     'error_code' => 'UNAUTHENTICATED',
                 ], 401);
             }
@@ -81,8 +84,8 @@ return Application::configure(basePath: dirname(__DIR__))
             if ($isApi($request)) {
                 if ($e instanceof MissingAbilityException || $e->getPrevious() instanceof MissingAbilityException) {
                     return response()->json([
-                        'success'    => false,
-                        'message'    => __('messages.invalid_token_type'),
+                        'success' => false,
+                        'message' => __('messages.invalid_token_type'),
                         'error_code' => 'INVALID_TOKEN_TYPE',
                     ], 401);
                 }
@@ -118,7 +121,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Safe Fallback for unhandled server errors (never leak stack trace in production)
         $exceptions->render(function (Throwable $e, Request $request) use ($isApi) {
-            if (!$isApi($request)) {
+            if (! $isApi($request)) {
                 return null;
             }
 
@@ -133,19 +136,19 @@ return Application::configure(basePath: dirname(__DIR__))
                 ], $e->getStatusCode(), $e->getHeaders());
             }
 
-            Log::error('[API-UNHANDLED-EXCEPTION] ' . $e->getMessage(), [
+            Log::error('[API-UNHANDLED-EXCEPTION] '.$e->getMessage(), [
                 'exception' => get_class($e),
-                'file'      => $e->getFile(),
-                'line'      => $e->getLine(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
             ]);
 
             return response()->json(array_filter([
                 'success' => false,
                 'message' => config('app.debug') ? $e->getMessage() : __('messages.server_error'),
-                'debug'   => config('app.debug') ? [
+                'debug' => config('app.debug') ? [
                     'exception' => get_class($e),
-                    'file'      => $e->getFile(),
-                    'line'      => $e->getLine(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
                 ] : null,
             ], fn ($v) => $v !== null), 500);
         });

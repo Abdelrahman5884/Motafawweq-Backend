@@ -8,7 +8,7 @@ class JoinGroupByCodeRequest extends BaseApiRequest
 {
     public function authorize(): bool
     {
-        return $this->user() !== null;
+        return (bool) $this->user()?->isStudent();
     }
 
     protected function prepareForValidation(): void
@@ -25,10 +25,9 @@ class JoinGroupByCodeRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'join_code'      => ['required', 'string', 'min:4', 'max:32', 'regex:/^[A-Za-z0-9\-_]+$/'],
+            'join_code' => ['required', 'string', 'min:4', 'max:32', 'regex:/^[A-Za-z0-9\-_]+$/'],
             'parent_name_ar' => ['nullable', 'string', 'max:150'],
-            'parent_phone'   => ['nullable', 'string', 'max:30'],
+            'parent_phone' => ['nullable', 'string', 'max:30'],
         ];
     }
 }
-

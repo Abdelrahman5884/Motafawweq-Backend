@@ -33,13 +33,13 @@ class TeacherFinancialController extends Controller
         );
 
         return $this->success([
-            'earnings'     => $overview['earnings'],
+            'earnings' => $overview['earnings'],
             'transactions' => StudentDirectPaymentResource::collection($overview['transactions']->items()),
-            'pagination'   => [
+            'pagination' => [
                 'currentPage' => $overview['transactions']->currentPage(),
-                'lastPage'    => $overview['transactions']->lastPage(),
-                'perPage'     => $overview['transactions']->perPage(),
-                'total'       => $overview['transactions']->total(),
+                'lastPage' => $overview['transactions']->lastPage(),
+                'perPage' => $overview['transactions']->perPage(),
+                'total' => $overview['transactions']->total(),
             ],
         ], __('messages.financials.retrieved'));
     }
@@ -71,4 +71,3 @@ class TeacherFinancialController extends Controller
         );
     }
 }
-

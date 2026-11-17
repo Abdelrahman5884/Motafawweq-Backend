@@ -22,19 +22,18 @@ class TeacherPayoutAccountResource extends BaseJsonResource
         $identifier = (string) $this->account_identifier;
 
         return array_filter([
-            'id'            => $this->uuid,
-            'type'          => $type?->value ?? (string) $this->type,
-            'labelAr'       => $this->label_ar,
-            'labelEn'       => $this->label_en,
-            'address'       => $type === PayoutAccountType::INSTAPAY ? $identifier : null,
-            'phone'         => $type === PayoutAccountType::VODAFONE ? $identifier : null,
+            'id' => $this->uuid,
+            'type' => $type?->value ?? (string) $this->type,
+            'labelAr' => $this->label_ar,
+            'labelEn' => $this->label_en,
+            'address' => $type === PayoutAccountType::INSTAPAY ? $identifier : null,
+            'phone' => $type === PayoutAccountType::VODAFONE ? $identifier : null,
             'accountNumber' => in_array($type, [PayoutAccountType::CIB, PayoutAccountType::CARD], true) ? $identifier : null,
-            'value'         => $identifier,
-            'maskedValue'   => $this->maskedIdentifier(),
-            'isDefault'     => (bool) $this->is_default,
-            'isActive'      => (bool) $this->is_active,
-            'createdAt'     => $this->formatDate($this->created_at),
+            'value' => $identifier,
+            'maskedValue' => $this->maskedIdentifier(),
+            'isDefault' => (bool) $this->is_default,
+            'isActive' => (bool) $this->is_active,
+            'createdAt' => $this->formatDate($this->created_at),
         ], fn ($val) => $val !== null);
     }
 }
-

@@ -17,4 +17,3 @@ interface HomeworkSubmissionRepositoryInterface extends BaseRepositoryInterface
      */
     public function findByUuidForHomework(string $uuid, int $homeworkId): HomeworkSubmission;
 }
-

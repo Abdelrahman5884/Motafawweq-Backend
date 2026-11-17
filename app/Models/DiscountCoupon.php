@@ -26,11 +26,11 @@ class DiscountCoupon extends Model
         return [
             'discount_percent' => 'integer',
             'max_discount_egp' => 'float',
-            'min_order_egp'    => 'float',
-            'is_active'        => 'boolean',
-            'expires_at'       => 'datetime',
-            'max_uses'         => 'integer',
-            'used_count'       => 'integer',
+            'min_order_egp' => 'float',
+            'is_active' => 'boolean',
+            'expires_at' => 'datetime',
+            'max_uses' => 'integer',
+            'used_count' => 'integer',
         ];
     }
 
@@ -46,7 +46,7 @@ class DiscountCoupon extends Model
 
     public function isValid(float $orderAmount = 0.0): bool
     {
-        if (!$this->is_active) {
+        if (! $this->is_active) {
             return false;
         }
 
@@ -67,7 +67,7 @@ class DiscountCoupon extends Model
 
     public function calculateDiscount(float $orderAmount): float
     {
-        if (!$this->isValid($orderAmount)) {
+        if (! $this->isValid($orderAmount)) {
             return 0.00;
         }
 
@@ -80,4 +80,3 @@ class DiscountCoupon extends Model
         return min($discount, $orderAmount);
     }
 }
-

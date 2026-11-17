@@ -17,8 +17,7 @@ class ConfirmUploadRequest extends BaseApiRequest
     {
         return [
             'file_id.required' => 'معرف الملف المرفوع مطلوب.',
-            'file_id.uuid'     => 'معرف الملف غير صالح.',
+            'file_id.uuid' => 'معرف الملف غير صالح.',
         ];
     }
 }
-

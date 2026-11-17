@@ -14,7 +14,6 @@ use App\Repositories\Contracts\ExamRepositoryInterface;
 use App\Services\BaseService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class TeacherExamService extends BaseService
@@ -45,7 +44,7 @@ class TeacherExamService extends BaseService
     public function createExam(User $teacher, array $data): Exam
     {
         $rawQuestions = $data['questions'] ?? [];
-        if (!is_array($rawQuestions) || count($rawQuestions) === 0) {
+        if (! is_array($rawQuestions) || count($rawQuestions) === 0) {
             throw ValidationException::withMessages([
                 'questions' => [__('messages.exam_questions_required')],
             ]);
@@ -75,7 +74,7 @@ class TeacherExamService extends BaseService
             $titleEn = trim(strip_tags((string) ($data['title_en'] ?? $data['titleEn'] ?? $titleAr)));
             $durationMinutes = max(5, (int) ($data['duration_minutes'] ?? $data['durationMinutes'] ?? 60));
             $passScore = max(0, (int) ($data['pass_score'] ?? $data['passScore'] ?? 25));
-            $dueDate = !empty($data['due_date']) || !empty($data['dueDate'])
+            $dueDate = ! empty($data['due_date']) || ! empty($data['dueDate'])
                 ? Carbon::parse($data['due_date'] ?? $data['dueDate'])->toDateString()
                 : null;
 
@@ -89,28 +88,28 @@ class TeacherExamService extends BaseService
 
             /** @var Exam $exam */
             $exam = Exam::create([
-                'teacher_id'       => $teacher->id,
-                'course_id'        => $courseId,
-                'course_title_ar'  => $courseTitle ?: 'المقرر الدراسي',
-                'title_ar'         => $titleAr,
-                'title_en'         => $titleEn,
-                'stage'            => trim((string) ($data['stage'] ?? 'sec')),
-                'grade_ar'         => trim((string) ($data['grade_ar'] ?? $data['gradeAr'] ?? 'الصف الثالث الثانوي')),
+                'teacher_id' => $teacher->id,
+                'course_id' => $courseId,
+                'course_title_ar' => $courseTitle ?: 'المقرر الدراسي',
+                'title_ar' => $titleAr,
+                'title_en' => $titleEn,
+                'stage' => trim((string) ($data['stage'] ?? 'sec')),
+                'grade_ar' => trim((string) ($data['grade_ar'] ?? $data['gradeAr'] ?? 'الصف الثالث الثانوي')),
                 'duration_minutes' => $durationMinutes,
-                'pass_score'       => $passScore,
-                'status'           => $statusEnum,
-                'show_results'     => $showResults,
-                'is_bubble_sheet'  => $isBubbleSheet,
-                'due_date'         => $dueDate,
+                'pass_score' => $passScore,
+                'status' => $statusEnum,
+                'show_results' => $showResults,
+                'is_bubble_sheet' => $isBubbleSheet,
+                'due_date' => $dueDate,
             ]);
 
             $this->syncExamQuestions($exam, $rawQuestions);
             $exam->recalculateMetrics();
 
             $this->logSecurityEvent('teacher.exam.created', [
-                'exam_uuid'       => $exam->uuid,
+                'exam_uuid' => $exam->uuid,
                 'questions_count' => $exam->questions_count,
-                'full_mark'       => $exam->full_mark,
+                'full_mark' => $exam->full_mark,
             ], 'info', $exam);
 
             return $exam->load(['questions', 'course']);
@@ -161,7 +160,7 @@ class TeacherExamService extends BaseService
                 $fillable['status'] = ExamStatus::tryFrom($st)?->value ?? 'active';
             }
 
-            if (!empty($fillable)) {
+            if (! empty($fillable)) {
                 $exam->update($fillable);
             }
 
@@ -174,7 +173,7 @@ class TeacherExamService extends BaseService
 
             $this->logSecurityEvent('teacher.exam.updated', [
                 'exam_uuid' => $exam->uuid,
-                'changes'   => array_keys($fillable),
+                'changes' => array_keys($fillable),
             ], 'info', $exam);
 
             return $exam->fresh(['questions', 'course']);
@@ -188,12 +187,12 @@ class TeacherExamService extends BaseService
     {
         $exam = $this->examRepository->findByUuidForTeacher($uuid, $teacher);
 
-        return $this->transaction(function () use ($teacher, $exam) {
+        return $this->transaction(function () use ($exam) {
             $newStatus = $exam->status === ExamStatus::ACTIVE ? ExamStatus::CLOSED : ExamStatus::ACTIVE;
             $exam->update(['status' => $newStatus]);
 
             $this->logSecurityEvent('teacher.exam.status_toggled', [
-                'exam_uuid'  => $exam->uuid,
+                'exam_uuid' => $exam->uuid,
                 'new_status' => $newStatus->value,
             ], 'info', $exam);
 
@@ -208,12 +207,12 @@ class TeacherExamService extends BaseService
     {
         $exam = $this->examRepository->findByUuidForTeacher($uuid, $teacher);
 
-        return $this->transaction(function () use ($teacher, $exam) {
-            $newShowResults = !$exam->show_results;
+        return $this->transaction(function () use ($exam) {
+            $newShowResults = ! $exam->show_results;
             $exam->update(['show_results' => $newShowResults]);
 
             $this->logSecurityEvent('teacher.exam.results_toggled', [
-                'exam_uuid'    => $exam->uuid,
+                'exam_uuid' => $exam->uuid,
                 'show_results' => $newShowResults,
             ], 'info', $exam);
 
@@ -231,38 +230,38 @@ class TeacherExamService extends BaseService
         return $this->transaction(function () use ($teacher, $sourceExam) {
             /** @var Exam $newExam */
             $newExam = Exam::create([
-                'teacher_id'       => $teacher->id,
-                'course_id'        => $sourceExam->course_id,
-                'course_title_ar'  => $sourceExam->course_title_ar,
-                'title_ar'         => $sourceExam->title_ar . ' (نسخة مكررة)',
-                'title_en'         => $sourceExam->title_en ? $sourceExam->title_en . ' (Copy)' : null,
-                'stage'            => $sourceExam->stage,
-                'grade_ar'         => $sourceExam->grade_ar,
+                'teacher_id' => $teacher->id,
+                'course_id' => $sourceExam->course_id,
+                'course_title_ar' => $sourceExam->course_title_ar,
+                'title_ar' => $sourceExam->title_ar.' (نسخة مكررة)',
+                'title_en' => $sourceExam->title_en ? $sourceExam->title_en.' (Copy)' : null,
+                'stage' => $sourceExam->stage,
+                'grade_ar' => $sourceExam->grade_ar,
                 'duration_minutes' => $sourceExam->duration_minutes,
-                'full_mark'        => $sourceExam->full_mark,
-                'pass_score'       => $sourceExam->pass_score,
-                'questions_count'  => $sourceExam->questions_count,
-                'status'           => ExamStatus::CLOSED, // new copies start closed for review
-                'show_results'     => $sourceExam->show_results,
-                'is_bubble_sheet'  => $sourceExam->is_bubble_sheet,
-                'due_date'         => $sourceExam->due_date,
+                'full_mark' => $sourceExam->full_mark,
+                'pass_score' => $sourceExam->pass_score,
+                'questions_count' => $sourceExam->questions_count,
+                'status' => ExamStatus::CLOSED, // new copies start closed for review
+                'show_results' => $sourceExam->show_results,
+                'is_bubble_sheet' => $sourceExam->is_bubble_sheet,
+                'due_date' => $sourceExam->due_date,
             ]);
 
             foreach ($sourceExam->questions as $q) {
                 ExamQuestion::create([
-                    'exam_id'          => $newExam->id,
-                    'question_number'  => $q->question_number,
-                    'type'             => $q->type,
-                    'points'           => $q->points,
-                    'difficulty'       => $q->difficulty,
-                    'question_ar'      => $q->question_ar,
-                    'question_en'      => $q->question_en,
-                    'options_ar'       => $q->options_ar,
-                    'correct_index'    => $q->correct_index,
-                    'correct_bool'     => $q->correct_bool,
-                    'model_answer_ar'  => $q->model_answer_ar,
+                    'exam_id' => $newExam->id,
+                    'question_number' => $q->question_number,
+                    'type' => $q->type,
+                    'points' => $q->points,
+                    'difficulty' => $q->difficulty,
+                    'question_ar' => $q->question_ar,
+                    'question_en' => $q->question_en,
+                    'options_ar' => $q->options_ar,
+                    'correct_index' => $q->correct_index,
+                    'correct_bool' => $q->correct_bool,
+                    'model_answer_ar' => $q->model_answer_ar,
                     'rubric_points_ar' => $q->rubric_points_ar,
-                    'explanation_ar'   => $q->explanation_ar,
+                    'explanation_ar' => $q->explanation_ar,
                 ]);
             }
 
@@ -270,7 +269,7 @@ class TeacherExamService extends BaseService
 
             $this->logSecurityEvent('teacher.exam.duplicated', [
                 'source_exam_uuid' => $sourceExam->uuid,
-                'new_exam_uuid'    => $newExam->uuid,
+                'new_exam_uuid' => $newExam->uuid,
             ], 'info', $newExam);
 
             return $newExam->load(['questions', 'course']);
@@ -284,7 +283,7 @@ class TeacherExamService extends BaseService
     {
         $exam = $this->examRepository->findByUuidForTeacher($uuid, $teacher);
 
-        return $this->transaction(function () use ($teacher, $exam) {
+        return $this->transaction(function () use ($exam) {
             $examUuid = $exam->uuid;
             $exam->delete();
 
@@ -304,7 +303,7 @@ class TeacherExamService extends BaseService
         ExamQuestion::where('exam_id', $exam->id)->delete();
 
         foreach ($questions as $idx => $item) {
-            if (!is_array($item)) {
+            if (! is_array($item)) {
                 continue;
             }
 
@@ -356,19 +355,19 @@ class TeacherExamService extends BaseService
                 : null;
 
             ExamQuestion::create([
-                'exam_id'          => $exam->id,
-                'question_number'  => $idx + 1,
-                'type'             => $typeEnum,
-                'points'           => $points,
-                'difficulty'       => $difficulty ?: 'متوسط',
-                'question_ar'      => $questionAr ?: 'سؤال رقم ' . ($idx + 1),
-                'question_en'      => $questionEn,
-                'options_ar'       => $options,
-                'correct_index'    => $correctIndex,
-                'correct_bool'     => $correctBool,
-                'model_answer_ar'  => $modelAnswer,
+                'exam_id' => $exam->id,
+                'question_number' => $idx + 1,
+                'type' => $typeEnum,
+                'points' => $points,
+                'difficulty' => $difficulty ?: 'متوسط',
+                'question_ar' => $questionAr ?: 'سؤال رقم '.($idx + 1),
+                'question_en' => $questionEn,
+                'options_ar' => $options,
+                'correct_index' => $correctIndex,
+                'correct_bool' => $correctBool,
+                'model_answer_ar' => $modelAnswer,
                 'rubric_points_ar' => $rubricPoints,
-                'explanation_ar'   => $explanation,
+                'explanation_ar' => $explanation,
             ]);
         }
     }
@@ -389,4 +388,3 @@ class TeacherExamService extends BaseService
         }
     }
 }
-

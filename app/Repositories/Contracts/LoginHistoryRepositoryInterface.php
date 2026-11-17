@@ -17,4 +17,3 @@ interface LoginHistoryRepositoryInterface extends BaseRepositoryInterface
      */
     public function isKnownDevice(User $user, ?string $ip, ?string $userAgent): bool;
 }
-

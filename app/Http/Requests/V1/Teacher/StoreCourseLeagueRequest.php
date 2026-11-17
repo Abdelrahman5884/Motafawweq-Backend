@@ -52,13 +52,12 @@ class StoreCourseLeagueRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'course_id'      => ['nullable'],
+            'course_id' => ['nullable'],
             'study_group_id' => ['nullable'],
-            'title_ar'       => ['nullable', 'string', 'max:250'],
-            'duration'       => ['nullable', 'string', Rule::in(LeagueDuration::values())],
-            'starts_at'      => ['nullable', 'date'],
-            'is_active'      => ['nullable', 'boolean'],
+            'title_ar' => ['nullable', 'string', 'max:250'],
+            'duration' => ['nullable', 'string', Rule::in(LeagueDuration::values())],
+            'starts_at' => ['nullable', 'date'],
+            'is_active' => ['nullable', 'boolean'],
         ];
     }
 }
-

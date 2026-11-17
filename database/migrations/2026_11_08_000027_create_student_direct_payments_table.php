@@ -53,4 +53,3 @@ return new class extends Migration
         Schema::dropIfExists('student_direct_payments');
     }
 };
-

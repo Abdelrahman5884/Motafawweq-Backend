@@ -33,12 +33,12 @@ class ExamQuestion extends Model
     protected function casts(): array
     {
         return [
-            'type'             => ExamQuestionType::class,
-            'question_number'  => 'integer',
-            'points'           => 'integer',
-            'options_ar'       => 'array',
-            'correct_index'    => 'integer',
-            'correct_bool'     => 'boolean',
+            'type' => ExamQuestionType::class,
+            'question_number' => 'integer',
+            'points' => 'integer',
+            'options_ar' => 'array',
+            'correct_index' => 'integer',
+            'correct_bool' => 'boolean',
             'rubric_points_ar' => 'array',
         ];
     }
@@ -57,4 +57,3 @@ class ExamQuestion extends Model
         return $this->belongsTo(Exam::class, 'exam_id');
     }
 }
-

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Traits\ApiResponse;
 use App\Traits\HasSecurityAudit;
 
@@ -12,12 +13,9 @@ abstract class BaseApiController extends Controller
 
     /**
      * Get the authenticated user with strong typing.
-     *
-     * @return \App\Models\User|null
      */
-    protected function authenticatedUser(): ?\App\Models\User
+    protected function authenticatedUser(): ?User
     {
         return request()->user();
     }
 }
-

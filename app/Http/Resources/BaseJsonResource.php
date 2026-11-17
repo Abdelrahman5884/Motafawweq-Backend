@@ -2,7 +2,7 @@
 
 namespace App\Http\Resources;
 
-use Illuminate\Http\Request;
+use Carbon\Carbon;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 abstract class BaseJsonResource extends JsonResource
@@ -18,19 +18,17 @@ abstract class BaseJsonResource extends JsonResource
      * Helper to format a datetime consistently across all API resources.
      *
      * @param  \DateTimeInterface|string|null  $date
-     * @return string|null
      */
     protected function formatDate(mixed $date): ?string
     {
-        if (!$date) {
+        if (! $date) {
             return null;
         }
 
         if (is_string($date)) {
-            $date = \Carbon\Carbon::parse($date);
+            $date = Carbon::parse($date);
         }
 
         return $date->toIso8601String();
     }
 }
-

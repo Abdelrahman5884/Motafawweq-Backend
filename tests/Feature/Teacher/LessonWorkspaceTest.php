@@ -5,13 +5,11 @@ namespace Tests\Feature\Teacher;
 use App\Enums\CourseStatus;
 use App\Enums\LessonMediaMode;
 use App\Enums\LessonStatus;
-use App\Enums\StageType;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\Course;
 use App\Models\Lesson;
-use App\Models\SecurityAuditLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -24,9 +22,9 @@ class LessonWorkspaceTest extends TestCase
     protected function createTeacher(string $email = 'teacher@motafawweq.com'): User
     {
         return User::factory()->create([
-            'email'             => $email,
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'email' => $email,
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
@@ -34,14 +32,14 @@ class LessonWorkspaceTest extends TestCase
     protected function createCourse(User $teacher, string $title = 'الفيزياء الحديثة'): Course
     {
         return Course::create([
-            'teacher_id'    => $teacher->id,
-            'title_ar'      => $title,
-            'stage_id'      => 'sec',
+            'teacher_id' => $teacher->id,
+            'title_ar' => $title,
+            'stage_id' => 'sec',
             'stage_name_ar' => 'المرحلة الثانوية',
-            'grade_ar'      => 'الصف الثالث الثانوي',
-            'subject_ar'    => 'الفيزياء',
-            'price_egp'     => 300,
-            'status'        => CourseStatus::PUBLISHED->value,
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'subject_ar' => 'الفيزياء',
+            'price_egp' => 300,
+            'status' => CourseStatus::PUBLISHED->value,
         ]);
     }
 
@@ -53,16 +51,16 @@ class LessonWorkspaceTest extends TestCase
         int $durationSeconds = 3600
     ): Lesson {
         return Lesson::create([
-            'teacher_id'       => $teacher->id,
-            'course_id'        => $course->id,
-            'title_ar'         => $title,
-            'subject_ar'       => 'الفيزياء',
-            'grade_ar'         => 'الصف الثالث الثانوي',
-            'media_mode'       => $mediaMode,
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => $title,
+            'subject_ar' => 'الفيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'media_mode' => $mediaMode,
             'duration_seconds' => $durationSeconds,
-            'duration_label'   => '60:00',
-            'status'           => LessonStatus::PUBLISHED->value,
-            'published_at'     => now(),
+            'duration_label' => '60:00',
+            'status' => LessonStatus::PUBLISHED->value,
+            'published_at' => now(),
         ]);
     }
 
@@ -97,13 +95,13 @@ class LessonWorkspaceTest extends TestCase
         $response = $this->putJson("/api/v1/teacher/workspace/lessons/{$lesson->uuid}/chapters", [
             'chapters' => [
                 [
-                    'titleAr'      => 'الفصل الثاني: إشعاع الجسم الأسود',
-                    'titleEn'      => 'Chapter 2: Blackbody Radiation',
+                    'titleAr' => 'الفصل الثاني: إشعاع الجسم الأسود',
+                    'titleEn' => 'Chapter 2: Blackbody Radiation',
                     'startSeconds' => 300,
                 ],
                 [
-                    'titleAr'      => 'الفصل الأول: مقدمة تاريخية',
-                    'titleEn'      => 'Chapter 1: Historical Intro',
+                    'titleAr' => 'الفصل الأول: مقدمة تاريخية',
+                    'titleEn' => 'Chapter 1: Historical Intro',
                     'startSeconds' => 0,
                 ],
             ],
@@ -130,15 +128,15 @@ class LessonWorkspaceTest extends TestCase
         $response = $this->putJson("/api/v1/teacher/workspace/lessons/{$lesson->uuid}/transcript", [
             'segments' => [
                 [
-                    'speaker'      => 'د. أحمد زويل',
+                    'speaker' => 'د. أحمد زويل',
                     'startSeconds' => 65,
-                    'textAr'       => 'لاحظ ماكس بلانك أن الطاقة مكمأة وليست متصلة.',
-                    'textEn'       => 'Max Planck noticed that energy is quantized, not continuous.',
+                    'textAr' => 'لاحظ ماكس بلانك أن الطاقة مكمأة وليست متصلة.',
+                    'textEn' => 'Max Planck noticed that energy is quantized, not continuous.',
                 ],
                 [
-                    'speaker'      => 'د. أحمد زويل',
+                    'speaker' => 'د. أحمد زويل',
                     'startSeconds' => 0,
-                    'textAr'       => 'أهلاً بكم في محاضرة الفيزياء الحديثة.',
+                    'textAr' => 'أهلاً بكم في محاضرة الفيزياء الحديثة.',
                 ],
             ],
         ]);
@@ -161,25 +159,25 @@ class LessonWorkspaceTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $treeData = [
-            'id'           => 'root-1',
-            'labelAr'      => 'الفيزياء الكمية',
-            'labelEn'      => 'Quantum Physics',
-            'summaryAr'    => 'فرع الفيزياء الذي يدرس الأنظمة الذرية ودون الذرية',
+            'id' => 'root-1',
+            'labelAr' => 'الفيزياء الكمية',
+            'labelEn' => 'Quantum Physics',
+            'summaryAr' => 'فرع الفيزياء الذي يدرس الأنظمة الذرية ودون الذرية',
             'startSeconds' => 0,
-            'children'     => [
+            'children' => [
                 [
-                    'id'           => 'child-1',
-                    'labelAr'      => 'تكمية الطاقة (بلانك)',
-                    'labelEn'      => 'Energy Quantization',
+                    'id' => 'child-1',
+                    'labelAr' => 'تكمية الطاقة (بلانك)',
+                    'labelEn' => 'Energy Quantization',
                     'startSeconds' => 120,
-                    'children'     => [],
+                    'children' => [],
                 ],
             ],
         ];
 
         $saveResponse = $this->putJson("/api/v1/teacher/workspace/lessons/{$lesson->uuid}/concept-graph", [
             'tree_data' => $treeData,
-            'source'    => 'manual',
+            'source' => 'manual',
         ]);
 
         $saveResponse->assertOk()
@@ -208,7 +206,7 @@ class LessonWorkspaceTest extends TestCase
         $deepTree = ['labelAr' => 'Level 8', 'children' => []];
         for ($level = 7; $level >= 1; $level--) {
             $deepTree = [
-                'labelAr'  => "Level {$level}",
+                'labelAr' => "Level {$level}",
                 'children' => [$deepTree],
             ];
         }
@@ -241,8 +239,8 @@ class LessonWorkspaceTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
-            'level'   => 'warning',
+            'event' => 'teacher.idor_attempt_blocked',
+            'level' => 'warning',
         ]);
     }
 }

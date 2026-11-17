@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class GroupAttendanceSession extends Model
 {
-    use HasFactory, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory;
 
     protected $fillable = [
         'study_group_id',
@@ -31,11 +31,11 @@ class GroupAttendanceSession extends Model
     protected function casts(): array
     {
         return [
-            'session_date'    => 'date',
-            'total_enrolled'  => 'integer',
-            'present_count'   => 'integer',
-            'absent_count'    => 'integer',
-            'late_count'      => 'integer',
+            'session_date' => 'date',
+            'total_enrolled' => 'integer',
+            'present_count' => 'integer',
+            'absent_count' => 'integer',
+            'late_count' => 'integer',
             'attendance_rate' => 'float',
         ];
     }
@@ -68,14 +68,13 @@ class GroupAttendanceSession extends Model
         $rate = $enrolledCount > 0 ? round(($present / $enrolledCount) * 100, 1) : 0.0;
 
         $this->update([
-            'total_enrolled'  => $enrolledCount,
-            'present_count'   => $present,
-            'absent_count'    => $absent,
-            'late_count'      => $late,
+            'total_enrolled' => $enrolledCount,
+            'present_count' => $present,
+            'absent_count' => $absent,
+            'late_count' => $late,
             'attendance_rate' => $rate,
         ]);
 
         return $this;
     }
 }
-

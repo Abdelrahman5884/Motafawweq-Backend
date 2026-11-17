@@ -2,14 +2,12 @@
 
 namespace Tests\Feature\Teacher;
 
-use App\Enums\AcademicStatus;
 use App\Enums\EnrollmentStatus;
 use App\Enums\JoinMethod;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\GroupEnrollment;
-use App\Models\SecurityAuditLog;
 use App\Models\StudyGroup;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -23,9 +21,9 @@ class TeacherStudentRosterTest extends TestCase
     protected function createTeacher(string $email = 'teacher.roster@motafawweq.com'): User
     {
         return User::factory()->create([
-            'email'             => $email,
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'email' => $email,
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
@@ -33,12 +31,12 @@ class TeacherStudentRosterTest extends TestCase
     protected function createStudent(string $name = 'عمر طارق القاضي', string $email = 'student.omar@motafawweq.com'): User
     {
         return User::factory()->create([
-            'name'              => $name,
-            'email'             => $email,
-            'phone'             => '010' . random_int(10000000, 99999999),
-            'role'              => UserRole::STUDENT,
-            'status'            => UserStatus::ACTIVE,
-            'student_code'      => 'STD-' . random_int(100000, 999999),
+            'name' => $name,
+            'email' => $email,
+            'phone' => '010'.random_int(10000000, 99999999),
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
+            'student_code' => 'STD-'.random_int(100000, 999999),
             'email_verified_at' => now(),
         ]);
     }
@@ -46,14 +44,14 @@ class TeacherStudentRosterTest extends TestCase
     protected function createGroup(User $teacher, int $maxStudents = 50): StudyGroup
     {
         return StudyGroup::create([
-            'teacher_id'   => $teacher->id,
-            'name_ar'      => 'أحياء 3 ثانوي — الدقي',
-            'subject_ar'   => 'الأحياء',
-            'grade_ar'     => 'الصف الثالث الثانوي',
-            'center_name'  => 'سنتر الرواد',
+            'teacher_id' => $teacher->id,
+            'name_ar' => 'أحياء 3 ثانوي — الدقي',
+            'subject_ar' => 'الأحياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'center_name' => 'سنتر الرواد',
             'max_students' => $maxStudents,
-            'price_egp'    => 450,
-            'join_code'    => 'BIO-DK-99',
+            'price_egp' => 450,
+            'join_code' => 'BIO-DK-99',
         ]);
     }
 
@@ -66,23 +64,23 @@ class TeacherStudentRosterTest extends TestCase
 
         // Enrolled student
         GroupEnrollment::create([
-            'study_group_id'   => $group->id,
-            'student_id'       => $student1->id,
-            'status'           => EnrollmentStatus::ENROLLED->value,
-            'join_method'      => JoinMethod::QR_SCAN->value,
-            'student_barcode'  => 'STD-001-0001-A1B2',
+            'study_group_id' => $group->id,
+            'student_id' => $student1->id,
+            'status' => EnrollmentStatus::ENROLLED->value,
+            'join_method' => JoinMethod::QR_SCAN->value,
+            'student_barcode' => 'STD-001-0001-A1B2',
             'student_passcode' => '4821',
-            'attendance_rate'  => 95,
-            'enrolled_at'      => now(),
+            'attendance_rate' => 95,
+            'enrolled_at' => now(),
         ]);
 
         // Pending student
         GroupEnrollment::create([
             'study_group_id' => $group->id,
-            'student_id'     => $student2->id,
-            'status'         => EnrollmentStatus::PENDING->value,
-            'join_method'    => JoinMethod::JOIN_CODE->value,
-            'requested_at'   => now(),
+            'student_id' => $student2->id,
+            'status' => EnrollmentStatus::PENDING->value,
+            'join_method' => JoinMethod::JOIN_CODE->value,
+            'requested_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -123,9 +121,9 @@ class TeacherStudentRosterTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $response = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/invite", [
-            'student_id'     => (string) $student->id,
+            'student_id' => (string) $student->id,
             'parent_name_ar' => 'أحمد الشناوي',
-            'parent_phone'   => '01011122233',
+            'parent_phone' => '01011122233',
         ]);
 
         $response->assertCreated()
@@ -135,14 +133,14 @@ class TeacherStudentRosterTest extends TestCase
 
         $this->assertDatabaseHas('group_enrollments', [
             'study_group_id' => $group->id,
-            'student_id'     => $student->id,
-            'status'         => EnrollmentStatus::PENDING->value,
-            'join_method'    => JoinMethod::TEACHER_INVITE->value,
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::PENDING->value,
+            'join_method' => JoinMethod::TEACHER_INVITE->value,
         ]);
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacher->id,
-            'event'   => 'teacher.roster.student_invited',
+            'event' => 'teacher.roster.student_invited',
         ]);
     }
 
@@ -154,10 +152,10 @@ class TeacherStudentRosterTest extends TestCase
 
         $enrollment = GroupEnrollment::create([
             'study_group_id' => $group->id,
-            'student_id'     => $student->id,
-            'status'         => EnrollmentStatus::PENDING->value,
-            'join_method'    => JoinMethod::QR_SCAN->value,
-            'requested_at'   => now(),
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::PENDING->value,
+            'join_method' => JoinMethod::QR_SCAN->value,
+            'requested_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -176,15 +174,15 @@ class TeacherStudentRosterTest extends TestCase
         $this->assertNotNull($passcode);
 
         $this->assertDatabaseHas('group_enrollments', [
-            'id'               => $enrollment->id,
-            'status'           => EnrollmentStatus::ENROLLED->value,
-            'student_barcode'  => $barcode,
+            'id' => $enrollment->id,
+            'status' => EnrollmentStatus::ENROLLED->value,
+            'student_barcode' => $barcode,
             'student_passcode' => $passcode,
         ]);
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacher->id,
-            'event'   => 'teacher.roster.student_accepted',
+            'event' => 'teacher.roster.student_accepted',
         ]);
     }
 
@@ -196,10 +194,10 @@ class TeacherStudentRosterTest extends TestCase
 
         $enrollment = GroupEnrollment::create([
             'study_group_id' => $group->id,
-            'student_id'     => $student->id,
-            'status'         => EnrollmentStatus::PENDING->value,
-            'join_method'    => JoinMethod::JOIN_CODE->value,
-            'requested_at'   => now(),
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::PENDING->value,
+            'join_method' => JoinMethod::JOIN_CODE->value,
+            'requested_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -210,7 +208,7 @@ class TeacherStudentRosterTest extends TestCase
             ->assertJsonPath('success', true);
 
         $this->assertDatabaseHas('group_enrollments', [
-            'id'     => $enrollment->id,
+            'id' => $enrollment->id,
             'status' => EnrollmentStatus::REJECTED->value,
         ]);
     }
@@ -222,12 +220,12 @@ class TeacherStudentRosterTest extends TestCase
         $student = $this->createStudent();
 
         $enrollment = GroupEnrollment::create([
-            'study_group_id'   => $group->id,
-            'student_id'       => $student->id,
-            'status'           => EnrollmentStatus::ENROLLED->value,
-            'student_barcode'  => 'STD-001-9999-ABCD',
+            'study_group_id' => $group->id,
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::ENROLLED->value,
+            'student_barcode' => 'STD-001-9999-ABCD',
             'student_passcode' => '1234',
-            'enrolled_at'      => now(),
+            'enrolled_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -249,9 +247,9 @@ class TeacherStudentRosterTest extends TestCase
         Sanctum::actingAs($student, [TokenType::ACCESS->value]);
 
         $response = $this->postJson('/api/v1/groups/join', [
-            'join_code'      => $group->join_code,
+            'join_code' => $group->join_code,
             'parent_name_ar' => 'هاني الجوهري',
-            'parent_phone'   => '01005566778',
+            'parent_phone' => '01005566778',
         ]);
 
         $response->assertCreated()
@@ -260,9 +258,9 @@ class TeacherStudentRosterTest extends TestCase
 
         $this->assertDatabaseHas('group_enrollments', [
             'study_group_id' => $group->id,
-            'student_id'     => $student->id,
-            'status'         => EnrollmentStatus::PENDING->value,
-            'join_method'    => JoinMethod::JOIN_CODE->value,
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::PENDING->value,
+            'join_method' => JoinMethod::JOIN_CODE->value,
         ]);
     }
 
@@ -275,12 +273,12 @@ class TeacherStudentRosterTest extends TestCase
 
         // Fill capacity with 1 student
         GroupEnrollment::create([
-            'study_group_id'   => $group->id,
-            'student_id'       => $student1->id,
-            'status'           => EnrollmentStatus::ENROLLED->value,
-            'student_barcode'  => 'STD-001-0001-CAP1',
+            'study_group_id' => $group->id,
+            'student_id' => $student1->id,
+            'status' => EnrollmentStatus::ENROLLED->value,
+            'student_barcode' => 'STD-001-0001-CAP1',
             'student_passcode' => '1111',
-            'enrolled_at'      => now(),
+            'enrolled_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -304,10 +302,10 @@ class TeacherStudentRosterTest extends TestCase
 
         $enrollmentA = GroupEnrollment::create([
             'study_group_id' => $groupA->id,
-            'student_id'     => $student->id,
-            'status'         => EnrollmentStatus::PENDING->value,
-            'join_method'    => JoinMethod::QR_SCAN->value,
-            'requested_at'   => now(),
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::PENDING->value,
+            'join_method' => JoinMethod::QR_SCAN->value,
+            'requested_at' => now(),
         ]);
 
         Sanctum::actingAs($teacherB, [TokenType::ACCESS->value]);
@@ -330,9 +328,8 @@ class TeacherStudentRosterTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
-            'level'   => 'warning',
+            'event' => 'teacher.idor_attempt_blocked',
+            'level' => 'warning',
         ]);
     }
 }
-

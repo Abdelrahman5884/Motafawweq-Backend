@@ -34,4 +34,3 @@ class PersonalAccessToken extends SanctumPersonalAccessToken
         return $this->type === TokenType::REFRESH;
     }
 }
-

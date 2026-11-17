@@ -4,18 +4,18 @@ namespace App\Enums;
 
 enum EnrollmentStatus: string
 {
-    case PENDING  = 'pending';
+    case PENDING = 'pending';
     case ENROLLED = 'enrolled';
     case REJECTED = 'rejected';
-    case REMOVED  = 'removed';
+    case REMOVED = 'removed';
 
     public function labelAr(): string
     {
         return match ($this) {
-            self::PENDING  => 'قيد المراجعة',
+            self::PENDING => 'قيد المراجعة',
             self::ENROLLED => 'مقيد',
             self::REJECTED => 'مرفوض',
-            self::REMOVED  => 'ملغي القيد',
+            self::REMOVED => 'ملغي القيد',
         };
     }
 
@@ -24,4 +24,3 @@ enum EnrollmentStatus: string
         return array_column(self::cases(), 'value');
     }
 }
-

@@ -6,11 +6,11 @@ enum TeacherPlanTier: string
 {
     case FREE = 'free';
     case PLUS = 'plus';
-    case PRO  = 'pro';
+    case PRO = 'pro';
 
     public function label(): string
     {
-        return __('messages.teacher_plans.' . $this->value);
+        return __('messages.teacher_plans.'.$this->value);
     }
 
     /**
@@ -21,7 +21,7 @@ enum TeacherPlanTier: string
         return match ($this) {
             self::FREE => 1,
             self::PLUS => 10,
-            self::PRO  => null,
+            self::PRO => null,
         };
     }
 
@@ -33,7 +33,7 @@ enum TeacherPlanTier: string
         return match ($this) {
             self::FREE => 50,
             self::PLUS => 500,
-            self::PRO  => null,
+            self::PRO => null,
         };
     }
 
@@ -45,7 +45,7 @@ enum TeacherPlanTier: string
         return match ($this) {
             self::FREE => 50,
             self::PLUS => null,
-            self::PRO  => null,
+            self::PRO => null,
         };
     }
 
@@ -85,7 +85,7 @@ enum TeacherPlanTier: string
     {
         return match ($this) {
             self::PRO => true,
-            default   => false,
+            default => false,
         };
     }
 
@@ -94,4 +94,3 @@ enum TeacherPlanTier: string
         return array_column(self::cases(), 'value');
     }
 }
-

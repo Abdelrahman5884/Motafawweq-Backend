@@ -103,4 +103,3 @@ class TeacherCourseController extends BaseApiController
         );
     }
 }
-

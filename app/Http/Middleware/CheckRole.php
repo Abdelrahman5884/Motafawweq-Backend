@@ -14,14 +14,13 @@ class CheckRole
     /**
      * Handle an incoming request and verify user role.
      *
-     * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
-     * @param  string  ...$roles
+     * @param  Closure(Request): (Response)  $next
      */
     public function handle(Request $request, Closure $next, string ...$roles): Response
     {
         $user = $request->user();
 
-        if (!$user) {
+        if (! $user) {
             return $this->unauthorizedResponse();
         }
 
@@ -33,11 +32,10 @@ class CheckRole
             $allowedRoles = array_merge($allowedRoles, explode(',', $r));
         }
 
-        if (!in_array($userRole, $allowedRoles, true)) {
+        if (! in_array($userRole, $allowedRoles, true)) {
             return $this->forbiddenResponse(__('messages.forbidden'));
         }
 
         return $next($request);
     }
 }
-

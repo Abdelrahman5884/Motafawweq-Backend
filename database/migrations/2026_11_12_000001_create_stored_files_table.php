@@ -15,11 +15,11 @@ return new class extends Migration
             $table->id();
             $table->uuid('uuid')->unique();
             $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
-            
+
             // Entity association
             $table->string('entity_type', 60)->index();
             $table->string('entity_id', 100)->nullable()->index();
-            
+
             // File metadata
             $table->string('original_filename', 255);
             $table->string('storage_disk', 40)->default('supabase');
@@ -46,4 +46,3 @@ return new class extends Migration
         Schema::dropIfExists('stored_files');
     }
 };
-

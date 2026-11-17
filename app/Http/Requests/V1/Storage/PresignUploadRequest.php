@@ -9,15 +9,15 @@ class PresignUploadRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'entity_type'        => ['required', 'string', 'in:user_avatar,center_logo,center_document,course_thumbnail,course_resource,lesson_media,lesson_attachment,lesson_transcript,lesson_mindmap,lesson_quiz,student_submission'],
-            'entity_id'          => ['nullable', 'string', 'max:100'],
-            'filename'           => ['required', 'string', 'max:255'],
-            'mime_type'          => ['required', 'string', 'max:100'],
-            'file_size'          => ['required', 'integer', 'min:1', 'max:52428800'], // Max 50 MB
-            'metadata'           => ['nullable', 'array'],
-            'metadata.title'     => ['nullable', 'string', 'max:255'],
-            'metadata.caption'   => ['nullable', 'string', 'max:500'],
-            'metadata.duration'  => ['nullable', 'integer', 'min:1'],
+            'entity_type' => ['required', 'string', 'in:user_avatar,center_logo,center_document,course_thumbnail,course_resource,lesson_media,lesson_attachment,lesson_transcript,lesson_mindmap,lesson_quiz,student_submission'],
+            'entity_id' => ['nullable', 'string', 'max:100'],
+            'filename' => ['required', 'string', 'max:255'],
+            'mime_type' => ['required', 'string', 'max:100'],
+            'file_size' => ['required', 'integer', 'min:1', 'max:52428800'], // Max 50 MB
+            'metadata' => ['nullable', 'array'],
+            'metadata.title' => ['nullable', 'string', 'max:255'],
+            'metadata.caption' => ['nullable', 'string', 'max:500'],
+            'metadata.duration' => ['nullable', 'integer', 'min:1'],
         ];
     }
 
@@ -31,4 +31,3 @@ class PresignUploadRequest extends BaseApiRequest
         ];
     }
 }
-

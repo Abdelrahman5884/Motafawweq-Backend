@@ -18,4 +18,3 @@ interface CourseLeagueRepositoryInterface extends BaseRepositoryInterface
      */
     public function findByUuidForTeacher(string $uuid, User $teacher): CourseLeague;
 }
-

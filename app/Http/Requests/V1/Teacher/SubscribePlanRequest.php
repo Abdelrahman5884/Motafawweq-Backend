@@ -18,11 +18,10 @@ class SubscribePlanRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'plan_tier'      => ['required', new Enum(TeacherPlanTier::class)],
+            'plan_tier' => ['required', new Enum(TeacherPlanTier::class)],
             'billing_period' => ['required', new Enum(BillingPeriod::class)],
             'payment_method' => ['required', new Enum(PaymentMethod::class)],
-            'coupon_code'    => ['nullable', 'string', 'max:50'],
+            'coupon_code' => ['nullable', 'string', 'max:50'],
         ];
     }
 }
-

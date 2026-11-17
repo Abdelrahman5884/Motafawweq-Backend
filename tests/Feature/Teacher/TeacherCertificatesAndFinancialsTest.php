@@ -10,7 +10,6 @@ use App\Enums\TeacherPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
-use App\Models\Course;
 use App\Models\CourseCertificate;
 use App\Models\DiscountCoupon;
 use App\Models\StudentDirectPayment;
@@ -28,18 +27,18 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
     protected function createTeacher(string $email = 'teacher.cert@motafawweq.com'): User
     {
         $teacher = User::factory()->create([
-            'email'             => $email,
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'email' => $email,
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
 
         TeacherProfile::create([
-            'user_id'      => $teacher->id,
-            'name_ar'      => $teacher->name,
-            'name_en'      => 'Dr. Teacher Example',
-            'title_ar'     => 'كبير معلمي الأحياء ومؤلف سلسلة التفوق',
-            'subject_ar'   => 'الأحياء',
+            'user_id' => $teacher->id,
+            'name_ar' => $teacher->name,
+            'name_en' => 'Dr. Teacher Example',
+            'title_ar' => 'كبير معلمي الأحياء ومؤلف سلسلة التفوق',
+            'subject_ar' => 'الأحياء',
         ]);
 
         return $teacher;
@@ -48,16 +47,16 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
     protected function createStudent(string $name, string $email): User
     {
         return User::factory()->create([
-            'name'              => $name,
-            'email'             => $email,
-            'role'              => UserRole::STUDENT,
-            'status'            => UserStatus::ACTIVE,
+            'name' => $name,
+            'email' => $email,
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
 
     /* ----------------------------------------------------------------- */
-    /* Certificates Tests                                                */
+    /* Certificates Tests */
     /* ----------------------------------------------------------------- */
 
     public function test_teacher_can_issue_accredited_certificate_with_qr_and_digital_signature(): void
@@ -68,13 +67,13 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $payload = [
-            'student_id'      => $student->id,
+            'student_id' => $student->id,
             'student_name_ar' => 'عمر طارق القاضي',
             'student_name_en' => 'Omar Tarek',
-            'student_email'   => 'std.cert1@motafawweq.com',
-            'course_name_ar'  => 'ماستر كلاس الأحياء: البناء الضوئي وحركية الطاقة',
-            'grade_ar'        => 'الصف الثالث الثانوي',
-            'grade_percent'   => 98.5,
+            'student_email' => 'std.cert1@motafawweq.com',
+            'course_name_ar' => 'ماستر كلاس الأحياء: البناء الضوئي وحركية الطاقة',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'grade_percent' => 98.5,
             'honors_title_ar' => 'شهادة تميز وتفوق بالدرجة النهائية (Full Mark)',
         ];
 
@@ -91,9 +90,9 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
         $this->assertStringStartsWith('MTF-BIO-', $certNumber);
 
         $this->assertDatabaseHas('course_certificates', [
-            'teacher_id'         => $teacher->id,
+            'teacher_id' => $teacher->id,
             'certificate_number' => $certNumber,
-            'status'             => CertificateStatus::VERIFIED->value,
+            'status' => CertificateStatus::VERIFIED->value,
         ]);
 
         $this->assertDatabaseHas('security_audit_logs', [
@@ -105,13 +104,13 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
     {
         $teacher = $this->createTeacher();
         $cert = CourseCertificate::create([
-            'teacher_id'      => $teacher->id,
+            'teacher_id' => $teacher->id,
             'student_name_ar' => 'سارة خالد منصور',
-            'course_name_ar'  => 'الأحياء للثانوية العامة',
-            'grade_percent'   => 99.0,
+            'course_name_ar' => 'الأحياء للثانوية العامة',
+            'grade_percent' => 99.0,
             'honors_title_ar' => 'شهادة تفوق وتميز',
-            'issue_date'      => now()->toDateString(),
-            'status'          => CertificateStatus::VERIFIED,
+            'issue_date' => now()->toDateString(),
+            'status' => CertificateStatus::VERIFIED,
         ]);
 
         // 1. Valid verification
@@ -143,13 +142,13 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
     {
         $teacher = $this->createTeacher();
         $cert = CourseCertificate::create([
-            'teacher_id'      => $teacher->id,
+            'teacher_id' => $teacher->id,
             'student_name_ar' => 'مريم عادل',
-            'course_name_ar'  => 'أحياء الصف الثالث الثانوي',
-            'grade_percent'   => 92.0,
+            'course_name_ar' => 'أحياء الصف الثالث الثانوي',
+            'grade_percent' => 92.0,
             'honors_title_ar' => 'شهادة إتمام',
-            'issue_date'      => now()->toDateString(),
-            'status'          => CertificateStatus::VERIFIED,
+            'issue_date' => now()->toDateString(),
+            'status' => CertificateStatus::VERIFIED,
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -163,7 +162,7 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
             ->assertJsonPath('data.revocationReason', 'تم اكتشاف غش في الاختبار النهائي للمقرر');
 
         $this->assertDatabaseHas('course_certificates', [
-            'id'     => $cert->id,
+            'id' => $cert->id,
             'status' => CertificateStatus::REVOKED->value,
         ]);
 
@@ -180,13 +179,13 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
         $teacherB = $this->createTeacher('cert.teacherB@motafawweq.com');
 
         $certA = CourseCertificate::create([
-            'teacher_id'      => $teacherA->id,
+            'teacher_id' => $teacherA->id,
             'student_name_ar' => 'كريم بدوي',
-            'course_name_ar'  => 'أحياء',
-            'grade_percent'   => 95.0,
+            'course_name_ar' => 'أحياء',
+            'grade_percent' => 95.0,
             'honors_title_ar' => 'شهادة تفوق',
-            'issue_date'      => now()->toDateString(),
-            'status'          => CertificateStatus::VERIFIED,
+            'issue_date' => now()->toDateString(),
+            'status' => CertificateStatus::VERIFIED,
         ]);
 
         Sanctum::actingAs($teacherB, [TokenType::ACCESS->value]);
@@ -203,7 +202,7 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
     }
 
     /* ----------------------------------------------------------------- */
-    /* Financials & Direct Student Payments Tests                         */
+    /* Financials & Direct Student Payments Tests */
     /* ----------------------------------------------------------------- */
 
     public function test_teacher_can_fetch_financial_overview_and_direct_payments(): void
@@ -212,26 +211,26 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
         $student = $this->createStudent('يوسف الشناوي', 'std.pay@motafawweq.com');
 
         StudentDirectPayment::create([
-            'teacher_id'        => $teacher->id,
-            'student_id'        => $student->id,
-            'amount_egp'        => 450.00,
-            'payment_method'    => PaymentMethod::INSTAPAY,
-            'student_name_ar'   => 'يوسف الشناوي',
-            'course_name_ar'    => 'ماستر كلاس الوراثة الجزيئية',
-            'status'            => DirectPaymentStatus::CONFIRMED,
-            'paid_at'           => now()->subDay(),
-            'confirmed_at'      => now(),
+            'teacher_id' => $teacher->id,
+            'student_id' => $student->id,
+            'amount_egp' => 450.00,
+            'payment_method' => PaymentMethod::INSTAPAY,
+            'student_name_ar' => 'يوسف الشناوي',
+            'course_name_ar' => 'ماستر كلاس الوراثة الجزيئية',
+            'status' => DirectPaymentStatus::CONFIRMED,
+            'paid_at' => now()->subDay(),
+            'confirmed_at' => now(),
         ]);
 
         StudentDirectPayment::create([
-            'teacher_id'        => $teacher->id,
-            'student_id'        => $student->id,
-            'amount_egp'        => 300.00,
-            'payment_method'    => PaymentMethod::VODAFONE,
-            'student_name_ar'   => 'يوسف الشناوي',
-            'course_name_ar'    => 'كورس المراجعة الشاملة',
-            'status'            => DirectPaymentStatus::PENDING,
-            'paid_at'           => now(),
+            'teacher_id' => $teacher->id,
+            'student_id' => $student->id,
+            'amount_egp' => 300.00,
+            'payment_method' => PaymentMethod::VODAFONE,
+            'student_name_ar' => 'يوسف الشناوي',
+            'course_name_ar' => 'كورس المراجعة الشاملة',
+            'status' => DirectPaymentStatus::PENDING,
+            'paid_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -250,24 +249,24 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
         $teacher = $this->createTeacher();
         $student = $this->createStudent('سلمى محمود', 'std.pay2@motafawweq.com');
         $group = StudyGroup::create([
-            'teacher_id'  => $teacher->id,
-            'name_ar'     => 'مجموعة النخبة الدقي',
+            'teacher_id' => $teacher->id,
+            'name_ar' => 'مجموعة النخبة الدقي',
             'center_name' => 'سنتر الدقي النخبة',
-            'subject_ar'  => 'الأحياء',
-            'grade_ar'    => 'الصف الثالث الثانوي',
-            'price_egp'   => 450.00,
+            'subject_ar' => 'الأحياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'price_egp' => 450.00,
         ]);
 
         $payment = StudentDirectPayment::create([
-            'teacher_id'        => $teacher->id,
-            'student_id'        => $student->id,
-            'study_group_id'    => $group->id,
-            'amount_egp'        => 450.00,
-            'payment_method'    => PaymentMethod::VODAFONE,
-            'student_name_ar'   => 'سلمى محمود',
-            'course_name_ar'    => 'مجموعة النخبة الدقي',
-            'status'            => DirectPaymentStatus::PENDING,
-            'paid_at'           => now(),
+            'teacher_id' => $teacher->id,
+            'student_id' => $student->id,
+            'study_group_id' => $group->id,
+            'amount_egp' => 450.00,
+            'payment_method' => PaymentMethod::VODAFONE,
+            'student_name_ar' => 'سلمى محمود',
+            'course_name_ar' => 'مجموعة النخبة الدقي',
+            'status' => DirectPaymentStatus::PENDING,
+            'paid_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -279,27 +278,27 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
             ->assertJsonPath('data.status', 'confirmed');
 
         $this->assertDatabaseHas('student_direct_payments', [
-            'id'     => $payment->id,
+            'id' => $payment->id,
             'status' => DirectPaymentStatus::CONFIRMED->value,
         ]);
 
         // Student automatically enrolled in group
         $this->assertDatabaseHas('group_enrollments', [
             'study_group_id' => $group->id,
-            'student_id'     => $student->id,
-            'status'         => 'enrolled',
+            'student_id' => $student->id,
+            'status' => 'enrolled',
         ]);
 
         // 2. Reject payment test
         $payment2 = StudentDirectPayment::create([
-            'teacher_id'        => $teacher->id,
-            'student_id'        => $student->id,
-            'amount_egp'        => 200.00,
-            'payment_method'    => PaymentMethod::CIB,
-            'student_name_ar'   => 'سلمى محمود',
-            'course_name_ar'    => 'كورس كيمياء حيوية',
-            'status'            => DirectPaymentStatus::PENDING,
-            'paid_at'           => now(),
+            'teacher_id' => $teacher->id,
+            'student_id' => $student->id,
+            'amount_egp' => 200.00,
+            'payment_method' => PaymentMethod::CIB,
+            'student_name_ar' => 'سلمى محمود',
+            'course_name_ar' => 'كورس كيمياء حيوية',
+            'status' => DirectPaymentStatus::PENDING,
+            'paid_at' => now(),
         ]);
 
         $rejectResponse = $this->postJson("/api/v1/teacher/financials/payments/{$payment2->uuid}/reject", [
@@ -310,7 +309,7 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
             ->assertJsonPath('data.status', 'rejected');
 
         $this->assertDatabaseHas('student_direct_payments', [
-            'id'     => $payment2->id,
+            'id' => $payment2->id,
             'status' => DirectPaymentStatus::REJECTED->value,
         ]);
     }
@@ -322,14 +321,14 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
         $student = $this->createStudent('طالب دفع', 'std.pay3@motafawweq.com');
 
         $payment = StudentDirectPayment::create([
-            'teacher_id'        => $teacherA->id,
-            'student_id'        => $student->id,
-            'amount_egp'        => 350.00,
-            'payment_method'    => PaymentMethod::INSTAPAY,
-            'student_name_ar'   => 'طالب دفع',
-            'course_name_ar'    => 'كورس أحياء',
-            'status'            => DirectPaymentStatus::PENDING,
-            'paid_at'           => now(),
+            'teacher_id' => $teacherA->id,
+            'student_id' => $student->id,
+            'amount_egp' => 350.00,
+            'payment_method' => PaymentMethod::INSTAPAY,
+            'student_name_ar' => 'طالب دفع',
+            'course_name_ar' => 'كورس أحياء',
+            'status' => DirectPaymentStatus::PENDING,
+            'paid_at' => now(),
         ]);
 
         Sanctum::actingAs($teacherB, [TokenType::ACCESS->value]);
@@ -344,7 +343,7 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
     }
 
     /* ----------------------------------------------------------------- */
-    /* Teacher Billing, Coupons & Invoices Tests                         */
+    /* Teacher Billing, Coupons & Invoices Tests */
     /* ----------------------------------------------------------------- */
 
     public function test_teacher_can_fetch_billing_summary_and_validate_coupon(): void
@@ -352,10 +351,10 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
         $teacher = $this->createTeacher();
 
         DiscountCoupon::create([
-            'code'             => 'PROMO50',
+            'code' => 'PROMO50',
             'discount_percent' => 50,
-            'is_active'        => true,
-            'max_uses'         => 10,
+            'is_active' => true,
+            'max_uses' => 10,
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -369,7 +368,7 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
 
         // 2. Validate custom coupon
         $couponResponse = $this->postJson('/api/v1/teacher/billing/validate-coupon', [
-            'code'         => 'PROMO50',
+            'code' => 'PROMO50',
             'order_amount' => 480.0,
         ]);
 
@@ -380,7 +379,7 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
 
         // 3. Validate platform coupon (TEACHER2026)
         $teacher2026Response = $this->postJson('/api/v1/teacher/billing/validate-coupon', [
-            'code'         => 'TEACHER2026',
+            'code' => 'TEACHER2026',
             'order_amount' => 480.0,
         ]);
 
@@ -404,10 +403,10 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $payload = [
-            'plan_tier'      => TeacherPlanTier::PRO->value,
+            'plan_tier' => TeacherPlanTier::PRO->value,
             'billing_period' => BillingPeriod::TERM->value, // 880 EGP base
             'payment_method' => PaymentMethod::VODAFONE->value,
-            'coupon_code'    => 'TEACHER2026', // 25% discount -> 660 EGP
+            'coupon_code' => 'TEACHER2026', // 25% discount -> 660 EGP
         ];
 
         $response = $this->postJson('/api/v1/teacher/billing/subscribe', $payload);
@@ -422,20 +421,20 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
 
         $this->assertDatabaseHas('teacher_subscriptions', [
             'teacher_id' => $teacher->id,
-            'plan_tier'  => TeacherPlanTier::PRO->value,
-            'status'     => 'active',
+            'plan_tier' => TeacherPlanTier::PRO->value,
+            'status' => 'active',
             'amount_egp' => 660,
         ]);
 
         $this->assertDatabaseHas('teacher_profiles', [
-            'user_id'   => $teacher->id,
+            'user_id' => $teacher->id,
             'plan_tier' => TeacherPlanTier::PRO->value,
         ]);
 
         $this->assertDatabaseHas('teacher_invoices', [
-            'teacher_id'       => $teacher->id,
+            'teacher_id' => $teacher->id,
             'final_amount_egp' => 660,
-            'status'           => 'paid',
+            'status' => 'paid',
         ]);
 
         $this->assertDatabaseHas('security_audit_logs', [

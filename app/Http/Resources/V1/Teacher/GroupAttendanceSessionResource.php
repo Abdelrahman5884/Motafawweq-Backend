@@ -15,18 +15,17 @@ class GroupAttendanceSessionResource extends BaseJsonResource
     public function toArray(Request $request): array
     {
         return [
-            'id'             => $this->uuid,
-            'sessionDate'    => $this->session_date?->toDateString(),
-            'titleAr'        => $this->title_ar,
-            'status'         => $this->status,
-            'notes'          => $this->notes,
-            'totalEnrolled'  => (int) $this->total_enrolled,
-            'presentCount'   => (int) $this->present_count,
-            'absentCount'    => (int) $this->absent_count,
-            'lateCount'      => (int) $this->late_count,
+            'id' => $this->uuid,
+            'sessionDate' => $this->session_date?->toDateString(),
+            'titleAr' => $this->title_ar,
+            'status' => $this->status,
+            'notes' => $this->notes,
+            'totalEnrolled' => (int) $this->total_enrolled,
+            'presentCount' => (int) $this->present_count,
+            'absentCount' => (int) $this->absent_count,
+            'lateCount' => (int) $this->late_count,
             'attendanceRate' => (float) $this->attendance_rate,
-            'createdAt'      => $this->formatDate($this->created_at),
+            'createdAt' => $this->formatDate($this->created_at),
         ];
     }
 }
-

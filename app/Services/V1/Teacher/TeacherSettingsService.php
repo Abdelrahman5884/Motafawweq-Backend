@@ -106,11 +106,11 @@ class TeacherSettingsService extends BaseService
 
             // 3. Preferences & Notifications & Security Toggles
             $booleanMappings = [
-                'two_factor_enabled'           => ['twoFactorEnabled', 'two_factor_enabled'],
+                'two_factor_enabled' => ['twoFactorEnabled', 'two_factor_enabled'],
                 'notify_whatsapp_intervention' => ['notifyWhatsappIntervention', 'notify_whatsapp_intervention'],
-                'notify_new_enrollment'        => ['notifyNewEnrollment', 'notify_new_enrollment'],
-                'notify_exam_submission'       => ['notifyExamSubmission', 'notify_exam_submission'],
-                'auto_watermark_enabled'       => ['autoWatermarkEnabled', 'auto_watermark_enabled'],
+                'notify_new_enrollment' => ['notifyNewEnrollment', 'notify_new_enrollment'],
+                'notify_exam_submission' => ['notifyExamSubmission', 'notify_exam_submission'],
+                'auto_watermark_enabled' => ['autoWatermarkEnabled', 'auto_watermark_enabled'],
             ];
 
             foreach ($booleanMappings as $column => [$camelKey, $snakeKey]) {
@@ -135,11 +135,11 @@ class TeacherSettingsService extends BaseService
                 }
             }
 
-            if (!empty($userUpdates)) {
+            if (! empty($userUpdates)) {
                 $teacher->update($userUpdates);
             }
 
-            if (!empty($profileUpdates)) {
+            if (! empty($profileUpdates)) {
                 $profile->update($profileUpdates);
             }
 
@@ -147,7 +147,7 @@ class TeacherSettingsService extends BaseService
                 'teacher.settings.updated',
                 [
                     'updated_profile_fields' => array_keys($profileUpdates),
-                    'updated_user_fields'    => array_keys($userUpdates),
+                    'updated_user_fields' => array_keys($userUpdates),
                 ],
                 'info',
                 $profile
@@ -185,11 +185,11 @@ class TeacherSettingsService extends BaseService
 
         $allowedMimes = [
             'image/jpeg' => 'jpg',
-            'image/png'  => 'png',
+            'image/png' => 'png',
             'image/webp' => 'webp',
         ];
 
-        if (!isset($allowedMimes[$detectedMime])) {
+        if (! isset($allowedMimes[$detectedMime])) {
             throw ValidationException::withMessages([
                 'avatar' => [__('messages.invalid_image_signature')],
             ]);
@@ -201,8 +201,8 @@ class TeacherSettingsService extends BaseService
             $extension = $allowedMimes[$detectedMime];
             $disk = $this->getAvatarDisk();
             $filename = ($disk === 'supabase')
-                ? 'users/profiles/' . $teacher->id . '_' . Str::uuid() . '.' . $extension
-                : 'avatars/teachers/' . Str::uuid() . '.' . $extension;
+                ? 'users/profiles/'.$teacher->id.'_'.Str::uuid().'.'.$extension
+                : 'avatars/teachers/'.Str::uuid().'.'.$extension;
 
             Storage::disk($disk)->put($filename, file_get_contents($file->getRealPath()));
 
@@ -216,25 +216,25 @@ class TeacherSettingsService extends BaseService
             $teacher->update(['avatar' => $publicUrl]);
 
             StoredFile::create([
-                'uuid'              => (string) Str::uuid(),
-                'user_id'           => $teacher->id,
-                'entity_type'       => 'user_avatar',
-                'entity_id'         => (string) $teacher->id,
+                'uuid' => (string) Str::uuid(),
+                'user_id' => $teacher->id,
+                'entity_type' => 'user_avatar',
+                'entity_id' => (string) $teacher->id,
                 'original_filename' => basename($file->getClientOriginalName()),
-                'storage_disk'      => $disk,
-                'storage_path'      => $filename,
-                'mime_type'         => $detectedMime,
-                'file_size_bytes'   => (int) $file->getSize(),
-                'storage_provider'  => $disk === 'supabase' ? 'supabase' : 'local',
-                'upload_status'     => 'completed',
+                'storage_disk' => $disk,
+                'storage_path' => $filename,
+                'mime_type' => $detectedMime,
+                'file_size_bytes' => (int) $file->getSize(),
+                'storage_provider' => $disk === 'supabase' ? 'supabase' : 'local',
+                'upload_status' => 'completed',
             ]);
 
             $this->logSecurityEvent(
                 'teacher.avatar.uploaded',
                 [
                     'mime_type' => $detectedMime,
-                    'size'      => $file->getSize(),
-                    'path'      => $filename,
+                    'size' => $file->getSize(),
+                    'path' => $filename,
                 ],
                 'info',
                 $profile
@@ -250,7 +250,7 @@ class TeacherSettingsService extends BaseService
     protected function processInlineAvatarIfNeeded(User $teacher, string $avatarValue): string
     {
         if (str_starts_with($avatarValue, 'data:image/')) {
-            if (!preg_match('/^data:image\/(jpeg|jpg|png|webp);base64,([a-zA-Z0-9+\/=]+)$/', $avatarValue, $matches)) {
+            if (! preg_match('/^data:image\/(jpeg|jpg|png|webp);base64,([a-zA-Z0-9+\/=]+)$/', $avatarValue, $matches)) {
                 throw ValidationException::withMessages([
                     'avatar' => [__('messages.invalid_image_signature')],
                 ]);
@@ -267,17 +267,17 @@ class TeacherSettingsService extends BaseService
             $detectedMime = $finfo->buffer($binary);
             $allowedMimes = [
                 'image/jpeg' => 'jpg',
-                'image/png'  => 'png',
+                'image/png' => 'png',
                 'image/webp' => 'webp',
             ];
 
-            if (!isset($allowedMimes[$detectedMime])) {
+            if (! isset($allowedMimes[$detectedMime])) {
                 throw ValidationException::withMessages([
                     'avatar' => [__('messages.invalid_image_signature')],
                 ]);
             }
 
-            $filename = 'avatars/teachers/' . Str::uuid() . '.' . $allowedMimes[$detectedMime];
+            $filename = 'avatars/teachers/'.Str::uuid().'.'.$allowedMimes[$detectedMime];
             Storage::disk('public')->put($filename, $binary);
 
             $this->deleteOldLocalAvatar($teacher->avatar);
@@ -293,12 +293,13 @@ class TeacherSettingsService extends BaseService
         if (app()->environment('testing')) {
             return 'public';
         }
+
         return config('filesystems.disks.supabase.key') ? 'supabase' : 'public';
     }
 
     protected function deleteOldLocalAvatar(?string $oldAvatarUrl): void
     {
-        if (!$oldAvatarUrl) {
+        if (! $oldAvatarUrl) {
             return;
         }
 
@@ -307,4 +308,3 @@ class TeacherSettingsService extends BaseService
         }
     }
 }
-

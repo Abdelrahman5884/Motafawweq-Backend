@@ -32,7 +32,7 @@ class LessonWorkspaceController extends BaseApiController
 
         return $this->successResponse(
             [
-                'stats'   => $overview['stats'],
+                'stats' => $overview['stats'],
                 'lessons' => TeacherLessonResource::collection($overview['lessons'])->resolve($request),
             ],
             __('messages.workspace_overview_fetched')
@@ -111,4 +111,3 @@ class LessonWorkspaceController extends BaseApiController
         );
     }
 }
-

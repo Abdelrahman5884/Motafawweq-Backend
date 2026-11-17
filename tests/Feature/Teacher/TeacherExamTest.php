@@ -9,7 +9,6 @@ use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\Exam;
 use App\Models\ExamQuestion;
-use App\Models\SecurityAuditLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -22,9 +21,9 @@ class TeacherExamTest extends TestCase
     protected function createTeacher(string $email = 'teacher.exams@motafawweq.com'): User
     {
         return User::factory()->create([
-            'email'             => $email,
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'email' => $email,
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
@@ -35,39 +34,39 @@ class TeacherExamTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $payload = [
-            'titleAr'         => 'امتحان البناء الضوئي والتنفس الخلوي',
-            'titleEn'         => 'Photosynthesis Exam',
-            'courseTitleAr'   => 'ماستر كلاس الأحياء (3 ثانوي)',
+            'titleAr' => 'امتحان البناء الضوئي والتنفس الخلوي',
+            'titleEn' => 'Photosynthesis Exam',
+            'courseTitleAr' => 'ماستر كلاس الأحياء (3 ثانوي)',
             'durationMinutes' => 45,
-            'passScore'       => 15,
-            'dueDate'         => '2026-10-30',
-            'isBubbleSheet'   => true,
-            'questions'       => [
+            'passScore' => 15,
+            'dueDate' => '2026-10-30',
+            'isBubbleSheet' => true,
+            'questions' => [
                 [
-                    'type'          => ExamQuestionType::MCQ->value,
-                    'points'        => 10,
-                    'difficulty'    => 'متوسط',
-                    'questionAr'    => 'ما هو المانح المباشر لإلكترونات تعويض كلوروفيل (أ)؟',
-                    'optionsAr'     => ['الماء H2O', 'غاز CO2', 'مركب NADPH', 'جزيء الجلوكوز'],
-                    'correctIndex'  => 0,
+                    'type' => ExamQuestionType::MCQ->value,
+                    'points' => 10,
+                    'difficulty' => 'متوسط',
+                    'questionAr' => 'ما هو المانح المباشر لإلكترونات تعويض كلوروفيل (أ)؟',
+                    'optionsAr' => ['الماء H2O', 'غاز CO2', 'مركب NADPH', 'جزيء الجلوكوز'],
+                    'correctIndex' => 0,
                     'explanationAr' => 'انشطار الماء ضوئياً هو المصدر المباشر.',
                 ],
                 [
-                    'type'          => ExamQuestionType::TRUE_FALSE->value,
-                    'points'        => 10,
-                    'difficulty'    => 'مباشر',
-                    'questionAr'    => 'تحدث دورة كريبس بالكامل داخل الغشاء الداخلي للميتوكوندريا.',
-                    'correctBool'   => false,
+                    'type' => ExamQuestionType::TRUE_FALSE->value,
+                    'points' => 10,
+                    'difficulty' => 'مباشر',
+                    'questionAr' => 'تحدث دورة كريبس بالكامل داخل الغشاء الداخلي للميتوكوندريا.',
+                    'correctBool' => false,
                     'explanationAr' => 'تحدث داخل مادة الأساس.',
                 ],
                 [
-                    'type'           => ExamQuestionType::ESSAY->value,
-                    'points'         => 10,
-                    'difficulty'     => 'مستويات تفكير عليا',
-                    'questionAr'     => 'علل: توقف التفاعلات اللاضوئية بعد فترة وجيزة من انعدام الضوء.',
-                    'modelAnswerAr'  => 'تعتمد التفاعلات اللاضوئية على نواتج المرحلة الضوئية ATP و NADPH.',
+                    'type' => ExamQuestionType::ESSAY->value,
+                    'points' => 10,
+                    'difficulty' => 'مستويات تفكير عليا',
+                    'questionAr' => 'علل: توقف التفاعلات اللاضوئية بعد فترة وجيزة من انعدام الضوء.',
+                    'modelAnswerAr' => 'تعتمد التفاعلات اللاضوئية على نواتج المرحلة الضوئية ATP و NADPH.',
                     'rubricPointsAr' => ['ذكر الاعتماد على نواتج الضوء (درجة)', 'تحديد نفاد ATP (درجة)'],
-                    'explanationAr'  => 'سؤال ربط تكاملي.',
+                    'explanationAr' => 'سؤال ربط تكاملي.',
                 ],
             ],
         ];
@@ -83,27 +82,27 @@ class TeacherExamTest extends TestCase
             ->assertJsonCount(3, 'data.questions');
 
         $this->assertDatabaseHas('exams', [
-            'teacher_id'      => $teacher->id,
-            'title_ar'        => 'امتحان البناء الضوئي والتنفس الخلوي',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان البناء الضوئي والتنفس الخلوي',
             'questions_count' => 3,
-            'full_mark'       => 30,
+            'full_mark' => 30,
         ]);
 
         $this->assertDatabaseHas('exam_questions', [
-            'type'            => ExamQuestionType::MCQ->value,
+            'type' => ExamQuestionType::MCQ->value,
             'question_number' => 1,
-            'correct_index'   => 0,
+            'correct_index' => 0,
         ]);
 
         $this->assertDatabaseHas('exam_questions', [
-            'type'            => ExamQuestionType::TRUE_FALSE->value,
+            'type' => ExamQuestionType::TRUE_FALSE->value,
             'question_number' => 2,
-            'correct_bool'    => false,
+            'correct_bool' => false,
         ]);
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacher->id,
-            'event'   => 'teacher.exam.created',
+            'event' => 'teacher.exam.created',
         ]);
     }
 
@@ -114,14 +113,14 @@ class TeacherExamTest extends TestCase
 
         $exam1 = Exam::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'امتحان الأحياء الشامل',
-            'status'     => ExamStatus::ACTIVE->value,
+            'title_ar' => 'امتحان الأحياء الشامل',
+            'status' => ExamStatus::ACTIVE->value,
         ]);
 
         $exam2 = Exam::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'امتحان الكيمياء النهائي',
-            'status'     => ExamStatus::CLOSED->value,
+            'title_ar' => 'امتحان الكيمياء النهائي',
+            'status' => ExamStatus::CLOSED->value,
         ]);
 
         // Search by query
@@ -144,26 +143,26 @@ class TeacherExamTest extends TestCase
 
         $exam = Exam::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'كويز سريع',
-            'status'     => ExamStatus::ACTIVE->value,
+            'title_ar' => 'كويز سريع',
+            'status' => ExamStatus::ACTIVE->value,
         ]);
 
         ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 1,
-            'type'            => ExamQuestionType::MCQ->value,
-            'points'          => 5,
-            'question_ar'     => 'سؤال اختيار من متعدد',
-            'options_ar'      => ['أ', 'ب', 'ج', 'د'],
-            'correct_index'   => 1,
+            'type' => ExamQuestionType::MCQ->value,
+            'points' => 5,
+            'question_ar' => 'سؤال اختيار من متعدد',
+            'options_ar' => ['أ', 'ب', 'ج', 'د'],
+            'correct_index' => 1,
         ]);
 
         ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 2,
-            'type'            => ExamQuestionType::ESSAY->value,
-            'points'          => 10,
-            'question_ar'     => 'سؤال مقالي',
+            'type' => ExamQuestionType::ESSAY->value,
+            'points' => 10,
+            'question_ar' => 'سؤال مقالي',
             'model_answer_ar' => 'نموذج الإجابة المقالي',
         ]);
 
@@ -187,14 +186,14 @@ class TeacherExamTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $exam = Exam::create([
-            'teacher_id'       => $teacher->id,
-            'title_ar'         => 'امتحان تجريبي',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان تجريبي',
             'duration_minutes' => 30,
-            'full_mark'        => 20,
+            'full_mark' => 20,
         ]);
 
         $response = $this->putJson("/api/v1/teacher/exams/{$exam->uuid}", [
-            'titleAr'         => 'امتحان تجريبي معدل ومطور',
+            'titleAr' => 'امتحان تجريبي معدل ومطور',
             'durationMinutes' => 60,
         ]);
 
@@ -203,8 +202,8 @@ class TeacherExamTest extends TestCase
             ->assertJsonPath('data.durationMinutes', 60);
 
         $this->assertDatabaseHas('exams', [
-            'id'               => $exam->id,
-            'title_ar'         => 'امتحان تجريبي معدل ومطور',
+            'id' => $exam->id,
+            'title_ar' => 'امتحان تجريبي معدل ومطور',
             'duration_minutes' => 60,
         ]);
     }
@@ -215,9 +214,9 @@ class TeacherExamTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $exam = Exam::create([
-            'teacher_id'   => $teacher->id,
-            'title_ar'     => 'امتحان دوري',
-            'status'       => ExamStatus::ACTIVE->value,
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان دوري',
+            'status' => ExamStatus::ACTIVE->value,
             'show_results' => true,
         ]);
 
@@ -243,18 +242,18 @@ class TeacherExamTest extends TestCase
 
         $exam = Exam::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'امتحان نصف الفصل الدراسي',
-            'full_mark'  => 10,
+            'title_ar' => 'امتحان نصف الفصل الدراسي',
+            'full_mark' => 10,
         ]);
 
         ExamQuestion::create([
-            'exam_id'         => $exam->id,
+            'exam_id' => $exam->id,
             'question_number' => 1,
-            'type'            => ExamQuestionType::MCQ->value,
-            'points'          => 10,
-            'question_ar'     => 'سؤال مستنسخ',
-            'options_ar'      => ['1', '2'],
-            'correct_index'   => 0,
+            'type' => ExamQuestionType::MCQ->value,
+            'points' => 10,
+            'question_ar' => 'سؤال مستنسخ',
+            'options_ar' => ['1', '2'],
+            'correct_index' => 0,
         ]);
 
         $response = $this->postJson("/api/v1/teacher/exams/{$exam->uuid}/duplicate");
@@ -274,7 +273,7 @@ class TeacherExamTest extends TestCase
 
         $exam = Exam::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'امتحان للحذف',
+            'title_ar' => 'امتحان للحذف',
         ]);
 
         $response = $this->deleteJson("/api/v1/teacher/exams/{$exam->uuid}");
@@ -290,7 +289,7 @@ class TeacherExamTest extends TestCase
 
         $examA = Exam::create([
             'teacher_id' => $teacherA->id,
-            'title_ar'   => 'امتحان سري للمعلم أ',
+            'title_ar' => 'امتحان سري للمعلم أ',
         ]);
 
         Sanctum::actingAs($teacherB, [TokenType::ACCESS->value]);
@@ -314,8 +313,8 @@ class TeacherExamTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
-            'level'   => 'warning',
+            'event' => 'teacher.idor_attempt_blocked',
+            'level' => 'warning',
         ]);
     }
 
@@ -325,34 +324,34 @@ class TeacherExamTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $exam = Exam::create([
-            'teacher_id'       => $teacher->id,
-            'title_ar'         => 'امتحان أسئلة ديناميكي',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان أسئلة ديناميكي',
             'duration_minutes' => 45,
-            'full_mark'        => 5,
+            'full_mark' => 5,
         ]);
 
         $response = $this->putJson("/api/v1/teacher/exams/{$exam->uuid}", [
-            'titleAr'   => 'امتحان أسئلة ديناميكي مطور',
+            'titleAr' => 'امتحان أسئلة ديناميكي مطور',
             'questions' => [
                 [
-                    'type'         => 'mcq',
-                    'points'       => 5,
-                    'questionAr'   => 'سؤال اختيار من متعدد أول',
-                    'optionsAr'    => ['أ', 'ب', 'ج', 'د'],
+                    'type' => 'mcq',
+                    'points' => 5,
+                    'questionAr' => 'سؤال اختيار من متعدد أول',
+                    'optionsAr' => ['أ', 'ب', 'ج', 'د'],
                     'correctIndex' => 1,
                 ],
                 [
-                    'type'        => 'true_false',
-                    'points'      => 5,
-                    'questionAr'  => 'سؤال صح وخطأ ثان',
+                    'type' => 'true_false',
+                    'points' => 5,
+                    'questionAr' => 'سؤال صح وخطأ ثان',
                     'correctBool' => false,
                 ],
                 [
-                    'type'          => 'essay',
-                    'points'        => 10,
-                    'questionAr'    => 'سؤال مقالي ثالث',
+                    'type' => 'essay',
+                    'points' => 10,
+                    'questionAr' => 'سؤال مقالي ثالث',
                     'modelAnswerAr' => 'إجابة نموذجية مفصلة',
-                ]
+                ],
             ],
         ]);
 
@@ -363,22 +362,21 @@ class TeacherExamTest extends TestCase
             ->assertJsonCount(3, 'data.questions');
 
         $this->assertDatabaseHas('exam_questions', [
-            'exam_id'     => $exam->id,
+            'exam_id' => $exam->id,
             'question_ar' => 'سؤال اختيار من متعدد أول',
-            'points'      => 5,
+            'points' => 5,
         ]);
 
         $this->assertDatabaseHas('exam_questions', [
-            'exam_id'     => $exam->id,
+            'exam_id' => $exam->id,
             'question_ar' => 'سؤال صح وخطأ ثان',
-            'points'      => 5,
+            'points' => 5,
         ]);
 
         $this->assertDatabaseHas('exam_questions', [
-            'exam_id'     => $exam->id,
+            'exam_id' => $exam->id,
             'question_ar' => 'سؤال مقالي ثالث',
-            'points'      => 10,
+            'points' => 10,
         ]);
     }
 }
-

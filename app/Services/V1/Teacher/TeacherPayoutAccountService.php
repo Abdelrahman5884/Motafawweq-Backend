@@ -52,7 +52,7 @@ class TeacherPayoutAccountService extends BaseService
                 ->where('is_default', true)
                 ->exists();
 
-            $shouldBeDefault = !$hasExistingDefault || !empty($data['isDefault']) || !empty($data['is_default']);
+            $shouldBeDefault = ! $hasExistingDefault || ! empty($data['isDefault']) || ! empty($data['is_default']);
 
             if ($shouldBeDefault) {
                 TeacherPayoutAccount::forTeacher($teacher->id)->update(['is_default' => false]);
@@ -60,13 +60,13 @@ class TeacherPayoutAccountService extends BaseService
 
             /** @var TeacherPayoutAccount $account */
             $account = $this->payoutRepository->create([
-                'teacher_id'         => $teacher->id,
-                'type'               => $type,
-                'label_ar'           => $customLabelAr !== '' ? $customLabelAr : $type->defaultLabelAr(),
-                'label_en'           => $customLabelEn !== '' ? $customLabelEn : $type->defaultLabelEn(),
+                'teacher_id' => $teacher->id,
+                'type' => $type,
+                'label_ar' => $customLabelAr !== '' ? $customLabelAr : $type->defaultLabelAr(),
+                'label_en' => $customLabelEn !== '' ? $customLabelEn : $type->defaultLabelEn(),
                 'account_identifier' => $identifier,
-                'is_default'         => $shouldBeDefault,
-                'is_active'          => array_key_exists('isActive', $data)
+                'is_default' => $shouldBeDefault,
+                'is_active' => array_key_exists('isActive', $data)
                     ? (bool) $data['isActive']
                     : (array_key_exists('is_active', $data) ? (bool) $data['is_active'] : true),
             ]);
@@ -74,9 +74,9 @@ class TeacherPayoutAccountService extends BaseService
             $this->logSecurityEvent(
                 'teacher.payout_account.created',
                 [
-                    'type'              => $type->value,
+                    'type' => $type->value,
                     'masked_identifier' => $account->maskedIdentifier(),
-                    'is_default'        => $account->is_default,
+                    'is_default' => $account->is_default,
                 ],
                 'info',
                 $account
@@ -95,15 +95,15 @@ class TeacherPayoutAccountService extends BaseService
 
         return $this->transaction(function () use ($account) {
             $account->update([
-                'is_active' => !$account->is_active,
+                'is_active' => ! $account->is_active,
             ]);
 
             $this->logSecurityEvent(
                 'teacher.payout_account.toggled',
                 [
-                    'type'              => $account->type->value,
+                    'type' => $account->type->value,
                     'masked_identifier' => $account->maskedIdentifier(),
-                    'is_active'         => $account->is_active,
+                    'is_active' => $account->is_active,
                 ],
                 'info',
                 $account
@@ -127,13 +127,13 @@ class TeacherPayoutAccountService extends BaseService
 
             $account->update([
                 'is_default' => true,
-                'is_active'  => true,
+                'is_active' => true,
             ]);
 
             $this->logSecurityEvent(
                 'teacher.payout_account.default_changed',
                 [
-                    'type'              => $account->type->value,
+                    'type' => $account->type->value,
                     'masked_identifier' => $account->maskedIdentifier(),
                 ],
                 'info',
@@ -173,9 +173,9 @@ class TeacherPayoutAccountService extends BaseService
             $this->logSecurityEvent(
                 'teacher.payout_account.deleted',
                 [
-                    'type'              => $type,
+                    'type' => $type,
                     'masked_identifier' => $masked,
-                    'was_default'       => $wasDefault,
+                    'was_default' => $wasDefault,
                 ],
                 'warning'
             );

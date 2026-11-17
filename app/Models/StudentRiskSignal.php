@@ -13,7 +13,7 @@ use Illuminate\Support\Str;
 
 class StudentRiskSignal extends Model
 {
-    use HasFactory, SoftDeletes, HasSecurityAudit;
+    use HasFactory, HasSecurityAudit, SoftDeletes;
 
     protected $table = 'student_risk_signals';
 
@@ -35,13 +35,13 @@ class StudentRiskSignal extends Model
     protected function casts(): array
     {
         return [
-            'risk_level'          => RiskLevel::class,
-            'status'              => RiskSignalStatus::class,
+            'risk_level' => RiskLevel::class,
+            'status' => RiskSignalStatus::class,
             'attendance_drop_pct' => 'float',
             'quiz_score_drop_pct' => 'float',
-            'attendance_pct'      => 'integer',
-            'avg_exam_score'      => 'float',
-            'last_active_at'      => 'datetime',
+            'attendance_pct' => 'integer',
+            'avg_exam_score' => 'float',
+            'last_active_at' => 'datetime',
         ];
     }
 
@@ -69,4 +69,3 @@ class StudentRiskSignal extends Model
         return $this->belongsTo(StudyGroup::class, 'study_group_id');
     }
 }
-

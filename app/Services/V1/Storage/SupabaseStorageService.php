@@ -6,7 +6,6 @@ use App\Enums\LessonAttachmentType;
 use App\Enums\LessonMediaMode;
 use App\Enums\UserRole;
 use App\Models\Course;
-use App\Models\Homework;
 use App\Models\HomeworkSubmission;
 use App\Models\Lesson;
 use App\Models\LessonAttachment;
@@ -36,63 +35,63 @@ class SupabaseStorageService extends BaseService
      */
     protected array $entityConfigs = [
         'user_avatar' => [
-            'folder'        => 'users/profiles',
+            'folder' => 'users/profiles',
             'allowed_mimes' => ['image/jpeg', 'image/png', 'image/webp'],
-            'max_size'      => 5242880, // 5 MB
+            'max_size' => 5242880, // 5 MB
         ],
         'center_logo' => [
-            'folder'        => 'centers/logos',
+            'folder' => 'centers/logos',
             'allowed_mimes' => ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'],
-            'max_size'      => 5242880, // 5 MB
+            'max_size' => 5242880, // 5 MB
         ],
         'center_document' => [
-            'folder'        => 'centers/documents',
+            'folder' => 'centers/documents',
             'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
-            'max_size'      => 20971520, // 20 MB
+            'max_size' => 20971520, // 20 MB
         ],
         'course_thumbnail' => [
-            'folder'        => 'courses/thumbnails',
+            'folder' => 'courses/thumbnails',
             'allowed_mimes' => ['image/jpeg', 'image/png', 'image/webp'],
-            'max_size'      => 10485760, // 10 MB
+            'max_size' => 10485760, // 10 MB
         ],
         'course_resource' => [
-            'folder'        => 'courses/resources',
+            'folder' => 'courses/resources',
             'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
-            'max_size'      => self::MAX_FILE_SIZE_BYTES,
+            'max_size' => self::MAX_FILE_SIZE_BYTES,
         ],
         'lesson_media' => [
-            'folder'        => 'lessons/audio',
+            'folder' => 'lessons/audio',
             'allowed_mimes' => [
                 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav',
                 'audio/webm', 'audio/ogg', 'audio/aac', 'audio/m4a', 'audio/x-m4a',
-                'video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'
+                'video/mp4', 'video/webm', 'video/quicktime', 'video/ogg',
             ],
-            'max_size'      => self::MAX_FILE_SIZE_BYTES,
+            'max_size' => self::MAX_FILE_SIZE_BYTES,
         ],
         'lesson_attachment' => [
-            'folder'        => 'lessons/attachments',
+            'folder' => 'lessons/attachments',
             'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
-            'max_size'      => self::MAX_FILE_SIZE_BYTES,
+            'max_size' => self::MAX_FILE_SIZE_BYTES,
         ],
         'lesson_transcript' => [
-            'folder'        => 'lessons/transcripts',
+            'folder' => 'lessons/transcripts',
             'allowed_mimes' => ['application/json', 'text/plain', 'application/pdf'],
-            'max_size'      => 10485760, // 10 MB
+            'max_size' => 10485760, // 10 MB
         ],
         'lesson_mindmap' => [
-            'folder'        => 'lessons/mindmaps',
+            'folder' => 'lessons/mindmaps',
             'allowed_mimes' => ['application/json', 'image/png', 'image/jpeg', 'image/svg+xml'],
-            'max_size'      => 10485760, // 10 MB
+            'max_size' => 10485760, // 10 MB
         ],
         'lesson_quiz' => [
-            'folder'        => 'lessons/quizzes',
+            'folder' => 'lessons/quizzes',
             'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
-            'max_size'      => 20971520, // 20 MB
+            'max_size' => 20971520, // 20 MB
         ],
         'student_submission' => [
-            'folder'        => 'students/submissions',
+            'folder' => 'students/submissions',
             'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
-            'max_size'      => self::MAX_FILE_SIZE_BYTES,
+            'max_size' => self::MAX_FILE_SIZE_BYTES,
         ],
     ];
 
@@ -118,6 +117,7 @@ class SupabaseStorageService extends BaseService
     public function setDiskName(string $name): self
     {
         $this->diskName = $name;
+
         return $this;
     }
 
@@ -146,18 +146,18 @@ class SupabaseStorageService extends BaseService
 
         // Create pending file record in MySQL
         $storedFile = StoredFile::create([
-            'uuid'              => (string) Str::uuid(),
-            'user_id'           => $user->id,
-            'entity_type'       => $entityType,
-            'entity_id'         => $entityId,
+            'uuid' => (string) Str::uuid(),
+            'user_id' => $user->id,
+            'entity_type' => $entityType,
+            'entity_id' => $entityId,
             'original_filename' => $safeOriginalName,
-            'storage_disk'      => $this->diskName,
-            'storage_path'      => $storagePath,
-            'mime_type'         => $mimeType,
-            'file_size_bytes'   => $fileSizeBytes,
-            'storage_provider'  => 'supabase',
-            'upload_status'     => 'pending',
-            'metadata'          => $extraMetadata,
+            'storage_disk' => $this->diskName,
+            'storage_path' => $storagePath,
+            'mime_type' => $mimeType,
+            'file_size_bytes' => $fileSizeBytes,
+            'storage_provider' => 'supabase',
+            'upload_status' => 'pending',
+            'metadata' => $extraMetadata,
         ]);
 
         $disk = $this->disk();
@@ -168,8 +168,8 @@ class SupabaseStorageService extends BaseService
             $client = $disk->getClient();
             $bucket = config("filesystems.disks.{$this->diskName}.bucket", 'motafawweq-storage');
             $cmd = $client->getCommand('PutObject', [
-                'Bucket'      => $bucket,
-                'Key'         => $storagePath,
+                'Bucket' => $bucket,
+                'Key' => $storagePath,
                 'ContentType' => $mimeType,
             ]);
             $request = $client->createPresignedRequest($cmd, '+15 minutes');
@@ -180,21 +180,21 @@ class SupabaseStorageService extends BaseService
         }
 
         $this->logSecurityEvent('storage.presigned_upload_requested', [
-            'user_id'          => $user->id,
+            'user_id' => $user->id,
             'stored_file_uuid' => $storedFile->uuid,
-            'entity_type'      => $entityType,
-            'entity_id'        => $entityId,
-            'mime_type'        => $mimeType,
-            'file_size'        => $fileSizeBytes,
+            'entity_type' => $entityType,
+            'entity_id' => $entityId,
+            'mime_type' => $mimeType,
+            'file_size' => $fileSizeBytes,
         ]);
 
         return [
-            'file_id'            => $storedFile->uuid,
-            'upload_url'         => $presignedUrl,
-            'storage_path'       => $storagePath,
-            'mime_type'          => $mimeType,
+            'file_id' => $storedFile->uuid,
+            'upload_url' => $presignedUrl,
+            'storage_path' => $storagePath,
+            'mime_type' => $mimeType,
             'expires_in_seconds' => 900, // 15 minutes
-            'headers'            => [
+            'headers' => [
                 'Content-Type' => $mimeType,
             ],
         ];
@@ -207,7 +207,7 @@ class SupabaseStorageService extends BaseService
     {
         $storedFile = StoredFile::where('uuid', $fileUuid)->first();
 
-        if (!$storedFile) {
+        if (! $storedFile) {
             throw ValidationException::withMessages([
                 'file_id' => [__('messages.not_found')],
             ]);
@@ -216,7 +216,7 @@ class SupabaseStorageService extends BaseService
         // Ownership enforcement
         if ($storedFile->user_id !== $user->id && $user->role !== UserRole::ADMIN) {
             $this->logSecurityEvent('storage.unauthorized_confirm_attempt', [
-                'user_id'          => $user->id,
+                'user_id' => $user->id,
                 'stored_file_uuid' => $fileUuid,
             ]);
             throw ValidationException::withMessages([
@@ -227,7 +227,7 @@ class SupabaseStorageService extends BaseService
         $disk = $this->disk();
 
         // Verify object existence in Supabase Storage
-        if (!$disk->exists($storedFile->storage_path)) {
+        if (! $disk->exists($storedFile->storage_path)) {
             $storedFile->update(['upload_status' => 'failed']);
             throw ValidationException::withMessages([
                 'file_id' => ['لم يتم العثور على الملف في وحدة التخزين السحابي. يرجى إعادة المحاولة.'],
@@ -256,11 +256,11 @@ class SupabaseStorageService extends BaseService
         $this->attachFileToEntity($user, $storedFile);
 
         $this->logSecurityEvent('storage.upload_confirmed', [
-            'user_id'          => $user->id,
+            'user_id' => $user->id,
             'stored_file_uuid' => $storedFile->uuid,
-            'entity_type'      => $storedFile->entity_type,
-            'entity_id'        => $storedFile->entity_id,
-            'size'             => $storedFile->file_size_bytes,
+            'entity_type' => $storedFile->entity_type,
+            'entity_id' => $storedFile->entity_id,
+            'size' => $storedFile->file_size_bytes,
         ]);
 
         return $storedFile;
@@ -292,18 +292,18 @@ class SupabaseStorageService extends BaseService
         $this->disk()->put($storagePath, file_get_contents($realPath));
 
         $storedFile = StoredFile::create([
-            'uuid'              => (string) Str::uuid(),
-            'user_id'           => $user->id,
-            'entity_type'       => $entityType,
-            'entity_id'         => $entityId,
+            'uuid' => (string) Str::uuid(),
+            'user_id' => $user->id,
+            'entity_type' => $entityType,
+            'entity_id' => $entityId,
             'original_filename' => $this->sanitizeFilename($file->getClientOriginalName()),
-            'storage_disk'      => $this->diskName,
-            'storage_path'      => $storagePath,
-            'mime_type'         => $detectedMime,
-            'file_size_bytes'   => $fileSize,
-            'storage_provider'  => 'supabase',
-            'upload_status'     => 'completed',
-            'metadata'          => $extraMetadata,
+            'storage_disk' => $this->diskName,
+            'storage_path' => $storagePath,
+            'mime_type' => $detectedMime,
+            'file_size_bytes' => $fileSize,
+            'storage_provider' => 'supabase',
+            'upload_status' => 'completed',
+            'metadata' => $extraMetadata,
         ]);
 
         $this->attachFileToEntity($user, $storedFile);
@@ -338,7 +338,7 @@ class SupabaseStorageService extends BaseService
     {
         if ($storedFile->user_id !== $user->id && $user->role !== UserRole::ADMIN) {
             $this->logSecurityEvent('storage.unauthorized_delete_attempt', [
-                'user_id'          => $user->id,
+                'user_id' => $user->id,
                 'stored_file_uuid' => $storedFile->uuid,
             ]);
             throw ValidationException::withMessages([
@@ -353,9 +353,9 @@ class SupabaseStorageService extends BaseService
         $storedFile->delete();
 
         $this->logSecurityEvent('storage.file_deleted', [
-            'user_id'          => $user->id,
+            'user_id' => $user->id,
             'stored_file_uuid' => $storedFile->uuid,
-            'path'             => $storedFile->storage_path,
+            'path' => $storedFile->storage_path,
         ]);
     }
 
@@ -369,7 +369,7 @@ class SupabaseStorageService extends BaseService
         string $mimeType,
         int $fileSizeBytes
     ): void {
-        if (!isset($this->entityConfigs[$entityType])) {
+        if (! isset($this->entityConfigs[$entityType])) {
             throw ValidationException::withMessages([
                 'entity_type' => ['نوع الكيان غير مدعوم في خدمة التخزين.'],
             ]);
@@ -393,7 +393,7 @@ class SupabaseStorageService extends BaseService
         }
 
         // MIME type check
-        if (!in_array(strtolower($mimeType), $config['allowed_mimes'], true)) {
+        if (! in_array(strtolower($mimeType), $config['allowed_mimes'], true)) {
             throw ValidationException::withMessages([
                 'mime_type' => ['نوع الملف غير مسموح به في منصة متفوق.'],
             ]);
@@ -510,12 +510,12 @@ class SupabaseStorageService extends BaseService
                         $durationSecs = isset($meta['duration']) ? max(0, (int) $meta['duration']) : 0;
 
                         $lessonUpdates = [
-                            'media_disk'          => $this->diskName,
-                            'media_path'          => $storedFile->storage_path,
+                            'media_disk' => $this->diskName,
+                            'media_path' => $storedFile->storage_path,
                             'media_original_name' => $storedFile->original_filename,
-                            'media_mime_type'     => $storedFile->mime_type,
-                            'media_size_bytes'    => $storedFile->file_size_bytes,
-                            'media_mode'          => $isAudio ? LessonMediaMode::AUDIO : LessonMediaMode::VIDEO,
+                            'media_mime_type' => $storedFile->mime_type,
+                            'media_size_bytes' => $storedFile->file_size_bytes,
+                            'media_mode' => $isAudio ? LessonMediaMode::AUDIO : LessonMediaMode::VIDEO,
                         ];
 
                         if ($durationSecs > 0) {
@@ -543,19 +543,19 @@ class SupabaseStorageService extends BaseService
                         $nextOrder = (int) $lesson->attachments()->where('type', $type->value)->max('display_order') + 1;
 
                         LessonAttachment::create([
-                            'lesson_id'          => $lesson->id,
-                            'teacher_id'         => $lesson->teacher_id,
-                            'type'               => $type,
-                            'title'              => $meta['title'] ?? pathinfo($storedFile->original_filename, PATHINFO_FILENAME),
-                            'caption'            => $meta['caption'] ?? null,
+                            'lesson_id' => $lesson->id,
+                            'teacher_id' => $lesson->teacher_id,
+                            'type' => $type,
+                            'title' => $meta['title'] ?? pathinfo($storedFile->original_filename, PATHINFO_FILENAME),
+                            'caption' => $meta['caption'] ?? null,
                             'original_file_name' => $storedFile->original_filename,
-                            'storage_disk'       => $this->diskName,
-                            'storage_path'       => $storedFile->storage_path,
-                            'mime_type'          => $storedFile->mime_type,
-                            'file_size_bytes'    => $storedFile->file_size_bytes,
-                            'file_size_label'    => $this->formatBytes($storedFile->file_size_bytes),
-                            'pages_count'        => $isPdf ? (int) ($meta['pages_count'] ?? 1) : null,
-                            'display_order'      => $nextOrder,
+                            'storage_disk' => $this->diskName,
+                            'storage_path' => $storedFile->storage_path,
+                            'mime_type' => $storedFile->mime_type,
+                            'file_size_bytes' => $storedFile->file_size_bytes,
+                            'file_size_label' => $this->formatBytes($storedFile->file_size_bytes),
+                            'pages_count' => $isPdf ? (int) ($meta['pages_count'] ?? 1) : null,
+                            'display_order' => $nextOrder,
                         ]);
                     }
                 }
@@ -593,24 +593,24 @@ class SupabaseStorageService extends BaseService
     protected function resolveExtension(string $filename, string $mimeType): string
     {
         $map = [
-            'application/pdf'    => 'pdf',
-            'image/jpeg'         => 'jpg',
-            'image/png'          => 'png',
-            'image/webp'         => 'webp',
-            'image/svg+xml'      => 'svg',
-            'audio/mpeg'         => 'mp3',
-            'audio/mp3'          => 'mp3',
-            'audio/wav'          => 'wav',
-            'audio/x-wav'        => 'wav',
-            'audio/webm'         => 'webm',
-            'audio/ogg'          => 'ogg',
-            'audio/aac'          => 'aac',
-            'audio/m4a'          => 'm4a',
-            'audio/x-m4a'        => 'm4a',
-            'video/mp4'          => 'mp4',
-            'video/webm'         => 'webm',
-            'application/json'   => 'json',
-            'text/plain'         => 'txt',
+            'application/pdf' => 'pdf',
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'image/svg+xml' => 'svg',
+            'audio/mpeg' => 'mp3',
+            'audio/mp3' => 'mp3',
+            'audio/wav' => 'wav',
+            'audio/x-wav' => 'wav',
+            'audio/webm' => 'webm',
+            'audio/ogg' => 'ogg',
+            'audio/aac' => 'aac',
+            'audio/m4a' => 'm4a',
+            'audio/x-m4a' => 'm4a',
+            'video/mp4' => 'mp4',
+            'video/webm' => 'webm',
+            'application/json' => 'json',
+            'text/plain' => 'txt',
         ];
 
         if (isset($map[$mimeType])) {
@@ -618,6 +618,7 @@ class SupabaseStorageService extends BaseService
         }
 
         $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+
         return $ext ?: 'bin';
     }
 
@@ -627,6 +628,7 @@ class SupabaseStorageService extends BaseService
     protected function sanitizeFilename(string $filename): string
     {
         $clean = preg_replace('/[^\p{L}\p{N}\s._\-()]/u', '', basename($filename));
+
         return mb_substr(trim($clean), 0, 180) ?: 'motafawweq_file';
     }
 
@@ -636,12 +638,12 @@ class SupabaseStorageService extends BaseService
     protected function formatBytes(int $bytes): string
     {
         if ($bytes >= 1048576) {
-            return number_format($bytes / 1048576, 1) . ' MB';
+            return number_format($bytes / 1048576, 1).' MB';
         }
         if ($bytes >= 1024) {
-            return number_format($bytes / 1024, 0) . ' KB';
+            return number_format($bytes / 1024, 0).' KB';
         }
-        return $bytes . ' B';
+
+        return $bytes.' B';
     }
 }
-

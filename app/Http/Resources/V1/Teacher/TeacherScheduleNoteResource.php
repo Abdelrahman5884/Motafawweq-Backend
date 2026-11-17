@@ -20,15 +20,14 @@ class TeacherScheduleNoteResource extends BaseJsonResource
             : DayOfWeek::tryFrom((string) $this->day_of_week);
 
         return [
-            'id'        => $this->uuid,
-            'uuid'      => $this->uuid,
-            'day'       => $dayEnum ? $dayEnum->value : (string) $this->day_of_week,
-            'text'      => $this->note_text,
-            'time'      => $this->note_time,
-            'priority'  => $this->priority,
-            'isDone'    => (bool) $this->is_done,
+            'id' => $this->uuid,
+            'uuid' => $this->uuid,
+            'day' => $dayEnum ? $dayEnum->value : (string) $this->day_of_week,
+            'text' => $this->note_text,
+            'time' => $this->note_time,
+            'priority' => $this->priority,
+            'isDone' => (bool) $this->is_done,
             'createdAt' => $this->created_at?->toDateString(),
         ];
     }
 }
-

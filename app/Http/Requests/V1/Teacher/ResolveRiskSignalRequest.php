@@ -34,8 +34,7 @@ class ResolveRiskSignalRequest extends BaseApiRequest
     {
         return [
             'action' => ['required', 'string', Rule::in(['notify', 'notify_parent', 'resolve'])],
-            'notes'  => ['nullable', 'string', 'max:500'],
+            'notes' => ['nullable', 'string', 'max:500'],
         ];
     }
 }
-

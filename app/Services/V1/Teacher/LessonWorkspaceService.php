@@ -16,6 +16,7 @@ use Illuminate\Validation\ValidationException;
 class LessonWorkspaceService extends BaseService
 {
     private const MAX_GRAPH_DEPTH = 6;
+
     private const MAX_GRAPH_NODES = 150;
 
     public function __construct(
@@ -36,6 +37,7 @@ class LessonWorkspaceService extends BaseService
 
         $videoCount = $lessons->filter(function (Lesson $l) {
             $mode = $l->media_mode instanceof LessonMediaMode ? $l->media_mode->value : (string) $l->media_mode;
+
             return in_array($mode, ['video', 'embed'], true);
         })->count();
 
@@ -43,11 +45,11 @@ class LessonWorkspaceService extends BaseService
 
         return [
             'lessons' => $lessons,
-            'stats'   => [
+            'stats' => [
                 'totalLessons' => $lessons->count(),
-                'totalHours'   => $totalHours,
-                'videoCount'   => $videoCount,
-                'audioCount'   => $audioCount,
+                'totalHours' => $totalHours,
+                'videoCount' => $videoCount,
+                'audioCount' => $audioCount,
             ],
         ];
     }
@@ -75,6 +77,7 @@ class LessonWorkspaceService extends BaseService
             usort($chapters, function (array $a, array $b) {
                 $secA = (int) ($a['start_seconds'] ?? $a['startSeconds'] ?? 0);
                 $secB = (int) ($b['start_seconds'] ?? $b['startSeconds'] ?? 0);
+
                 return $secA <=> $secB;
             });
 
@@ -85,20 +88,20 @@ class LessonWorkspaceService extends BaseService
                 $timestamp = trim((string) ($item['timestamp'] ?? $item['timestamp_label'] ?? $this->formatTimestamp($startSecs)));
 
                 LessonChapter::create([
-                    'lesson_id'       => $lesson->id,
-                    'teacher_id'      => $teacher->id,
-                    'title_ar'        => $titleAr !== '' ? $titleAr : 'فصل دراسي',
-                    'title_en'        => $titleEn !== '' ? $titleEn : $titleAr,
-                    'start_seconds'   => $startSecs,
+                    'lesson_id' => $lesson->id,
+                    'teacher_id' => $teacher->id,
+                    'title_ar' => $titleAr !== '' ? $titleAr : 'فصل دراسي',
+                    'title_en' => $titleEn !== '' ? $titleEn : $titleAr,
+                    'start_seconds' => $startSecs,
                     'timestamp_label' => $timestamp,
-                    'display_order'   => $idx + 1,
+                    'display_order' => $idx + 1,
                 ]);
             }
 
             $this->logSecurityEvent(
                 'teacher.workspace.chapters_updated',
                 [
-                    'lesson_uuid'    => $lesson->uuid,
+                    'lesson_uuid' => $lesson->uuid,
                     'chapters_count' => count($chapters),
                 ],
                 'info',
@@ -123,6 +126,7 @@ class LessonWorkspaceService extends BaseService
             usort($segments, function (array $a, array $b) {
                 $secA = (int) ($a['start_seconds'] ?? $a['startSeconds'] ?? 0);
                 $secB = (int) ($b['start_seconds'] ?? $b['startSeconds'] ?? 0);
+
                 return $secA <=> $secB;
             });
 
@@ -136,21 +140,21 @@ class LessonWorkspaceService extends BaseService
                 $timestamp = trim((string) ($seg['timestamp'] ?? $seg['timestamp_label'] ?? $this->formatTimestamp($startSecs)));
 
                 LessonTranscript::create([
-                    'lesson_id'       => $lesson->id,
-                    'teacher_id'      => $teacher->id,
-                    'speaker'         => $speaker !== '' ? $speaker : 'المعلم',
-                    'start_seconds'   => $startSecs,
+                    'lesson_id' => $lesson->id,
+                    'teacher_id' => $teacher->id,
+                    'speaker' => $speaker !== '' ? $speaker : 'المعلم',
+                    'start_seconds' => $startSecs,
                     'timestamp_label' => $timestamp,
-                    'text_ar'         => $textAr,
-                    'text_en'         => $textEn,
-                    'display_order'   => $idx + 1,
+                    'text_ar' => $textAr,
+                    'text_en' => $textEn,
+                    'display_order' => $idx + 1,
                 ]);
             }
 
             $this->logSecurityEvent(
                 'teacher.workspace.transcript_updated',
                 [
-                    'lesson_uuid'    => $lesson->uuid,
+                    'lesson_uuid' => $lesson->uuid,
                     'segments_count' => count($segments),
                 ],
                 'info',
@@ -182,8 +186,8 @@ class LessonWorkspaceService extends BaseService
                 ['lesson_id' => $lesson->id],
                 [
                     'teacher_id' => $teacher->id,
-                    'tree_data'  => $sanitizedTree,
-                    'source'     => in_array($source, ['manual', 'ai'], true) ? $source : 'manual',
+                    'tree_data' => $sanitizedTree,
+                    'source' => in_array($source, ['manual', 'ai'], true) ? $source : 'manual',
                 ]
             );
 
@@ -192,7 +196,7 @@ class LessonWorkspaceService extends BaseService
                 [
                     'lesson_uuid' => $lesson->uuid,
                     'nodes_count' => $nodeCounter,
-                    'source'      => $graph->source,
+                    'source' => $graph->source,
                 ],
                 'info',
                 $graph
@@ -233,7 +237,7 @@ class LessonWorkspaceService extends BaseService
             : ($startSecs !== null ? $this->formatTimestamp($startSecs) : null);
 
         $children = [];
-        if (!empty($node['children']) && is_array($node['children'])) {
+        if (! empty($node['children']) && is_array($node['children'])) {
             foreach ($node['children'] as $child) {
                 if (is_array($child)) {
                     $children[] = $this->sanitizeAndValidateGraphNode($child, $depth + 1, $nodeCounter);
@@ -242,14 +246,14 @@ class LessonWorkspaceService extends BaseService
         }
 
         return array_filter([
-            'id'           => isset($node['id']) ? trim(strip_tags((string) $node['id'])) : 'node-' . $nodeCounter,
-            'label'        => $labelAr,
-            'labelAr'      => $labelAr,
-            'labelEn'      => $labelEn,
-            'summaryAr'    => $summaryAr,
+            'id' => isset($node['id']) ? trim(strip_tags((string) $node['id'])) : 'node-'.$nodeCounter,
+            'label' => $labelAr,
+            'labelAr' => $labelAr,
+            'labelEn' => $labelEn,
+            'summaryAr' => $summaryAr,
             'startSeconds' => $startSecs,
-            'timestamp'    => $timestamp,
-            'children'     => $children,
+            'timestamp' => $timestamp,
+            'children' => $children,
         ], fn ($val) => $val !== null);
     }
 
@@ -261,4 +265,3 @@ class LessonWorkspaceService extends BaseService
         return sprintf('%02d:%02d', $m, $s);
     }
 }
-

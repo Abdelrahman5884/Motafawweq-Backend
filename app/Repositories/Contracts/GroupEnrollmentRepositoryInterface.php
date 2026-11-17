@@ -17,4 +17,3 @@ interface GroupEnrollmentRepositoryInterface extends BaseRepositoryInterface
 
     public function countEnrolledInGroup(int $groupId): int;
 }
-

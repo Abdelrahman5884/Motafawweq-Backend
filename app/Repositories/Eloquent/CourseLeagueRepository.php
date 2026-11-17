@@ -55,8 +55,8 @@ class CourseLeagueRepository extends BaseRepository implements CourseLeagueRepos
             ->with(['course', 'studyGroup'])
             ->first();
 
-        if (!$league) {
-            throw (new ModelNotFoundException())->setModel(CourseLeague::class, [$uuid]);
+        if (! $league) {
+            throw (new ModelNotFoundException)->setModel(CourseLeague::class, [$uuid]);
         }
 
         $league->assertOwnedBy($teacher);
@@ -64,4 +64,3 @@ class CourseLeagueRepository extends BaseRepository implements CourseLeagueRepos
         return $league;
     }
 }
-

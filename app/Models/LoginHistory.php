@@ -21,7 +21,7 @@ class LoginHistory extends Model
     protected function casts(): array
     {
         return [
-            'status'     => LoginStatus::class,
+            'status' => LoginStatus::class,
             'created_at' => 'datetime',
         ];
     }
@@ -31,4 +31,3 @@ class LoginHistory extends Model
         return $this->belongsTo(User::class);
     }
 }
-

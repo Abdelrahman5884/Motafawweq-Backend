@@ -18,8 +18,10 @@ abstract class BaseService
      * Automatically rolls back on exception and logs.
      *
      * @template T
+     *
      * @param  Closure(): T  $callback
      * @return T
+     *
      * @throws Throwable
      */
     protected function transaction(Closure $callback): mixed
@@ -29,13 +31,14 @@ abstract class BaseService
         try {
             $result = $callback();
             DB::commit();
+
             return $result;
         } catch (Throwable $e) {
             DB::rollBack();
-            Log::error("[SERVICE-TRANSACTION-FAILED] " . $e->getMessage(), [
+            Log::error('[SERVICE-TRANSACTION-FAILED] '.$e->getMessage(), [
                 'exception' => get_class($e),
-                'file'      => $e->getFile(),
-                'line'      => $e->getLine(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
             ]);
             throw $e;
         }
@@ -50,9 +53,9 @@ abstract class BaseService
         try {
             $notifiable->notify($notification);
         } catch (Throwable $e) {
-            Log::error('[NOTIFICATION-FAILED] ' . get_class($notification), [
+            Log::error('[NOTIFICATION-FAILED] '.get_class($notification), [
                 'notifiable_id' => $notifiable->id ?? null,
-                'error'         => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
         }
     }

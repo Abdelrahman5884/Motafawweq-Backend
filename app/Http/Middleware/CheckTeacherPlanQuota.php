@@ -7,6 +7,7 @@ use App\Traits\ApiResponse;
 use App\Traits\HasSecurityAudit;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -28,7 +29,7 @@ class CheckTeacherPlanQuota
     {
         $user = $request->user();
 
-        if (!$user || !$user->isTeacher()) {
+        if (! $user || ! $user->isTeacher()) {
             return $this->forbiddenResponse(__('messages.forbidden'));
         }
 
@@ -37,7 +38,7 @@ class CheckTeacherPlanQuota
         if (Schema::hasTable('teacher_profiles') && $user->relationLoaded('teacherProfile') && $user->teacherProfile) {
             $tierValue = $user->teacherProfile->plan_tier?->value ?? $user->teacherProfile->plan_tier ?? 'plus';
         } elseif (Schema::hasTable('teacher_profiles')) {
-            $profileTier = \Illuminate\Support\Facades\DB::table('teacher_profiles')
+            $profileTier = DB::table('teacher_profiles')
                 ->where('user_id', $user->id)
                 ->value('plan_tier');
             if ($profileTier) {
@@ -51,14 +52,14 @@ class CheckTeacherPlanQuota
             case 'courses':
                 $maxCourses = $tier->maxCourses();
                 if ($maxCourses !== null && Schema::hasTable('courses')) {
-                    $activeCoursesCount = \Illuminate\Support\Facades\DB::table('courses')
+                    $activeCoursesCount = DB::table('courses')
                         ->where('teacher_id', $user->id)
                         ->whereNull('deleted_at')
                         ->count();
 
                     if ($activeCoursesCount >= $maxCourses) {
                         return $this->quotaExceededResponse($user->id, $tier, $feature, __('messages.quota_courses_exceeded', [
-                            'max'  => $maxCourses,
+                            'max' => $maxCourses,
                             'plan' => $tier->label(),
                         ]));
                     }
@@ -68,7 +69,7 @@ class CheckTeacherPlanQuota
             case 'students':
                 $maxStudents = $tier->maxStudents();
                 if ($maxStudents !== null && Schema::hasTable('group_enrollments') && Schema::hasTable('study_groups')) {
-                    $enrolledCount = \Illuminate\Support\Facades\DB::table('group_enrollments')
+                    $enrolledCount = DB::table('group_enrollments')
                         ->join('study_groups', 'study_groups.id', '=', 'group_enrollments.study_group_id')
                         ->where('study_groups.teacher_id', $user->id)
                         ->where('group_enrollments.status', 'enrolled')
@@ -76,7 +77,7 @@ class CheckTeacherPlanQuota
 
                     if ($enrolledCount >= $maxStudents) {
                         return $this->quotaExceededResponse($user->id, $tier, $feature, __('messages.quota_students_exceeded', [
-                            'max'  => $maxStudents,
+                            'max' => $maxStudents,
                             'plan' => $tier->label(),
                         ]));
                     }
@@ -84,7 +85,7 @@ class CheckTeacherPlanQuota
                 break;
 
             case 'certificates':
-                if (!$tier->allowsCertificates()) {
+                if (! $tier->allowsCertificates()) {
                     return $this->quotaExceededResponse($user->id, $tier, $feature, __('messages.quota_certificates_not_allowed', [
                         'plan' => $tier->label(),
                     ]));
@@ -92,7 +93,7 @@ class CheckTeacherPlanQuota
                 break;
 
             case 'leagues':
-                if (!$tier->allowsCourseLeagues()) {
+                if (! $tier->allowsCourseLeagues()) {
                     return $this->quotaExceededResponse($user->id, $tier, $feature, __('messages.quota_leagues_not_allowed', [
                         'plan' => $tier->label(),
                     ]));
@@ -100,7 +101,7 @@ class CheckTeacherPlanQuota
                 break;
 
             case 'whatsapp_alerts':
-                if (!$tier->allowsWhatsappParentAlerts()) {
+                if (! $tier->allowsWhatsappParentAlerts()) {
                     return $this->quotaExceededResponse($user->id, $tier, $feature, __('messages.quota_whatsapp_not_allowed', [
                         'plan' => $tier->label(),
                     ]));
@@ -114,18 +115,17 @@ class CheckTeacherPlanQuota
     protected function quotaExceededResponse(int $userId, TeacherPlanTier $tier, string $feature, string $message): Response
     {
         $this->logSecurityEvent('teacher.plan_quota_exceeded', [
-            'user_id'   => $userId,
+            'user_id' => $userId,
             'plan_tier' => $tier->value,
-            'feature'   => $feature,
+            'feature' => $feature,
         ], 'info');
 
         return response()->json([
-            'success'      => false,
-            'message'      => $message,
-            'error_code'   => 'PLAN_QUOTA_EXCEEDED',
+            'success' => false,
+            'message' => $message,
+            'error_code' => 'PLAN_QUOTA_EXCEEDED',
             'current_plan' => $tier->value,
-            'feature'      => $feature,
+            'feature' => $feature,
         ], Response::HTTP_FORBIDDEN);
     }
 }
-

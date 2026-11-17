@@ -52,7 +52,7 @@ class TeacherHomeworkService extends BaseService
         // Resolve Course if provided
         $courseId = null;
         $courseTitle = trim((string) ($data['course_title_ar'] ?? ''));
-        if (!empty($data['course_id'])) {
+        if (! empty($data['course_id'])) {
             $course = Course::where('uuid', $data['course_id'])
                 ->orWhere('id', is_numeric($data['course_id']) ? (int) $data['course_id'] : 0)
                 ->first();
@@ -66,7 +66,7 @@ class TeacherHomeworkService extends BaseService
         // Resolve Lesson if provided
         $lessonId = null;
         $lessonTitle = trim((string) ($data['lesson_title_ar'] ?? ''));
-        if (!empty($data['lesson_id'])) {
+        if (! empty($data['lesson_id'])) {
             $lesson = Lesson::where('uuid', $data['lesson_id'])
                 ->orWhere('id', is_numeric($data['lesson_id']) ? (int) $data['lesson_id'] : 0)
                 ->first();
@@ -96,10 +96,10 @@ class TeacherHomeworkService extends BaseService
             $type = HomeworkType::tryFrom($typeStr) ?? HomeworkType::FILE;
 
             $maxGrade = max(1, (int) ($data['max_grade'] ?? 20));
-            $dueDate = !empty($data['due_date']) ? Carbon::parse($data['due_date'])->toDateString() : null;
-            $dueTime = !empty($data['due_time']) ? trim((string) $data['due_time']) : '23:59';
-            $targetLocationId = !empty($data['target_location_id']) ? trim((string) $data['target_location_id']) : 'all';
-            $targetLocationAr = !empty($data['target_location_ar']) ? trim((string) $data['target_location_ar']) : 'جميع الأماكن (كل السناتر + الأونلاين)';
+            $dueDate = ! empty($data['due_date']) ? Carbon::parse($data['due_date'])->toDateString() : null;
+            $dueTime = ! empty($data['due_time']) ? trim((string) $data['due_time']) : '23:59';
+            $targetLocationId = ! empty($data['target_location_id']) ? trim((string) $data['target_location_id']) : 'all';
+            $targetLocationAr = ! empty($data['target_location_ar']) ? trim((string) $data['target_location_ar']) : 'جميع الأماكن (كل السناتر + الأونلاين)';
 
             // Auto-calculate total assigned students if not explicitly given
             $totalAssigned = isset($data['total_assigned']) ? (int) $data['total_assigned'] : 0;
@@ -111,31 +111,31 @@ class TeacherHomeworkService extends BaseService
 
             /** @var Homework $homework */
             $homework = Homework::create([
-                'teacher_id'         => $teacher->id,
-                'course_id'          => $courseId,
-                'course_title_ar'    => $courseTitle ?: 'المقرر الدراسي',
-                'lesson_id'          => $lessonId,
-                'lesson_title_ar'    => $lessonTitle,
-                'title_ar'           => trim(strip_tags((string) ($data['title_ar'] ?? 'واجب جديد'))),
+                'teacher_id' => $teacher->id,
+                'course_id' => $courseId,
+                'course_title_ar' => $courseTitle ?: 'المقرر الدراسي',
+                'lesson_id' => $lessonId,
+                'lesson_title_ar' => $lessonTitle,
+                'title_ar' => trim(strip_tags((string) ($data['title_ar'] ?? 'واجب جديد'))),
                 'target_location_id' => $targetLocationId,
                 'target_location_ar' => $targetLocationAr,
-                'type'               => $type,
-                'file_type'          => $fileType,
-                'attachment_name'    => $attachmentName,
-                'attachment_path'    => $attachmentPath,
-                'text_content'       => !empty($data['text_content']) ? trim((string) $data['text_content']) : null,
-                'due_date'           => $dueDate,
-                'due_time'           => $dueTime,
-                'max_grade'          => $maxGrade,
-                'total_assigned'     => $totalAssigned,
+                'type' => $type,
+                'file_type' => $fileType,
+                'attachment_name' => $attachmentName,
+                'attachment_path' => $attachmentPath,
+                'text_content' => ! empty($data['text_content']) ? trim((string) $data['text_content']) : null,
+                'due_date' => $dueDate,
+                'due_time' => $dueTime,
+                'max_grade' => $maxGrade,
+                'total_assigned' => $totalAssigned,
             ]);
 
             $this->logSecurityEvent(
                 'homework_created',
                 [
-                    'teacher_id'    => $teacher->id,
+                    'teacher_id' => $teacher->id,
                     'homework_uuid' => $homework->uuid,
-                    'title_ar'      => $homework->title_ar,
+                    'title_ar' => $homework->title_ar,
                 ],
                 'info',
                 $homework
@@ -156,7 +156,7 @@ class TeacherHomeworkService extends BaseService
         $courseId = $homework->course_id;
         $courseTitle = $homework->course_title_ar;
         if (array_key_exists('course_id', $data)) {
-            if (!empty($data['course_id'])) {
+            if (! empty($data['course_id'])) {
                 $course = Course::where('uuid', $data['course_id'])
                     ->orWhere('id', is_numeric($data['course_id']) ? (int) $data['course_id'] : 0)
                     ->first();
@@ -175,7 +175,7 @@ class TeacherHomeworkService extends BaseService
         $lessonId = $homework->lesson_id;
         $lessonTitle = $homework->lesson_title_ar;
         if (array_key_exists('lesson_id', $data)) {
-            if (!empty($data['lesson_id'])) {
+            if (! empty($data['lesson_id'])) {
                 $lesson = Lesson::where('uuid', $data['lesson_id'])
                     ->orWhere('id', is_numeric($data['lesson_id']) ? (int) $data['lesson_id'] : 0)
                     ->first();
@@ -207,13 +207,13 @@ class TeacherHomeworkService extends BaseService
             }
 
             $updatePayload = [
-                'course_id'       => $courseId,
+                'course_id' => $courseId,
                 'course_title_ar' => $courseTitle,
-                'lesson_id'       => $lessonId,
+                'lesson_id' => $lessonId,
                 'lesson_title_ar' => $lessonTitle,
                 'attachment_name' => $attachmentName,
                 'attachment_path' => $attachmentPath,
-                'file_type'       => $fileType,
+                'file_type' => $fileType,
             ];
 
             if (isset($data['title_ar'])) {
@@ -249,7 +249,7 @@ class TeacherHomeworkService extends BaseService
             $this->logSecurityEvent(
                 'homework_updated',
                 [
-                    'teacher_id'    => $teacher->id,
+                    'teacher_id' => $teacher->id,
                     'homework_uuid' => $homework->uuid,
                 ],
                 'info',
@@ -271,9 +271,9 @@ class TeacherHomeworkService extends BaseService
             $this->logSecurityEvent(
                 'homework_deleted',
                 [
-                    'teacher_id'    => $teacher->id,
+                    'teacher_id' => $teacher->id,
                     'homework_uuid' => $homework->uuid,
-                    'title_ar'      => $homework->title_ar,
+                    'title_ar' => $homework->title_ar,
                 ],
                 'warning',
                 $homework
@@ -294,7 +294,7 @@ class TeacherHomeworkService extends BaseService
         $submissions = $this->submissionRepository->getSubmissionsForHomework($homework->id, $filters);
 
         return [
-            'homework'    => $homework,
+            'homework' => $homework,
             'submissions' => $submissions,
         ];
     }
@@ -333,12 +333,12 @@ class TeacherHomeworkService extends BaseService
             $feedback = isset($data['feedback_ar']) ? trim(strip_tags((string) $data['feedback_ar'])) : $submission->feedback_ar;
 
             $submission->update([
-                'status'      => $status,
-                'score'       => $score,
-                'max_score'   => $maxGrade,
+                'status' => $status,
+                'score' => $score,
+                'max_score' => $maxGrade,
                 'feedback_ar' => $feedback,
-                'graded_at'   => Carbon::now(),
-                'graded_by'   => $teacher->id,
+                'graded_at' => Carbon::now(),
+                'graded_by' => $teacher->id,
             ]);
 
             // Recalculate parent homework submission metrics
@@ -347,11 +347,11 @@ class TeacherHomeworkService extends BaseService
             $submission->logSecurityEvent(
                 'homework_submission_graded',
                 [
-                    'teacher_id'      => $teacher->id,
-                    'homework_uuid'   => $homework->uuid,
+                    'teacher_id' => $teacher->id,
+                    'homework_uuid' => $homework->uuid,
                     'submission_uuid' => $submission->uuid,
-                    'status'          => $status->value,
-                    'score'           => $score,
+                    'status' => $status->value,
+                    'score' => $score,
                 ],
                 'info',
                 $submission
@@ -372,17 +372,17 @@ class TeacherHomeworkService extends BaseService
 
         $allowedMimes = [
             'application/pdf' => 'pdf',
-            'image/jpeg'      => 'jpg',
-            'image/png'       => 'png',
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
         ];
 
-        if (!isset($allowedMimes[$detectedMime])) {
+        if (! isset($allowedMimes[$detectedMime])) {
             $this->logSecurityEvent(
                 'malicious_file_upload_blocked',
                 [
-                    'user_id'       => $user->id,
+                    'user_id' => $user->id,
                     'detected_mime' => $detectedMime,
-                    'filename'      => $file->getClientOriginalName(),
+                    'filename' => $file->getClientOriginalName(),
                 ],
                 'warning'
             );
@@ -393,12 +393,12 @@ class TeacherHomeworkService extends BaseService
         }
 
         $extension = $allowedMimes[$detectedMime];
-        $storagePath = "{$subPath}/" . Str::uuid() . ".{$extension}";
+        $storagePath = "{$subPath}/".Str::uuid().".{$extension}";
         Storage::disk('local')->put($storagePath, file_get_contents($file->getRealPath()));
 
         return [
-            'path'      => $storagePath,
-            'name'      => $file->getClientOriginalName(),
+            'path' => $storagePath,
+            'name' => $file->getClientOriginalName(),
             'file_type' => $extension === 'pdf' ? 'pdf' : 'image',
         ];
     }

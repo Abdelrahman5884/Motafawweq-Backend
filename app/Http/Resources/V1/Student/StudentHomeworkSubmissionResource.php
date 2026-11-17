@@ -30,20 +30,19 @@ class StudentHomeworkSubmissionResource extends BaseJsonResource
         }
 
         return [
-            'id'             => $this->uuid,
-            'homeworkId'     => $this->whenLoaded('homework', fn () => $this->homework?->uuid),
-            'status'         => $status,
-            'statusLabelAr'  => $statusLabelAr,
+            'id' => $this->uuid,
+            'homeworkId' => $this->whenLoaded('homework', fn () => $this->homework?->uuid),
+            'status' => $status,
+            'statusLabelAr' => $statusLabelAr,
             'submissionType' => $this->submission_type,
             'attachmentName' => $this->attachment_name,
-            'attachmentUrl'  => $attachmentUrl,
-            'solutionText'   => $this->solution_text,
-            'score'          => $this->score !== null ? (float) $this->score : null,
-            'maxScore'       => (int) $this->max_score,
-            'feedbackAr'     => $this->feedback_ar,
-            'submittedAt'    => $this->formatDate($this->submitted_at),
-            'gradedAt'       => $this->formatDate($this->graded_at),
+            'attachmentUrl' => $attachmentUrl,
+            'solutionText' => $this->solution_text,
+            'score' => $this->score !== null ? (float) $this->score : null,
+            'maxScore' => (int) $this->max_score,
+            'feedbackAr' => $this->feedback_ar,
+            'submittedAt' => $this->formatDate($this->submitted_at),
+            'gradedAt' => $this->formatDate($this->graded_at),
         ];
     }
 }
-

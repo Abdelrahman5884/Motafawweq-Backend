@@ -32,8 +32,8 @@ class TeacherAttendanceController extends BaseApiController
 
         return $this->successResponse(
             [
-                'record'          => new GroupAttendanceRecordResource($result['record']),
-                'session'         => new GroupAttendanceSessionResource($result['session']),
+                'record' => new GroupAttendanceRecordResource($result['record']),
+                'session' => new GroupAttendanceSessionResource($result['session']),
                 'alreadyRecorded' => $result['alreadyRecorded'],
             ],
             $result['alreadyRecorded']
@@ -95,10 +95,9 @@ class TeacherAttendanceController extends BaseApiController
         return $this->successResponse(
             [
                 'session' => new GroupAttendanceSessionResource($details['session']),
-                'roster'  => $details['roster'],
+                'roster' => $details['roster'],
             ],
             __('messages.attendance_session_fetched')
         );
     }
 }
-

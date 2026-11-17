@@ -18,7 +18,18 @@ class StudentHomeworkController extends BaseApiController
     ) {}
 
     /**
-     * POST /api/v1/homeworks/{uuid}/submit
+     * GET /api/v1/student/homeworks
+     * List accessible homeworks for the student.
+     */
+    public function index(): JsonResponse
+    {
+        $homeworks = $this->studentHomeworkService->listHomeworks($this->authenticatedUser());
+
+        return $this->successResponse($homeworks);
+    }
+
+    /**
+     * POST /api/v1/student/homeworks/{uuid}/submit (and legacy /api/v1/homeworks/{uuid}/submit)
      * Submit homework solution by authenticated student.
      */
     public function submit(SubmitHomeworkRequest $request, string $uuid): JsonResponse
@@ -39,26 +50,24 @@ class StudentHomeworkController extends BaseApiController
     }
 
     /**
-     * GET /api/v1/homeworks/submissions/{submissionUuid}/attachment
-     * Student streams their own submitted solution attachment.
+     * GET /api/v1/student/homeworks/submissions/{submissionUuid}/attachment
+     * Student streams their own submitted solution attachment (strictly enforces ownership).
      */
     public function downloadSubmissionAttachment(string $submissionUuid): BinaryFileResponse
     {
         $student = $this->authenticatedUser();
 
         /** @var HomeworkSubmission $submission */
-        $submission = HomeworkSubmission::where('uuid', $submissionUuid)
-            ->where('student_id', $student->id)
-            ->firstOrFail();
+        $submission = HomeworkSubmission::where('uuid', $submissionUuid)->firstOrFail();
+        $submission->assertOwnedByStudent($student);
 
-        if (!$submission->attachment_path || !Storage::disk('local')->exists($submission->attachment_path)) {
+        if (! $submission->attachment_path || ! Storage::disk('local')->exists($submission->attachment_path)) {
             abort(404, __('messages.file_not_found'));
         }
 
         return response()->file(
             Storage::disk('local')->path($submission->attachment_path),
-            ['Content-Disposition' => 'inline; filename="' . ($submission->attachment_name ?: 'my-solution') . '"']
+            ['Content-Disposition' => 'inline; filename="'.($submission->attachment_name ?: 'my-solution').'"']
         );
     }
 }
-

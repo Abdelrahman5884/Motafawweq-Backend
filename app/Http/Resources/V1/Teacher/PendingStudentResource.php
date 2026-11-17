@@ -27,19 +27,18 @@ class PendingStudentResource extends BaseJsonResource
             : JoinMethod::tryFrom((string) $this->join_method);
 
         return [
-            'id'           => $this->uuid,
-            'studentId'    => $student?->id,
-            'studentCode'  => $student?->student_code,
-            'name'         => $nameEn,
-            'nameAr'       => $nameAr,
-            'phone'        => $phone,
+            'id' => $this->uuid,
+            'studentId' => $student?->id,
+            'studentCode' => $student?->student_code,
+            'name' => $nameEn,
+            'nameAr' => $nameAr,
+            'phone' => $phone,
             'parentNameAr' => $parentName,
-            'parentPhone'  => $parentPhone,
-            'method'       => $methodEnum ? $methodEnum->labelAr() : 'كود الانضمام',
-            'joinMethod'   => $methodEnum ? $methodEnum->value : (string) $this->join_method,
-            'requestedAt'  => $this->formatDate($this->requested_at ?? $this->created_at),
-            'avatar'       => $student?->avatar_url ?? 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=100&auto=format&fit=crop&q=80',
+            'parentPhone' => $parentPhone,
+            'method' => $methodEnum ? $methodEnum->labelAr() : 'كود الانضمام',
+            'joinMethod' => $methodEnum ? $methodEnum->value : (string) $this->join_method,
+            'requestedAt' => $this->formatDate($this->requested_at ?? $this->created_at),
+            'avatar' => $student?->avatar_url ?? 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=100&auto=format&fit=crop&q=80',
         ];
     }
 }
-

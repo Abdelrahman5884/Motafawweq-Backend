@@ -154,4 +154,3 @@ class TeacherExamController extends BaseApiController
         );
     }
 }
-

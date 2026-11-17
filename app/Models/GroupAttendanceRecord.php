@@ -30,9 +30,9 @@ class GroupAttendanceRecord extends Model
     protected function casts(): array
     {
         return [
-            'status'          => AttendanceStatus::class,
+            'status' => AttendanceStatus::class,
             'recorded_method' => AttendanceRecordMethod::class,
-            'scanned_at'      => 'datetime',
+            'scanned_at' => 'datetime',
         ];
     }
 
@@ -70,4 +70,3 @@ class GroupAttendanceRecord extends Model
         return $this->belongsTo(User::class, 'recorded_by');
     }
 }
-

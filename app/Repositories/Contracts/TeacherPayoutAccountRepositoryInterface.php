@@ -14,4 +14,3 @@ interface TeacherPayoutAccountRepositoryInterface extends BaseRepositoryInterfac
 
     public function seedDefaultsIfEmpty(User $teacher): Collection;
 }
-

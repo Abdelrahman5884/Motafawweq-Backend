@@ -47,7 +47,7 @@ class UpdateCourseLeagueRequest extends BaseApiRequest
             }
         }
 
-        if (!empty($merged)) {
+        if (! empty($merged)) {
             $this->merge($merged);
         }
     }
@@ -55,12 +55,11 @@ class UpdateCourseLeagueRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'title_ar'       => ['sometimes', 'required', 'string', 'min:2', 'max:250'],
+            'title_ar' => ['sometimes', 'required', 'string', 'min:2', 'max:250'],
             'study_group_id' => ['sometimes', 'nullable'],
-            'duration'       => ['sometimes', 'string', Rule::in(LeagueDuration::values())],
-            'ends_at'        => ['sometimes', 'nullable', 'date'],
-            'is_active'      => ['sometimes', 'boolean'],
+            'duration' => ['sometimes', 'string', Rule::in(LeagueDuration::values())],
+            'ends_at' => ['sometimes', 'nullable', 'date'],
+            'is_active' => ['sometimes', 'boolean'],
         ];
     }
 }
-

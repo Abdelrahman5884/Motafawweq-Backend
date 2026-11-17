@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ExamStatus;
+use App\Enums\ExamSubmissionStatus;
 use App\Traits\BelongsToTeacher;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,7 +13,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Exam extends Model
 {
-    use HasFactory, SoftDeletes, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'teacher_id',
@@ -40,18 +41,18 @@ class Exam extends Model
     protected function casts(): array
     {
         return [
-            'status'            => ExamStatus::class,
-            'show_results'      => 'boolean',
-            'is_bubble_sheet'   => 'boolean',
-            'due_date'          => 'date:Y-m-d',
-            'starts_at'         => 'datetime',
-            'duration_minutes'  => 'integer',
-            'full_mark'         => 'integer',
-            'pass_score'        => 'integer',
-            'questions_count'   => 'integer',
-            'avg_score'         => 'float',
-            'pass_rate'         => 'float',
-            'top_score_count'   => 'integer',
+            'status' => ExamStatus::class,
+            'show_results' => 'boolean',
+            'is_bubble_sheet' => 'boolean',
+            'due_date' => 'date:Y-m-d',
+            'starts_at' => 'datetime',
+            'duration_minutes' => 'integer',
+            'full_mark' => 'integer',
+            'pass_score' => 'integer',
+            'questions_count' => 'integer',
+            'avg_score' => 'float',
+            'pass_rate' => 'float',
+            'top_score_count' => 'integer',
             'submissions_count' => 'integer',
         ];
     }
@@ -81,7 +82,7 @@ class Exam extends Model
 
         $this->update([
             'questions_count' => $count,
-            'full_mark'       => $totalPoints > 0 ? $totalPoints : $this->full_mark,
+            'full_mark' => $totalPoints > 0 ? $totalPoints : $this->full_mark,
         ]);
 
         return $this;
@@ -92,7 +93,7 @@ class Exam extends Model
      */
     public function recalculatePerformanceMetrics(): self
     {
-        $gradedQuery = $this->submissions()->where('status', \App\Enums\ExamSubmissionStatus::GRADED);
+        $gradedQuery = $this->submissions()->where('status', ExamSubmissionStatus::GRADED);
         $count = $gradedQuery->count();
         $avgScore = $count > 0 ? (float) $gradedQuery->avg('score') : 0.00;
         $passedCount = (clone $gradedQuery)->where('is_passed', true)->count();
@@ -102,12 +103,11 @@ class Exam extends Model
 
         $this->update([
             'submissions_count' => $count,
-            'avg_score'         => round($avgScore, 2),
-            'pass_rate'         => $passRate,
-            'top_score_count'   => $topScoreCount,
+            'avg_score' => round($avgScore, 2),
+            'pass_rate' => $passRate,
+            'top_score_count' => $topScoreCount,
         ]);
 
         return $this;
     }
 }
-

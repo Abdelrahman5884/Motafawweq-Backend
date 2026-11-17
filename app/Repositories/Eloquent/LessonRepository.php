@@ -22,17 +22,17 @@ class LessonRepository extends BaseRepository implements LessonRepositoryInterfa
             ->forTeacher($teacherId)
             ->with(['course', 'attachments', 'chapters', 'transcriptSegments', 'conceptGraph']);
 
-        if (!empty($filters['course_id'])) {
+        if (! empty($filters['course_id'])) {
             $query->where('course_id', (int) $filters['course_id']);
         }
 
-        if (!empty($filters['course_uuid'])) {
+        if (! empty($filters['course_uuid'])) {
             $query->whereHas('course', function ($q) use ($filters) {
                 $q->where('uuid', $filters['course_uuid']);
             });
         }
 
-        if (!empty($filters['status'])) {
+        if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
 
@@ -58,8 +58,8 @@ class LessonRepository extends BaseRepository implements LessonRepositoryInterfa
             ->where('uuid', $uuid)
             ->first();
 
-        if (!$lesson) {
-            throw (new ModelNotFoundException())->setModel(Lesson::class, [$uuid]);
+        if (! $lesson) {
+            throw (new ModelNotFoundException)->setModel(Lesson::class, [$uuid]);
         }
 
         $lesson->assertOwnedBy($teacher);
@@ -76,8 +76,8 @@ class LessonRepository extends BaseRepository implements LessonRepositoryInterfa
             ->where('lesson_id', $lesson->id)
             ->first();
 
-        if (!$attachment) {
-            throw (new ModelNotFoundException())->setModel(LessonAttachment::class, [$attachmentUuid]);
+        if (! $attachment) {
+            throw (new ModelNotFoundException)->setModel(LessonAttachment::class, [$attachmentUuid]);
         }
 
         $attachment->assertOwnedBy($teacher);
@@ -85,4 +85,3 @@ class LessonRepository extends BaseRepository implements LessonRepositoryInterfa
         return $attachment;
     }
 }
-

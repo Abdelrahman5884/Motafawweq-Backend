@@ -8,7 +8,7 @@ class SubmitHomeworkRequest extends BaseApiRequest
 {
     public function authorize(): bool
     {
-        return $this->user() !== null;
+        return (bool) $this->user()?->isStudent();
     }
 
     protected function prepareForValidation(): void
@@ -17,20 +17,16 @@ class SubmitHomeworkRequest extends BaseApiRequest
 
         $submissionType = $this->input('submission_type') ?? $this->input('submissionType');
         $solutionText = $this->input('solution_text') ?? $this->input('solutionText');
-        $locationAr = $this->input('location_ar') ?? $this->input('locationAr');
 
         $merged = [];
         if ($submissionType !== null) {
             $merged['submission_type'] = strtolower(trim((string) $submissionType));
         }
         if ($solutionText !== null) {
-            $merged['solution_text'] = trim((string) $solutionText);
-        }
-        if ($locationAr !== null) {
-            $merged['location_ar'] = trim(strip_tags((string) $locationAr));
+            $merged['solution_text'] = trim(strip_tags((string) $solutionText));
         }
 
-        if (!empty($merged)) {
+        if (! empty($merged)) {
             $this->merge($merged);
         }
     }
@@ -39,11 +35,9 @@ class SubmitHomeworkRequest extends BaseApiRequest
     {
         return [
             'submission_type' => ['nullable', 'string', 'in:pdf,image,text'],
-            'solution_text'   => ['nullable', 'string'],
-            'location_ar'     => ['nullable', 'string', 'max:150'],
-            'file'            => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
-            'attachment'      => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
+            'solution_text' => ['nullable', 'string', 'max:20000'],
+            'file' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
         ];
     }
 }
-

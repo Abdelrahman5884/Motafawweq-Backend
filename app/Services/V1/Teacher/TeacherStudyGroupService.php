@@ -3,7 +3,6 @@
 namespace App\Services\V1\Teacher;
 
 use App\Enums\DayOfWeek;
-use App\Enums\ScheduleNotePriority;
 use App\Models\Course;
 use App\Models\GroupScheduleSlot;
 use App\Models\StudyGroup;
@@ -13,7 +12,6 @@ use App\Repositories\Contracts\StudyGroupRepositoryInterface;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -61,14 +59,14 @@ class TeacherStudyGroupService extends BaseService
 
             // Determine join code
             $joinCode = null;
-            if (!empty($data['join_code']) || !empty($data['joinCode'])) {
+            if (! empty($data['join_code']) || ! empty($data['joinCode'])) {
                 $rawCode = strtoupper(trim((string) ($data['join_code'] ?? $data['joinCode'])));
-                if (!StudyGroup::where('join_code', $rawCode)->exists()) {
+                if (! StudyGroup::where('join_code', $rawCode)->exists()) {
                     $joinCode = $rawCode;
                 }
             }
-            if (!$joinCode) {
-                $prefix = !empty($subjectAr) ? Str::substr($subjectAr, 0, 3) : 'GRP';
+            if (! $joinCode) {
+                $prefix = ! empty($subjectAr) ? Str::substr($subjectAr, 0, 3) : 'GRP';
                 $joinCode = StudyGroup::generateUniqueJoinCode($prefix);
             }
 
@@ -91,22 +89,22 @@ class TeacherStudyGroupService extends BaseService
 
             /** @var StudyGroup $group */
             $group = StudyGroup::create([
-                'teacher_id'   => $teacher->id,
-                'course_id'    => $courseId,
-                'name_ar'      => $nameAr,
-                'name_en'      => $nameEn,
-                'subject_ar'   => $subjectAr,
-                'subject_en'   => $subjectEn,
-                'grade_ar'     => $gradeAr,
-                'grade_en'     => $gradeEn,
-                'center_name'  => $centerName,
-                'hall_name'    => $hallName,
-                'schedule_ar'  => $scheduleAr,
-                'schedule_en'  => $scheduleEn,
+                'teacher_id' => $teacher->id,
+                'course_id' => $courseId,
+                'name_ar' => $nameAr,
+                'name_en' => $nameEn,
+                'subject_ar' => $subjectAr,
+                'subject_en' => $subjectEn,
+                'grade_ar' => $gradeAr,
+                'grade_en' => $gradeEn,
+                'center_name' => $centerName,
+                'hall_name' => $hallName,
+                'schedule_ar' => $scheduleAr,
+                'schedule_en' => $scheduleEn,
                 'max_students' => $maxStudents,
-                'price_egp'    => $priceEgp,
-                'join_code'    => $joinCode,
-                'status'       => 'active',
+                'price_egp' => $priceEgp,
+                'join_code' => $joinCode,
+                'status' => 'active',
             ]);
 
             // Save schedule slots
@@ -117,8 +115,8 @@ class TeacherStudyGroupService extends BaseService
 
             $this->logSecurityEvent('teacher.group.created', [
                 'group_uuid' => $group->uuid,
-                'join_code'  => $group->join_code,
-                'center'     => $group->center_name,
+                'join_code' => $group->join_code,
+                'center' => $group->center_name,
             ], 'info', $group);
 
             return $group->load('scheduleSlots');
@@ -176,7 +174,7 @@ class TeacherStudyGroupService extends BaseService
                 $fillableData['status'] = in_array($data['status'], ['active', 'archived'], true) ? $data['status'] : 'active';
             }
 
-            if (!empty($fillableData)) {
+            if (! empty($fillableData)) {
                 $group->update($fillableData);
             }
 
@@ -186,18 +184,18 @@ class TeacherStudyGroupService extends BaseService
                 $this->syncGroupSlots($group, $teacher, $rawSlots);
             } elseif (($fillableData['status'] ?? null) === 'active') {
                 $existingSlots = $group->scheduleSlots()->get()->map(fn ($s) => [
-                    'day'        => $s->day_of_week instanceof DayOfWeek ? $s->day_of_week->value : (string) $s->day_of_week,
+                    'day' => $s->day_of_week instanceof DayOfWeek ? $s->day_of_week->value : (string) $s->day_of_week,
                     'start_time' => $s->start_time,
-                    'end_time'   => $s->end_time,
+                    'end_time' => $s->end_time,
                 ])->all();
-                if (!empty($existingSlots)) {
+                if (! empty($existingSlots)) {
                     $this->assertNoScheduleOverlap($teacher, $existingSlots, $group->id, true);
                 }
             }
 
             $this->logSecurityEvent('teacher.group.updated', [
                 'group_uuid' => $group->uuid,
-                'changes'    => array_keys($fillableData),
+                'changes' => array_keys($fillableData),
             ], 'info', $group);
 
             return $group->fresh(['scheduleSlots']);
@@ -212,7 +210,7 @@ class TeacherStudyGroupService extends BaseService
         // Enforce ownership BEFORE opening transaction
         $group = $this->groupRepository->findByUuidForTeacher($uuid, $teacher);
 
-        return $this->transaction(function () use ($teacher, $group) {
+        return $this->transaction(function () use ($group) {
             $groupUuid = $group->uuid;
             $group->delete();
 
@@ -232,17 +230,17 @@ class TeacherStudyGroupService extends BaseService
         // Enforce ownership BEFORE opening transaction
         $group = $this->groupRepository->findByUuidForTeacher($uuid, $teacher);
 
-        return $this->transaction(function () use ($teacher, $group) {
+        return $this->transaction(function () use ($group) {
             $oldCode = $group->join_code;
-            $prefix = !empty($group->subject_ar) ? Str::substr($group->subject_ar, 0, 3) : 'GRP';
+            $prefix = ! empty($group->subject_ar) ? Str::substr($group->subject_ar, 0, 3) : 'GRP';
             $newCode = StudyGroup::generateUniqueJoinCode($prefix);
 
             $group->update(['join_code' => $newCode]);
 
             $this->logSecurityEvent('teacher.group.code_regenerated', [
                 'group_uuid' => $group->uuid,
-                'old_code'   => substr($oldCode, 0, 4) . '***',
-                'new_code'   => $newCode,
+                'old_code' => substr($oldCode, 0, 4).'***',
+                'new_code' => $newCode,
             ], 'info', $group);
 
             return $group->fresh(['scheduleSlots']);
@@ -264,12 +262,12 @@ class TeacherStudyGroupService extends BaseService
         GroupScheduleSlot::where('study_group_id', $group->id)->delete();
 
         foreach ($slots as $slot) {
-            if (!is_array($slot)) {
+            if (! is_array($slot)) {
                 continue;
             }
 
             $day = strtolower(trim((string) ($slot['day'] ?? $slot['day_of_week'] ?? '')));
-            if (!in_array($day, DayOfWeek::values(), true)) {
+            if (! in_array($day, DayOfWeek::values(), true)) {
                 continue;
             }
 
@@ -279,11 +277,11 @@ class TeacherStudyGroupService extends BaseService
 
             GroupScheduleSlot::create([
                 'study_group_id' => $group->id,
-                'teacher_id'     => $teacher->id,
-                'day_of_week'    => $day,
-                'start_time'     => $startTime,
-                'end_time'       => $endTime,
-                'hall_name'      => $hall,
+                'teacher_id' => $teacher->id,
+                'day_of_week' => $day,
+                'start_time' => $startTime,
+                'end_time' => $endTime,
+                'hall_name' => $hall,
             ]);
         }
     }
@@ -301,23 +299,23 @@ class TeacherStudyGroupService extends BaseService
         bool $checkActiveGroups = true
     ): void {
         $dayNamesAr = [
-            'saturday'  => 'السبت',
-            'sunday'    => 'الأحد',
-            'monday'    => 'الاثنين',
-            'tuesday'   => 'الثلاثاء',
+            'saturday' => 'السبت',
+            'sunday' => 'الأحد',
+            'monday' => 'الاثنين',
+            'tuesday' => 'الثلاثاء',
             'wednesday' => 'الأربعاء',
-            'thursday'  => 'الخميس',
-            'friday'    => 'الجمعة',
+            'thursday' => 'الخميس',
+            'friday' => 'الجمعة',
         ];
 
         $normalized = [];
         foreach ($slots as $slot) {
-            if (!is_array($slot)) {
+            if (! is_array($slot)) {
                 continue;
             }
 
             $day = strtolower(trim((string) ($slot['day'] ?? $slot['day_of_week'] ?? '')));
-            if (!in_array($day, DayOfWeek::values(), true)) {
+            if (! in_array($day, DayOfWeek::values(), true)) {
                 continue;
             }
 
@@ -334,12 +332,12 @@ class TeacherStudyGroupService extends BaseService
             }
 
             $normalized[] = [
-                'day'        => $day,
-                'day_ar'     => $dayNamesAr[$day] ?? $day,
+                'day' => $day,
+                'day_ar' => $dayNamesAr[$day] ?? $day,
                 'start_time' => $startTime,
-                'end_time'   => $endTime,
-                'start_min'  => $startMin,
-                'end_min'    => $endMin,
+                'end_time' => $endTime,
+                'start_min' => $startMin,
+                'end_min' => $endMin,
             ];
         }
 
@@ -361,7 +359,7 @@ class TeacherStudyGroupService extends BaseService
             }
         }
 
-        if (!$checkActiveGroups) {
+        if (! $checkActiveGroups) {
             return;
         }
 
@@ -455,13 +453,13 @@ class TeacherStudyGroupService extends BaseService
             ->get();
 
         $daysConfig = [
-            'saturday'  => ['dayIndex' => 6, 'nameAr' => 'السبت', 'nameEn' => 'Saturday'],
-            'sunday'    => ['dayIndex' => 0, 'nameAr' => 'الأحد', 'nameEn' => 'Sunday'],
-            'monday'    => ['dayIndex' => 1, 'nameAr' => 'الاثنين', 'nameEn' => 'Monday'],
-            'tuesday'   => ['dayIndex' => 2, 'nameAr' => 'الثلاثاء', 'nameEn' => 'Tuesday'],
+            'saturday' => ['dayIndex' => 6, 'nameAr' => 'السبت', 'nameEn' => 'Saturday'],
+            'sunday' => ['dayIndex' => 0, 'nameAr' => 'الأحد', 'nameEn' => 'Sunday'],
+            'monday' => ['dayIndex' => 1, 'nameAr' => 'الاثنين', 'nameEn' => 'Monday'],
+            'tuesday' => ['dayIndex' => 2, 'nameAr' => 'الثلاثاء', 'nameEn' => 'Tuesday'],
             'wednesday' => ['dayIndex' => 3, 'nameAr' => 'الأربعاء', 'nameEn' => 'Wednesday'],
-            'thursday'  => ['dayIndex' => 4, 'nameAr' => 'الخميس', 'nameEn' => 'Thursday'],
-            'friday'    => ['dayIndex' => 5, 'nameAr' => 'الجمعة', 'nameEn' => 'Friday'],
+            'thursday' => ['dayIndex' => 4, 'nameAr' => 'الخميس', 'nameEn' => 'Thursday'],
+            'friday' => ['dayIndex' => 5, 'nameAr' => 'الجمعة', 'nameEn' => 'Friday'],
         ];
 
         $todayDayMap = [
@@ -488,16 +486,16 @@ class TeacherStudyGroupService extends BaseService
                     $slotDay = $slot->day_of_week instanceof DayOfWeek ? $slot->day_of_week->value : (string) $slot->day_of_week;
                     if ($slotDay === $dayKey) {
                         $daySessions[] = [
-                            'slotId'     => $slot->uuid,
-                            'groupId'    => $group->uuid,
-                            'groupName'  => $group->name_ar,
-                            'subject'    => $group->subject_ar,
-                            'grade'      => $group->grade_ar,
+                            'slotId' => $slot->uuid,
+                            'groupId' => $group->uuid,
+                            'groupName' => $group->name_ar,
+                            'subject' => $group->subject_ar,
+                            'grade' => $group->grade_ar,
                             'centerName' => $group->center_name,
-                            'hallName'   => $slot->hall_name ?: $group->hall_name,
-                            'startTime'  => $slot->start_time,
-                            'endTime'    => $slot->end_time,
-                            'joinCode'   => $group->join_code,
+                            'hallName' => $slot->hall_name ?: $group->hall_name,
+                            'startTime' => $slot->start_time,
+                            'endTime' => $slot->end_time,
+                            'joinCode' => $group->join_code,
                         ];
                     }
                 }
@@ -508,36 +506,37 @@ class TeacherStudyGroupService extends BaseService
 
             $dayNotes = $notes->filter(function (TeacherScheduleNote $note) use ($dayKey) {
                 $noteDay = $note->day_of_week instanceof DayOfWeek ? $note->day_of_week->value : (string) $note->day_of_week;
+
                 return $noteDay === $dayKey;
             })->map(fn (TeacherScheduleNote $note) => [
-                'id'        => $note->uuid,
-                'uuid'      => $note->uuid,
-                'text'      => $note->note_text,
-                'time'      => $note->note_time,
-                'priority'  => $note->priority,
-                'isDone'    => (bool) $note->is_done,
+                'id' => $note->uuid,
+                'uuid' => $note->uuid,
+                'text' => $note->note_text,
+                'time' => $note->note_time,
+                'priority' => $note->priority,
+                'isDone' => (bool) $note->is_done,
                 'createdAt' => $note->created_at?->toDateString(),
             ])->values()->all();
 
             $totalSessions += count($daySessions);
 
             $days[$dayKey] = [
-                'dayKey'   => $dayKey,
-                'dayName'  => $cfg['nameAr'],
-                'dayEn'    => $cfg['nameEn'],
-                'isToday'  => $dayKey === $todayKey,
+                'dayKey' => $dayKey,
+                'dayName' => $cfg['nameAr'],
+                'dayEn' => $cfg['nameEn'],
+                'isToday' => $dayKey === $todayKey,
                 'sessions' => $daySessions,
-                'notes'    => $dayNotes,
+                'notes' => $dayNotes,
             ];
         }
 
         return [
-            'days'               => $days,
-            'centers'            => $allCenters,
-            'todayDayKey'        => $todayKey,
+            'days' => $days,
+            'centers' => $allCenters,
+            'todayDayKey' => $todayKey,
             'todaySessionsCount' => count($days[$todayKey]['sessions'] ?? []),
-            'totalSessions'      => $totalSessions,
-            'activeGroupsCount'  => $groups->count(),
+            'totalSessions' => $totalSessions,
+            'activeGroupsCount' => $groups->count(),
         ];
     }
 
@@ -551,7 +550,7 @@ class TeacherStudyGroupService extends BaseService
         $time = trim((string) ($data['time'] ?? $data['note_time'] ?? '16:00'));
         $priority = strtolower(trim((string) ($data['priority'] ?? 'medium')));
 
-        if (!in_array($priority, ['high', 'medium', 'normal', 'low'], true)) {
+        if (! in_array($priority, ['high', 'medium', 'normal', 'low'], true)) {
             $priority = 'medium';
         }
         if ($priority === 'low') {
@@ -559,12 +558,12 @@ class TeacherStudyGroupService extends BaseService
         }
 
         return TeacherScheduleNote::create([
-            'teacher_id'  => $teacher->id,
+            'teacher_id' => $teacher->id,
             'day_of_week' => $day,
-            'note_text'   => $text,
-            'note_time'   => $time,
-            'priority'    => $priority,
-            'is_done'     => false,
+            'note_text' => $text,
+            'note_time' => $time,
+            'priority' => $priority,
+            'is_done' => false,
         ]);
     }
 
@@ -575,13 +574,13 @@ class TeacherStudyGroupService extends BaseService
     {
         /** @var TeacherScheduleNote|null $note */
         $note = TeacherScheduleNote::where('uuid', $uuid)->first();
-        if (!$note) {
-            throw (new ModelNotFoundException())->setModel(TeacherScheduleNote::class, [$uuid]);
+        if (! $note) {
+            throw (new ModelNotFoundException)->setModel(TeacherScheduleNote::class, [$uuid]);
         }
 
         $note->assertOwnedBy($teacher);
 
-        $note->update(['is_done' => !$note->is_done]);
+        $note->update(['is_done' => ! $note->is_done]);
 
         return $note;
     }
@@ -593,8 +592,8 @@ class TeacherStudyGroupService extends BaseService
     {
         /** @var TeacherScheduleNote|null $note */
         $note = TeacherScheduleNote::where('uuid', $uuid)->first();
-        if (!$note) {
-            throw (new ModelNotFoundException())->setModel(TeacherScheduleNote::class, [$uuid]);
+        if (! $note) {
+            throw (new ModelNotFoundException)->setModel(TeacherScheduleNote::class, [$uuid]);
         }
 
         $note->assertOwnedBy($teacher);
@@ -603,4 +602,3 @@ class TeacherStudyGroupService extends BaseService
         return true;
     }
 }
-

@@ -34,7 +34,7 @@ class StoreScheduleNoteRequest extends BaseApiRequest
             $merged['priority'] = strtolower(trim((string) $priority));
         }
 
-        if (!empty($merged)) {
+        if (! empty($merged)) {
             $this->merge($merged);
         }
     }
@@ -42,11 +42,10 @@ class StoreScheduleNoteRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'day'      => ['required', 'string', Rule::in(DayOfWeek::values())],
-            'text'     => ['required', 'string', 'min:1', 'max:500'],
-            'time'     => ['nullable', 'string', 'regex:/^\d{1,2}:\d{2}$/'],
+            'day' => ['required', 'string', Rule::in(DayOfWeek::values())],
+            'text' => ['required', 'string', 'min:1', 'max:500'],
+            'time' => ['nullable', 'string', 'regex:/^\d{1,2}:\d{2}$/'],
             'priority' => ['nullable', 'string', Rule::in(['high', 'medium', 'normal', 'low'])],
         ];
     }
 }
-

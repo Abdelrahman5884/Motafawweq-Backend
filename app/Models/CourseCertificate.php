@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 
 class CourseCertificate extends Model
 {
-    use HasFactory, SoftDeletes, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'certificate_number',
@@ -39,9 +39,9 @@ class CourseCertificate extends Model
     protected function casts(): array
     {
         return [
-            'status'        => CertificateStatus::class,
-            'issue_date'    => 'date',
-            'revoked_at'    => 'datetime',
+            'status' => CertificateStatus::class,
+            'issue_date' => 'date',
+            'revoked_at' => 'datetime',
             'grade_percent' => 'float',
         ];
     }

@@ -14,7 +14,7 @@ use Illuminate\Support\Str;
 
 class Homework extends Model
 {
-    use HasFactory, SoftDeletes, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory, SoftDeletes;
 
     protected $table = 'homeworks';
 
@@ -45,14 +45,14 @@ class Homework extends Model
     protected function casts(): array
     {
         return [
-            'type'            => HomeworkType::class,
-            'due_date'        => 'date:Y-m-d',
-            'max_grade'       => 'integer',
-            'total_assigned'  => 'integer',
+            'type' => HomeworkType::class,
+            'due_date' => 'date:Y-m-d',
+            'max_grade' => 'integer',
+            'total_assigned' => 'integer',
             'submitted_count' => 'integer',
-            'graded_count'    => 'integer',
+            'graded_count' => 'integer',
             'pending_grading' => 'integer',
-            'avg_grade'       => 'float',
+            'avg_grade' => 'float',
         ];
     }
 
@@ -92,12 +92,11 @@ class Homework extends Model
 
         $this->update([
             'submitted_count' => $submitted,
-            'graded_count'    => $graded,
+            'graded_count' => $graded,
             'pending_grading' => $pending,
-            'avg_grade'       => round((float) $avgScore, 2),
+            'avg_grade' => round((float) $avgScore, 2),
         ]);
 
         return $this;
     }
 }
-

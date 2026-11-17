@@ -17,24 +17,23 @@ class LeagueParticipantResource extends BaseJsonResource
         $student = $this->whenLoaded('student');
 
         return [
-            'id'             => $this->uuid,
-            'studentId'      => (string) $this->student_id,
-            'rank'           => (int) $this->rank,
-            'previousRank'   => $this->previous_rank !== null ? (int) $this->previous_rank : null,
-            'movement'       => $this->movement ?? 'same',
-            'nameAr'         => $student?->name ?? 'طالب متفوق',
-            'avatar'         => $student?->avatar,
-            'score'          => (int) $this->xp_points,
-            'streak'         => (int) $this->streak_days,
-            'badge'          => $this->badge_title_ar ?? 'منافس نشط',
-            'tier'           => $this->tier ?? 'Bronze',
-            'schoolAr'       => $this->school_ar ?? 'مدرسة المتفوقين',
-            'groupAr'        => $this->group_ar ?? ($this->whenLoaded('league', fn () => $this->league?->group_name_ar) ?? 'عام'),
-            'perfectExams'   => (int) $this->perfect_exams_count,
-            'examsSolved'    => (int) $this->exams_solved_count,
-            'homeworkRate'   => $this->homework_rate . '%',
-            'attendanceRate' => $this->attendance_rate . '%',
+            'id' => $this->uuid,
+            'studentId' => (string) $this->student_id,
+            'rank' => (int) $this->rank,
+            'previousRank' => $this->previous_rank !== null ? (int) $this->previous_rank : null,
+            'movement' => $this->movement ?? 'same',
+            'nameAr' => $student?->name ?? 'طالب متفوق',
+            'avatar' => $student?->avatar,
+            'score' => (int) $this->xp_points,
+            'streak' => (int) $this->streak_days,
+            'badge' => $this->badge_title_ar ?? 'منافس نشط',
+            'tier' => $this->tier ?? 'Bronze',
+            'schoolAr' => $this->school_ar ?? 'مدرسة المتفوقين',
+            'groupAr' => $this->group_ar ?? ($this->whenLoaded('league', fn () => $this->league?->group_name_ar) ?? 'عام'),
+            'perfectExams' => (int) $this->perfect_exams_count,
+            'examsSolved' => (int) $this->exams_solved_count,
+            'homeworkRate' => $this->homework_rate.'%',
+            'attendanceRate' => $this->attendance_rate.'%',
         ];
     }
 }
-

@@ -4,7 +4,7 @@ namespace App\Enums;
 
 enum LessonMediaMode: string
 {
-    case MIC   = 'mic';
+    case MIC = 'mic';
     case AUDIO = 'audio';
     case VIDEO = 'video';
     case EMBED = 'embed';
@@ -14,4 +14,3 @@ enum LessonMediaMode: string
         return array_column(self::cases(), 'value');
     }
 }
-

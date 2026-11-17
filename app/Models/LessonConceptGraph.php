@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LessonConceptGraph extends Model
 {
-    use HasFactory, BelongsToTeacher;
+    use BelongsToTeacher, HasFactory;
 
     protected $fillable = [
         'lesson_id',
@@ -30,4 +30,3 @@ class LessonConceptGraph extends Model
         return $this->belongsTo(Lesson::class);
     }
 }
-

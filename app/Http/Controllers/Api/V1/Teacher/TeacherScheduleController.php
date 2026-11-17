@@ -8,7 +8,6 @@ use App\Http\Resources\V1\Teacher\TeacherScheduleNoteResource;
 use App\Services\V1\Teacher\TeacherStudyGroupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\Response;
 
 class TeacherScheduleController extends BaseApiController
 {

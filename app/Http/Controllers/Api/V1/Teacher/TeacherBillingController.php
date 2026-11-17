@@ -33,7 +33,7 @@ class TeacherBillingController extends Controller
 
         $result = $this->billingService->validateCoupon($code, $orderAmount);
 
-        if (!$result['isValid']) {
+        if (! $result['isValid']) {
             return $this->validationError(
                 ['code' => [$result['messageAr']]],
                 $result['messageAr']
@@ -51,18 +51,17 @@ class TeacherBillingController extends Controller
         );
 
         return $this->success([
-            'activeSub'     => [
-                'planTier'      => $result['subscription']->plan_tier->value,
-                'planNameAr'    => $result['subscription']->plan_name_ar,
-                'planNameEn'    => $result['subscription']->plan_name_en,
+            'activeSub' => [
+                'planTier' => $result['subscription']->plan_tier->value,
+                'planNameAr' => $result['subscription']->plan_name_ar,
+                'planNameEn' => $result['subscription']->plan_name_en,
                 'billingPeriod' => $result['subscription']->billing_period->value,
-                'status'        => $result['subscription']->status,
-                'renewalDate'   => $result['subscription']->renews_at->toDateString(),
+                'status' => $result['subscription']->status,
+                'renewalDate' => $result['subscription']->renews_at->toDateString(),
                 'daysRemaining' => $result['daysRemaining'],
-                'amountEgp'     => $result['subscription']->amount_egp,
+                'amountEgp' => $result['subscription']->amount_egp,
             ],
-            'invoice'       => new TeacherInvoiceResource($result['invoice']),
+            'invoice' => new TeacherInvoiceResource($result['invoice']),
         ], $result['messageAr']);
     }
 }
-

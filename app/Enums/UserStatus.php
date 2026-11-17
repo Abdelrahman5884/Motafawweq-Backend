@@ -15,6 +15,6 @@ enum UserStatus: string
 
     public function label(): string
     {
-        return __('messages.statuses.' . $this->value);
+        return __('messages.statuses.'.$this->value);
     }
 }

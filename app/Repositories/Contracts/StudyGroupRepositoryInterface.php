@@ -16,4 +16,3 @@ interface StudyGroupRepositoryInterface extends BaseRepositoryInterface
 
     public function countActiveForTeacher(int $teacherId): int;
 }
-

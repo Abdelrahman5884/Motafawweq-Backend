@@ -18,4 +18,3 @@ class RevokeCertificateRequest extends FormRequest
         ];
     }
 }
-

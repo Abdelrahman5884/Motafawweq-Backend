@@ -21,17 +21,17 @@ class TeacherCourseTest extends TestCase
         TeacherPlanTier $planTier = TeacherPlanTier::PLUS
     ): array {
         $teacher = User::factory()->create([
-            'name'              => 'د. سلمى السيد',
-            'email'             => $email,
-            'phone'             => '010' . random_int(10000000, 99999999),
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'name' => 'د. سلمى السيد',
+            'email' => $email,
+            'phone' => '010'.random_int(10000000, 99999999),
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
 
         $profile = TeacherProfile::create([
-            'user_id'    => $teacher->id,
-            'name_ar'    => $teacher->name,
+            'user_id' => $teacher->id,
+            'name_ar' => $teacher->name,
             'subject_ar' => 'الأحياء',
         ]);
         $profile->forceFill(['plan_tier' => $planTier])->save();
@@ -48,10 +48,10 @@ class TeacherCourseTest extends TestCase
         // 1. Create Course 1 (Secondary)
         $createRes = $this->withToken($token)
             ->postJson('/api/v1/teacher/courses', [
-                'title'       => 'ماستر كلاس الأحياء: البناء الضوئي والوراثة',
-                'stage'       => 'sec',
-                'grade'       => 'الصف الثالث الثانوي',
-                'price'       => 350,
+                'title' => 'ماستر كلاس الأحياء: البناء الضوئي والوراثة',
+                'stage' => 'sec',
+                'grade' => 'الصف الثالث الثانوي',
+                'price' => 350,
                 'description' => 'كورس شامل يغطي الدعامة والحركة والبيولوجيا الجزيئية.',
             ]);
 
@@ -92,9 +92,9 @@ class TeacherCourseTest extends TestCase
         // 5. Update Course 1
         $updateRes = $this->withToken($token)
             ->putJson("/api/v1/teacher/courses/{$courseUuid}", [
-                'title'        => 'ماستر كلاس الأحياء المطور 2026',
-                'price'        => 400,
-                'hours'        => '32 ساعة',
+                'title' => 'ماستر كلاس الأحياء المطور 2026',
+                'price' => 400,
+                'hours' => '32 ساعة',
                 'lessonsCount' => 16,
             ]);
 
@@ -119,7 +119,7 @@ class TeacherCourseTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacher->id,
-            'event'   => 'teacher.course.deleted',
+            'event' => 'teacher.course.deleted',
         ]);
     }
 
@@ -155,7 +155,7 @@ class TeacherCourseTest extends TestCase
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacher->id,
-            'event'   => 'teacher.plan_quota_exceeded',
+            'event' => 'teacher.plan_quota_exceeded',
         ]);
 
         // After deleting the 1st course, the teacher can create a new course
@@ -177,13 +177,13 @@ class TeacherCourseTest extends TestCase
         [$teacherB, $tokenB] = $this->createAuthenticatedTeacher('teacher.b.course@motafawweq.com');
 
         $courseA = Course::create([
-            'teacher_id'    => $teacherA->id,
-            'title_ar'      => 'مقرر خاص بالمعلم أ',
-            'stage_id'      => 'sec',
+            'teacher_id' => $teacherA->id,
+            'title_ar' => 'مقرر خاص بالمعلم أ',
+            'stage_id' => 'sec',
             'stage_name_ar' => 'المرحلة الثانوية',
-            'grade_ar'      => 'الصف الثالث الثانوي',
-            'subject_ar'    => 'الفيزياء',
-            'price_egp'     => 350,
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'subject_ar' => 'الفيزياء',
+            'price_egp' => 350,
         ]);
 
         // Teacher B's list does not include Teacher A's course
@@ -210,16 +210,15 @@ class TeacherCourseTest extends TestCase
             ->assertStatus(403);
 
         $this->assertDatabaseHas('courses', [
-            'id'         => $courseA->id,
-            'title_ar'   => 'مقرر خاص بالمعلم أ',
+            'id' => $courseA->id,
+            'title_ar' => 'مقرر خاص بالمعلم أ',
             'deleted_at' => null,
         ]);
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
-            'level'   => 'warning',
+            'event' => 'teacher.idor_attempt_blocked',
+            'level' => 'warning',
         ]);
     }
 }
-

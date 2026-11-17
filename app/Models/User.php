@@ -20,7 +20,7 @@ use Laravel\Sanctum\HasApiTokens;
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable, HasApiTokens;
+    use HasApiTokens, HasFactory, Notifiable;
 
     /**
      * The attributes that are mass assignable.
@@ -59,19 +59,19 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at'     => 'datetime',
-            'password'              => 'hashed',
-            'role'                  => UserRole::class,
-            'status'                => UserStatus::class,
-            'last_login_at'         => 'datetime',
-            'locked_until'          => 'datetime',
-            'password_changed_at'   => 'datetime',
+            'email_verified_at' => 'datetime',
+            'password' => 'hashed',
+            'role' => UserRole::class,
+            'status' => UserStatus::class,
+            'last_login_at' => 'datetime',
+            'locked_until' => 'datetime',
+            'password_changed_at' => 'datetime',
             'failed_login_attempts' => 'integer',
         ];
     }
 
     /* ----------------------------------------------------------------- */
-    /* Relations                                                          */
+    /* Relations */
     /* ----------------------------------------------------------------- */
 
     public function loginHistories(): HasMany
@@ -87,6 +87,36 @@ class User extends Authenticatable
     public function teacherProfile(): HasOne
     {
         return $this->hasOne(TeacherProfile::class);
+    }
+
+    public function studentProfile(): HasOne
+    {
+        return $this->hasOne(StudentProfile::class, 'student_id');
+    }
+
+    public function groupEnrollments(): HasMany
+    {
+        return $this->hasMany(GroupEnrollment::class, 'student_id');
+    }
+
+    public function studentStudySessions(): HasMany
+    {
+        return $this->hasMany(StudentStudySession::class, 'student_id');
+    }
+
+    public function studentLessonProgresses(): HasMany
+    {
+        return $this->hasMany(StudentLessonProgress::class, 'student_id');
+    }
+
+    public function studentLessonNotes(): HasMany
+    {
+        return $this->hasMany(StudentLessonNote::class, 'student_id');
+    }
+
+    public function studentXpLedgers(): HasMany
+    {
+        return $this->hasMany(StudentXpLedger::class, 'student_id');
     }
 
     public function teacherPayoutAccounts(): HasMany
@@ -198,12 +228,13 @@ class User extends Authenticatable
     }
 
     /* ----------------------------------------------------------------- */
-    /* Role helpers                                                       */
+    /* Role helpers */
     /* ----------------------------------------------------------------- */
 
     public function hasRole(UserRole|string $role): bool
     {
         $roleValue = $role instanceof UserRole ? $role->value : $role;
+
         return $this->role->value === $roleValue;
     }
 
@@ -228,7 +259,7 @@ class User extends Authenticatable
     }
 
     /* ----------------------------------------------------------------- */
-    /* Security state helpers                                             */
+    /* Security state helpers */
     /* ----------------------------------------------------------------- */
 
     public function isActive(): bool

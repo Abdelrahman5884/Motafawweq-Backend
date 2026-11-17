@@ -17,6 +17,6 @@ enum UserRole: string
 
     public function label(): string
     {
-        return __('messages.roles.' . $this->value);
+        return __('messages.roles.'.$this->value);
     }
 }

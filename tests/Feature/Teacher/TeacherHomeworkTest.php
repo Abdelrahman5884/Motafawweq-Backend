@@ -2,15 +2,16 @@
 
 namespace Tests\Feature\Teacher;
 
+use App\Enums\EnrollmentStatus;
 use App\Enums\HomeworkSubmissionStatus;
 use App\Enums\HomeworkType;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
-use App\Models\Course;
+use App\Models\GroupEnrollment;
 use App\Models\Homework;
 use App\Models\HomeworkSubmission;
-use App\Models\Lesson;
+use App\Models\StudyGroup;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -31,22 +32,42 @@ class TeacherHomeworkTest extends TestCase
     protected function createTeacher(string $email = 'teacher.hw@motafawweq.com'): User
     {
         return User::factory()->create([
-            'email'             => $email,
-            'role'              => UserRole::TEACHER,
-            'status'            => UserStatus::ACTIVE,
+            'email' => $email,
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
     }
 
     protected function createStudent(string $email = 'student.hw@motafawweq.com'): User
     {
-        return User::factory()->create([
-            'name'              => 'عمر طارق القاضي',
-            'email'             => $email,
-            'role'              => UserRole::STUDENT,
-            'status'            => UserStatus::ACTIVE,
+        $student = User::factory()->create([
+            'name' => 'عمر طارق القاضي',
+            'email' => $email,
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
+
+        $teacher = User::where('role', UserRole::TEACHER)->latest('id')->first();
+        if ($teacher) {
+            $group = StudyGroup::firstOrCreate(
+                ['teacher_id' => $teacher->id, 'join_code' => 'TEST-HW-GRP-'.$teacher->id],
+                [
+                    'name_ar' => 'مجموعة الواجب',
+                    'subject_ar' => 'الأحياء',
+                    'grade_ar' => 'الصف الثالث الثانوي',
+                    'center_name' => 'سنتر الدقي النخبة',
+                    'status' => 'active',
+                ]
+            );
+            GroupEnrollment::firstOrCreate(
+                ['study_group_id' => $group->id, 'student_id' => $student->id],
+                ['status' => EnrollmentStatus::ENROLLED, 'enrolled_at' => now()]
+            );
+        }
+
+        return $student;
     }
 
     public function test_teacher_can_create_homework_with_text_content(): void
@@ -55,14 +76,14 @@ class TeacherHomeworkTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $payload = [
-            'titleAr'          => 'واجب الأسبوع 3: مقارنة التفاعلات الضوئية واللاضوئية',
+            'titleAr' => 'واجب الأسبوع 3: مقارنة التفاعلات الضوئية واللاضوئية',
             'targetLocationId' => 'all',
             'targetLocationAr' => 'جميع الأماكن (كل السناتر + الأونلاين)',
-            'type'             => 'text',
-            'textContent'      => 'اشرح بالتفصيل دورة كالفن وحسابات جزيئات PGAL.',
-            'dueDate'          => '2026-10-15',
-            'dueTime'          => '22:00',
-            'maxGrade'         => 20,
+            'type' => 'text',
+            'textContent' => 'اشرح بالتفصيل دورة كالفن وحسابات جزيئات PGAL.',
+            'dueDate' => '2026-10-15',
+            'dueTime' => '22:00',
+            'maxGrade' => 20,
         ];
 
         $response = $this->postJson('/api/v1/teacher/homeworks', $payload);
@@ -75,8 +96,8 @@ class TeacherHomeworkTest extends TestCase
 
         $this->assertDatabaseHas('homeworks', [
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'واجب الأسبوع 3: مقارنة التفاعلات الضوئية واللاضوئية',
-            'max_grade'  => 20,
+            'title_ar' => 'واجب الأسبوع 3: مقارنة التفاعلات الضوئية واللاضوئية',
+            'max_grade' => 20,
         ]);
     }
 
@@ -91,9 +112,9 @@ class TeacherHomeworkTest extends TestCase
         );
 
         $response = $this->postJson('/api/v1/teacher/homeworks', [
-            'titleAr'  => 'واجب الأحياء عبر ملف PDF',
+            'titleAr' => 'واجب الأحياء عبر ملف PDF',
             'maxGrade' => 30,
-            'file'     => $validPdf,
+            'file' => $validPdf,
         ]);
 
         $response->assertCreated()
@@ -102,10 +123,10 @@ class TeacherHomeworkTest extends TestCase
             ->assertJsonPath('data.attachmentName', 'biology_hw.pdf');
 
         $this->assertDatabaseHas('homeworks', [
-            'teacher_id'      => $teacher->id,
-            'title_ar'        => 'واجب الأحياء عبر ملف PDF',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'واجب الأحياء عبر ملف PDF',
             'attachment_name' => 'biology_hw.pdf',
-            'file_type'       => 'pdf',
+            'file_type' => 'pdf',
         ]);
     }
 
@@ -121,7 +142,7 @@ class TeacherHomeworkTest extends TestCase
 
         $response = $this->postJson('/api/v1/teacher/homeworks', [
             'titleAr' => 'واجب ملف مشبوه',
-            'file'    => $maliciousFile,
+            'file' => $maliciousFile,
         ]);
 
         $response->assertStatus(422)
@@ -138,19 +159,19 @@ class TeacherHomeworkTest extends TestCase
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         Homework::create([
-            'teacher_id'         => $teacher->id,
-            'title_ar'           => 'واجب سنتر الدقي',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'واجب سنتر الدقي',
             'target_location_id' => 'ctr-dokki',
             'target_location_ar' => 'سنتر الدقي النخبة',
-            'max_grade'          => 20,
+            'max_grade' => 20,
         ]);
 
         Homework::create([
-            'teacher_id'         => $teacher->id,
-            'title_ar'           => 'واجب الأونلاين فقط',
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'واجب الأونلاين فقط',
             'target_location_id' => 'ctr-online',
             'target_location_ar' => 'أونلاين',
-            'max_grade'          => 20,
+            'max_grade' => 20,
         ]);
 
         $response = $this->getJson('/api/v1/teacher/homeworks?target_location_id=ctr-dokki');
@@ -168,13 +189,13 @@ class TeacherHomeworkTest extends TestCase
 
         $hw = Homework::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'واجب قديم',
-            'max_grade'  => 15,
+            'title_ar' => 'واجب قديم',
+            'max_grade' => 15,
         ]);
 
         // Update
         $updateResponse = $this->putJson("/api/v1/teacher/homeworks/{$hw->uuid}", [
-            'titleAr'  => 'واجب بعد التعديل',
+            'titleAr' => 'واجب بعد التعديل',
             'maxGrade' => 25,
         ]);
 
@@ -197,9 +218,9 @@ class TeacherHomeworkTest extends TestCase
         $student = $this->createStudent();
 
         $hw = Homework::create([
-            'teacher_id'     => $teacher->id,
-            'title_ar'       => 'واجب الجينات والوراثة',
-            'max_grade'      => 20,
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'واجب الجينات والوراثة',
+            'max_grade' => 20,
             'total_assigned' => 50,
         ]);
 
@@ -207,7 +228,7 @@ class TeacherHomeworkTest extends TestCase
 
         $payload = [
             'solutionText' => 'حل المسألة الوراثية: النسبة تكون 3 إلى 1 في الجيل الثاني.',
-            'locationAr'   => 'سنتر الدقي النخبة',
+            'locationAr' => 'سنتر الدقي النخبة',
         ];
 
         $response = $this->postJson("/api/v1/homeworks/{$hw->uuid}/submit", $payload);
@@ -219,8 +240,8 @@ class TeacherHomeworkTest extends TestCase
 
         $this->assertDatabaseHas('homework_submissions', [
             'homework_id' => $hw->id,
-            'student_id'  => $student->id,
-            'status'      => HomeworkSubmissionStatus::PENDING->value,
+            'student_id' => $student->id,
+            'status' => HomeworkSubmissionStatus::PENDING->value,
         ]);
 
         $hw->refresh();
@@ -236,8 +257,8 @@ class TeacherHomeworkTest extends TestCase
 
         $hw = Homework::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'واجب الرسم التخطيطي',
-            'max_grade'  => 20,
+            'title_ar' => 'واجب الرسم التخطيطي',
+            'max_grade' => 20,
         ]);
 
         Sanctum::actingAs($student, [TokenType::ACCESS->value]);
@@ -257,8 +278,8 @@ class TeacherHomeworkTest extends TestCase
             ->assertJsonPath('data.attachmentName', 'solution.pdf');
 
         $this->assertDatabaseHas('homework_submissions', [
-            'homework_id'     => $hw->id,
-            'student_id'      => $student->id,
+            'homework_id' => $hw->id,
+            'student_id' => $student->id,
             'attachment_name' => 'solution.pdf',
             'submission_type' => 'pdf',
         ]);
@@ -270,20 +291,20 @@ class TeacherHomeworkTest extends TestCase
         $student = $this->createStudent('std.list@motafawweq.com');
 
         $hw = Homework::create([
-            'teacher_id'      => $teacher->id,
-            'title_ar'        => 'واجب الرصد',
-            'max_grade'       => 20,
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'واجب الرصد',
+            'max_grade' => 20,
             'submitted_count' => 1,
             'pending_grading' => 1,
         ]);
 
         $sub = HomeworkSubmission::create([
-            'homework_id'     => $hw->id,
-            'student_id'      => $student->id,
-            'status'          => HomeworkSubmissionStatus::PENDING,
+            'homework_id' => $hw->id,
+            'student_id' => $student->id,
+            'status' => HomeworkSubmissionStatus::PENDING,
             'submission_type' => 'text',
-            'solution_text'   => 'حل الواجب',
-            'submitted_at'    => now(),
+            'solution_text' => 'حل الواجب',
+            'submitted_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
@@ -304,27 +325,27 @@ class TeacherHomeworkTest extends TestCase
         $student = $this->createStudent('std.grade@motafawweq.com');
 
         $hw = Homework::create([
-            'teacher_id'      => $teacher->id,
-            'title_ar'        => 'واجب التقييم',
-            'max_grade'       => 20,
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'واجب التقييم',
+            'max_grade' => 20,
             'submitted_count' => 1,
             'pending_grading' => 1,
         ]);
 
         $sub = HomeworkSubmission::create([
-            'homework_id'     => $hw->id,
-            'student_id'      => $student->id,
-            'status'          => HomeworkSubmissionStatus::PENDING,
+            'homework_id' => $hw->id,
+            'student_id' => $student->id,
+            'status' => HomeworkSubmissionStatus::PENDING,
             'submission_type' => 'text',
-            'solution_text'   => 'حل تفصيلي',
-            'submitted_at'    => now(),
+            'solution_text' => 'حل تفصيلي',
+            'submitted_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $payload = [
-            'status'     => 'graded',
-            'score'      => 19,
+            'status' => 'graded',
+            'score' => 19,
             'feedbackAr' => 'ممتاز جداً وإجابة دقيقة.',
         ];
 
@@ -349,23 +370,23 @@ class TeacherHomeworkTest extends TestCase
 
         $hw = Homework::create([
             'teacher_id' => $teacher->id,
-            'title_ar'   => 'واجب المراجعة',
-            'max_grade'  => 20,
+            'title_ar' => 'واجب المراجعة',
+            'max_grade' => 20,
         ]);
 
         $sub = HomeworkSubmission::create([
-            'homework_id'     => $hw->id,
-            'student_id'      => $student->id,
-            'status'          => HomeworkSubmissionStatus::PENDING,
+            'homework_id' => $hw->id,
+            'student_id' => $student->id,
+            'status' => HomeworkSubmissionStatus::PENDING,
             'submission_type' => 'text',
-            'solution_text'   => 'حل ناقص',
-            'submitted_at'    => now(),
+            'solution_text' => 'حل ناقص',
+            'submitted_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $payload = [
-            'status'     => 'rejected',
+            'status' => 'rejected',
             'feedbackAr' => 'الملف غير مكتمل، يرجى إعادة الحل.',
         ];
 
@@ -385,17 +406,17 @@ class TeacherHomeworkTest extends TestCase
 
         $hwA = Homework::create([
             'teacher_id' => $teacherA->id,
-            'title_ar'   => 'واجب المدرس أ',
-            'max_grade'  => 20,
+            'title_ar' => 'واجب المدرس أ',
+            'max_grade' => 20,
         ]);
 
         $sub = HomeworkSubmission::create([
-            'homework_id'     => $hwA->id,
-            'student_id'      => $student->id,
-            'status'          => HomeworkSubmissionStatus::PENDING,
+            'homework_id' => $hwA->id,
+            'student_id' => $student->id,
+            'status' => HomeworkSubmissionStatus::PENDING,
             'submission_type' => 'text',
-            'solution_text'   => 'حل طالب أ',
-            'submitted_at'    => now(),
+            'solution_text' => 'حل طالب أ',
+            'submitted_at' => now(),
         ]);
 
         // Teacher B tries to view Teacher A's homework submissions
@@ -407,14 +428,13 @@ class TeacherHomeworkTest extends TestCase
         // Teacher B tries to grade Teacher A's submission
         $gradeResponse = $this->patchJson("/api/v1/teacher/homeworks/{$hwA->uuid}/submissions/{$sub->uuid}/grade", [
             'status' => 'graded',
-            'score'  => 15,
+            'score' => 15,
         ]);
         $gradeResponse->assertForbidden();
 
         $this->assertDatabaseHas('security_audit_logs', [
             'user_id' => $teacherB->id,
-            'event'   => 'teacher.idor_attempt_blocked',
+            'event' => 'teacher.idor_attempt_blocked',
         ]);
     }
 }
-
