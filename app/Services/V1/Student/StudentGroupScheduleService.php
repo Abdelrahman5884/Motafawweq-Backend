@@ -119,7 +119,7 @@ class StudentGroupScheduleService extends BaseService
             ->where('status', 'active')
             ->whereHas('enrollments', function ($q) use ($student) {
                 $q->where('student_id', $student->id)
-                    ->where('status', EnrollmentStatus::ENROLLED);
+                    ->whereIn('status', [EnrollmentStatus::ENROLLED, EnrollmentStatus::PENDING]);
             })
             ->with(['scheduleSlots', 'teacher:id,name'])
             ->get();

@@ -544,4 +544,13 @@ Route::prefix('v1')->group(function () {
             ->whereUuid(['uuid', 'attachmentUuid'])
             ->name('api.v1.teacher.lessons.attachments.stream');
     });
+
+    Route::prefix('media/student-lessons')->group(function () {
+        Route::get('/{uuid}/media/stream', [StudentCourseLessonController::class, 'streamMedia'])
+            ->whereUuid('uuid')
+            ->name('api.v1.student.lessons.media.stream');
+        Route::get('/{uuid}/attachments/{attachmentUuid}/stream', [StudentCourseLessonController::class, 'streamAttachment'])
+            ->whereUuid(['uuid', 'attachmentUuid'])
+            ->name('api.v1.student.lessons.attachments.stream');
+    });
 });

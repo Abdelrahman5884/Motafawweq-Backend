@@ -3,9 +3,11 @@
 namespace App\Services\V1\Student;
 
 use App\Enums\CourseStatus;
+use App\Enums\LessonAttachmentType;
 use App\Enums\LessonStatus;
 use App\Models\Course;
 use App\Models\Lesson;
+use App\Models\LessonAttachment;
 use App\Models\StudentLessonNote;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentXpLedger;
@@ -13,6 +15,7 @@ use App\Models\User;
 use App\Services\BaseService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
 
 class StudentCourseLessonService extends BaseService
@@ -22,23 +25,22 @@ class StudentCourseLessonService extends BaseService
     ) {}
 
     /**
-     * List all published courses the student is entitled to access with progress metrics.
+     * List all published courses across teachers with the student's enrollment and progress status.
      */
     public function listCourses(User $student): array
     {
         $entitlements = $this->accessService->getEntitlements($student);
 
-        if (empty($entitlements['course_ids'])) {
-            return [];
-        }
-
         $courses = Course::query()
-            ->whereIn('id', $entitlements['course_ids'])
             ->where('status', CourseStatus::PUBLISHED)
-            ->with(['teacher:id,name'])
+            ->with(['teacher:id,name,avatar'])
             ->withCount(['lessons as published_lessons_count' => fn ($q) => $q->where('status', LessonStatus::PUBLISHED)])
             ->latest()
             ->get();
+
+        if ($courses->isEmpty()) {
+            return [];
+        }
 
         $completedByCourse = StudentLessonProgress::query()
             ->where('student_id', $student->id)
@@ -48,19 +50,28 @@ class StudentCourseLessonService extends BaseService
             ->groupBy('course_id')
             ->pluck('completed_count', 'course_id');
 
-        return $courses->map(function (Course $course) use ($completedByCourse) {
-            $totalLessons = (int) $course->published_lessons_count;
+        return $courses->map(function (Course $course) use ($completedByCourse, $entitlements) {
+            $publishedLessons = (int) $course->published_lessons_count;
+            $totalLessons = max($publishedLessons, (int) $course->lessons_count);
             $completed = (int) ($completedByCourse[$course->id] ?? 0);
-            $progressPercent = $totalLessons > 0 ? min(100, (int) round(($completed / $totalLessons) * 100)) : 0;
+            $progressPercent = $publishedLessons > 0 ? min(100, (int) round(($completed / $publishedLessons) * 100)) : 0;
+            $priceEgp = (float) ($course->price_egp ?? 0);
+            $isEnrolled = in_array((int) $course->id, $entitlements['course_ids'], true) || $priceEgp <= 0;
 
             return [
                 'id' => $course->uuid,
                 'uuid' => $course->uuid,
                 'titleAr' => $course->title_ar,
                 'titleEn' => $course->title_en ?? $course->title_ar,
-                'stage' => $course->stage?->value ?? (string) $course->stage,
+                'subjectAr' => $course->subject_ar ?: $course->grade_ar,
+                'stage' => $course->stage_name_ar ?: ($course->stage?->value ?? ''),
                 'gradeAr' => $course->grade_ar,
+                'descriptionAr' => $course->description_ar,
+                'priceEgp' => $priceEgp,
+                'isEnrolled' => $isEnrolled,
                 'teacherName' => $course->teacher?->name,
+                'teacherAvatar' => $course->teacher?->avatar,
+                'hoursTotal' => $course->hours_total,
                 'lessonsCount' => $totalLessons,
                 'completedLessons' => $completed,
                 'progressPercent' => $progressPercent,
@@ -153,12 +164,63 @@ class StudentCourseLessonService extends BaseService
                 'createdAt' => $n->created_at?->toIso8601String(),
             ])->values()->all();
 
+        $mediaUrl = null;
+        if (! empty($lesson->media_path)) {
+            $mediaUrl = URL::temporarySignedRoute(
+                'api.v1.student.lessons.media.stream',
+                now()->addMinutes(120),
+                ['uuid' => $lesson->uuid]
+            );
+        } elseif (! empty($lesson->embed_url)) {
+            $mediaUrl = $lesson->embed_url;
+        }
+
+        $pdfAttachments = [];
+        $whiteboardImages = [];
+        foreach ($lesson->attachments as $att) {
+            /** @var LessonAttachment $att */
+            $signedUrl = URL::temporarySignedRoute(
+                'api.v1.student.lessons.attachments.stream',
+                now()->addMinutes(120),
+                ['uuid' => $lesson->uuid, 'attachmentUuid' => $att->uuid]
+            );
+            $sizeKb = (int) round(((int) $att->file_size_bytes) / 1024);
+            $sizeLabel = $sizeKb >= 1024 ? round($sizeKb / 1024, 1).' MB' : "{$sizeKb} KB";
+
+            if ($att->type === LessonAttachmentType::WHITEBOARD_IMAGE) {
+                $whiteboardImages[] = [
+                    'id' => $att->uuid,
+                    'order' => (int) ($att->display_order ?: count($whiteboardImages) + 1),
+                    'titleAr' => $att->title_ar ?: $att->original_filename,
+                    'caption' => $att->caption_ar ?: '',
+                    'size' => $sizeLabel,
+                    'url' => $signedUrl,
+                ];
+            } else {
+                $pdfAttachments[] = [
+                    'id' => $att->uuid,
+                    'titleAr' => $att->title_ar ?: $att->original_filename,
+                    'size' => $sizeLabel,
+                    'pages' => 'PDF',
+                    'type' => 'PDF',
+                    'url' => $signedUrl,
+                ];
+            }
+        }
+
         return [
             'id' => $lesson->uuid,
             'courseId' => $lesson->course?->uuid,
             'titleAr' => $lesson->title_ar,
-            'durationLabel' => $lesson->duration_label,
+            'descAr' => $lesson->description_ar ?? '',
+            'durationSeconds' => (int) ($lesson->duration_seconds ?: 1800),
+            'durationLabel' => $lesson->duration_label ?: '30:00',
             'mediaMode' => $lesson->media_mode?->value ?? (string) $lesson->media_mode,
+            'embedUrl' => $lesson->embed_url,
+            'isYoutube' => (bool) $lesson->is_youtube,
+            'mediaUrl' => $mediaUrl,
+            'attachments' => $pdfAttachments,
+            'whiteboardImages' => $whiteboardImages,
             'chapters' => $lesson->chapters->map(fn ($c) => [
                 'id' => $c->uuid,
                 'titleAr' => $c->title_ar,
