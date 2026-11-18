@@ -39,4 +39,24 @@ class StudentGamificationController extends BaseApiController
 
         return $this->successResponse($certs);
     }
+
+    public function certificateEligibility(): JsonResponse
+    {
+        return $this->successResponse($this->gamificationService->getCertificateEligibility($this->authenticatedUser()));
+    }
+
+    public function activityHeatmap(): JsonResponse
+    {
+        return $this->successResponse($this->gamificationService->getActivityHeatmap($this->authenticatedUser()));
+    }
+
+    public function weeklyChallenges(): JsonResponse
+    {
+        return $this->successResponse($this->gamificationService->getWeeklyChallenges($this->authenticatedUser()));
+    }
+
+    public function pastLeagues(): JsonResponse
+    {
+        return $this->successResponse($this->gamificationService->getPastLeagues($this->authenticatedUser()));
+    }
 }

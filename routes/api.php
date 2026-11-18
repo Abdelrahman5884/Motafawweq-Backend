@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\Public\CertificateVerificationController;
 use App\Http\Controllers\Api\V1\Storage\StorageController;
 use App\Http\Controllers\Api\V1\Student\StudentBillingController;
+use App\Http\Controllers\Api\V1\Student\StudentConvertedLectureController;
 use App\Http\Controllers\Api\V1\Student\StudentCourseLessonController;
 use App\Http\Controllers\Api\V1\Student\StudentDashboardController;
 use App\Http\Controllers\Api\V1\Student\StudentExamTakingController;
@@ -255,6 +256,36 @@ Route::prefix('v1')->group(function () {
                 Route::get('/analytics', [StudentDashboardController::class, 'analytics'])
                     ->middleware('throttle:student-read');
                 Route::get('/revision', [StudentDashboardController::class, 'revision'])
+                    ->middleware('throttle:student-read');
+
+                // Phase 12: Schedule Notes, Converted Lectures Archive & Extended Gamification
+                Route::post('/schedule/notes', [StudentGroupScheduleController::class, 'storeScheduleNote'])
+                    ->middleware('throttle:student-write');
+                Route::patch('/schedule/notes/{uuid}/toggle', [StudentGroupScheduleController::class, 'toggleScheduleNote'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
+                Route::delete('/schedule/notes/{uuid}', [StudentGroupScheduleController::class, 'destroyScheduleNote'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
+
+                Route::get('/converted-lectures', [StudentConvertedLectureController::class, 'index'])
+                    ->middleware('throttle:student-read');
+                Route::post('/converted-lectures', [StudentConvertedLectureController::class, 'store'])
+                    ->middleware(['throttle:student-uploads', 'idempotent']);
+                Route::get('/converted-lectures/{uuid}', [StudentConvertedLectureController::class, 'show'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-read');
+                Route::delete('/converted-lectures/{uuid}', [StudentConvertedLectureController::class, 'destroy'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
+
+                Route::get('/gamification/heatmap', [StudentGamificationController::class, 'activityHeatmap'])
+                    ->middleware('throttle:student-read');
+                Route::get('/gamification/challenges', [StudentGamificationController::class, 'weeklyChallenges'])
+                    ->middleware('throttle:student-read');
+                Route::get('/leagues/history', [StudentGamificationController::class, 'pastLeagues'])
+                    ->middleware('throttle:student-read');
+                Route::get('/certificates/eligibility', [StudentGamificationController::class, 'certificateEligibility'])
                     ->middleware('throttle:student-read');
             });
 
