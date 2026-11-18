@@ -160,6 +160,8 @@ Route::prefix('v1')->group(function () {
                     ->middleware('throttle:student-read');
                 Route::put('/profile', [StudentProfileController::class, 'update'])
                     ->middleware('throttle:student-write');
+                Route::post('/profile/avatar', [StudentProfileController::class, 'uploadAvatar'])
+                    ->middleware('throttle:student-uploads');
 
                 // Phase 3: Study Groups, Weekly Schedule, Personal Study Sessions & Attendance
                 Route::get('/groups', [StudentGroupScheduleController::class, 'index'])

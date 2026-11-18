@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\BaseApiController;
 use App\Http\Requests\V1\Student\UpdateStudentProfileRequest;
 use App\Services\V1\Student\StudentProfileService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class StudentProfileController extends BaseApiController
 {
@@ -34,5 +35,22 @@ class StudentProfileController extends BaseApiController
         );
 
         return $this->successResponse($profile, 'تم تحديث بيانات الملف الشخصي بنجاح.');
+    }
+
+    /**
+     * POST /api/v1/student/profile/avatar
+     */
+    public function uploadAvatar(Request $request): JsonResponse
+    {
+        $request->validate([
+            'avatar' => ['required', 'file', 'image', 'mimes:jpeg,jpg,png,webp', 'max:5120'],
+        ]);
+
+        $profile = $this->profileService->uploadAvatar(
+            $this->authenticatedUser(),
+            $request->file('avatar')
+        );
+
+        return $this->successResponse($profile, 'تم تحديث الصورة الشخصية بنجاح.');
     }
 }

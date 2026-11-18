@@ -2,9 +2,15 @@
 
 namespace App\Services\V1\Student;
 
+use App\Models\StoredFile;
 use App\Models\StudentProfile;
 use App\Models\User;
 use App\Services\BaseService;
+use finfo;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class StudentProfileService extends BaseService
 {
@@ -86,6 +92,76 @@ class StudentProfileService extends BaseService
             $this->logSecurityEvent(
                 'student.profile.updated',
                 ['updated_fields' => array_keys(array_merge($userUpdates, $profileUpdates))],
+                'info',
+                $profile
+            );
+
+            return $this->formatProfile($student->fresh(), $profile->fresh());
+        });
+    }
+
+    /**
+     * Securely upload and replace the student's avatar image.
+     */
+    public function uploadAvatar(User $student, UploadedFile $file): array
+    {
+        $realPath = $file->getRealPath();
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $detectedMime = $realPath ? $finfo->file($realPath) : $file->getMimeType();
+
+        $allowedMimes = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+        ];
+
+        if (! isset($allowedMimes[$detectedMime])) {
+            throw ValidationException::withMessages([
+                'avatar' => [__('messages.invalid_image_signature')],
+            ]);
+        }
+
+        return $this->transaction(function () use ($student, $file, $allowedMimes, $detectedMime) {
+            $profile = StudentProfile::firstOrCreate(['student_id' => $student->id]);
+            $extension = $allowedMimes[$detectedMime];
+
+            $disk = (! app()->environment('testing') && config('filesystems.disks.supabase.key'))
+                ? 'supabase'
+                : 'public';
+
+            $filename = ($disk === 'supabase')
+                ? 'users/profiles/'.$student->id.'_'.Str::uuid().'.'.$extension
+                : 'avatars/students/'.Str::uuid().'.'.$extension;
+
+            Storage::disk($disk)->put($filename, file_get_contents($file->getRealPath()));
+
+            if ($student->avatar && preg_match('#/storage/(avatars/students/[a-zA-Z0-9\-]+\.(jpg|png|webp))$#', $student->avatar, $matches)) {
+                Storage::disk('public')->delete($matches[1]);
+            }
+
+            $publicUrl = ($disk === 'supabase' && method_exists(Storage::disk($disk), 'temporaryUrl'))
+                ? Storage::disk($disk)->temporaryUrl($filename, now()->addDays(7))
+                : Storage::disk($disk)->url($filename);
+
+            $student->update(['avatar' => $publicUrl]);
+
+            StoredFile::create([
+                'uuid' => (string) Str::uuid(),
+                'user_id' => $student->id,
+                'entity_type' => 'user_avatar',
+                'entity_id' => (string) $student->id,
+                'original_filename' => basename($file->getClientOriginalName()),
+                'storage_disk' => $disk,
+                'storage_path' => $filename,
+                'mime_type' => $detectedMime,
+                'file_size_bytes' => (int) $file->getSize(),
+                'storage_provider' => $disk === 'supabase' ? 'supabase' : 'local',
+                'upload_status' => 'completed',
+            ]);
+
+            $this->logSecurityEvent(
+                'student.avatar.uploaded',
+                ['mime_type' => $detectedMime],
                 'info',
                 $profile
             );
