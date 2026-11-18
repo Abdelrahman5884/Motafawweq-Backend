@@ -101,6 +101,17 @@ class StudentCourseLessonController extends BaseApiController
             return $this->notFoundResponse(__('messages.not_found'));
         }
 
+        if ($disk === 'local' || $disk === 'public') {
+            return response()->file(
+                Storage::disk($disk)->path($lesson->media_path),
+                [
+                    'Content-Type' => $lesson->media_mime_type ?: 'video/mp4',
+                    'Content-Disposition' => 'inline; filename="'.($lesson->media_original_name ?: 'lesson-media').'"',
+                    'Cache-Control' => 'private, max-age=3600',
+                ]
+            );
+        }
+
         if (method_exists(Storage::disk($disk), 'temporaryUrl')) {
             try {
                 return redirect()->away(Storage::disk($disk)->temporaryUrl($lesson->media_path, now()->addMinutes(60)));

@@ -3,11 +3,13 @@
 namespace App\Services\V1\Student;
 
 use App\Enums\CourseStatus;
+use App\Enums\DirectPaymentStatus;
 use App\Enums\LessonAttachmentType;
 use App\Enums\LessonStatus;
 use App\Models\Course;
 use App\Models\Lesson;
 use App\Models\LessonAttachment;
+use App\Models\StudentDirectPayment;
 use App\Models\StudentLessonNote;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentXpLedger;
@@ -50,13 +52,22 @@ class StudentCourseLessonService extends BaseService
             ->groupBy('course_id')
             ->pluck('completed_count', 'course_id');
 
-        return $courses->map(function (Course $course) use ($completedByCourse, $entitlements) {
+        $pendingCourseIds = StudentDirectPayment::query()
+            ->where('student_id', $student->id)
+            ->where('status', DirectPaymentStatus::PENDING)
+            ->whereIn('course_id', $courses->pluck('id'))
+            ->pluck('course_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        return $courses->map(function (Course $course) use ($completedByCourse, $entitlements, $pendingCourseIds) {
             $publishedLessons = (int) $course->published_lessons_count;
             $totalLessons = max($publishedLessons, (int) $course->lessons_count);
             $completed = (int) ($completedByCourse[$course->id] ?? 0);
             $progressPercent = $publishedLessons > 0 ? min(100, (int) round(($completed / $publishedLessons) * 100)) : 0;
             $priceEgp = (float) ($course->price_egp ?? 0);
-            $isEnrolled = in_array((int) $course->id, $entitlements['course_ids'], true) || $priceEgp <= 0;
+            $isEnrolled = in_array((int) $course->id, $entitlements['course_ids'], true);
+            $isPending = ! $isEnrolled && in_array((int) $course->id, $pendingCourseIds, true);
 
             return [
                 'id' => $course->uuid,
@@ -69,6 +80,7 @@ class StudentCourseLessonService extends BaseService
                 'descriptionAr' => $course->description_ar,
                 'priceEgp' => $priceEgp,
                 'isEnrolled' => $isEnrolled,
+                'isPending' => $isPending,
                 'teacherName' => $course->teacher?->name,
                 'teacherAvatar' => $course->teacher?->avatar,
                 'hoursTotal' => $course->hours_total,
@@ -86,7 +98,7 @@ class StudentCourseLessonService extends BaseService
     {
         /** @var Course|null $course */
         $course = Course::where('uuid', $courseUuid)
-            ->with(['teacher:id,name', 'lessons' => fn ($q) => $q->where('status', LessonStatus::PUBLISHED)->orderBy('sort_order')])
+            ->with(['teacher:id,name,avatar', 'lessons' => fn ($q) => $q->where('status', LessonStatus::PUBLISHED)->orderBy('id')])
             ->first();
 
         if (! $course) {
@@ -111,6 +123,7 @@ class StudentCourseLessonService extends BaseService
                 'titleAr' => $lesson->title_ar,
                 'durationLabel' => $lesson->duration_label,
                 'mediaMode' => $lesson->media_mode?->value ?? (string) $lesson->media_mode,
+                'hasMedia' => ! empty($lesson->media_path) || ! empty($lesson->embed_url),
                 'progressPercent' => (int) ($prog?->progress_percent ?? 0),
                 'isCompleted' => (bool) ($prog?->is_completed ?? false),
                 'isBookmarked' => (bool) ($prog?->is_bookmarked ?? false),
@@ -120,8 +133,10 @@ class StudentCourseLessonService extends BaseService
         return [
             'id' => $course->uuid,
             'titleAr' => $course->title_ar,
+            'subjectAr' => $course->subject_ar ?: $course->grade_ar,
             'gradeAr' => $course->grade_ar,
             'teacherName' => $course->teacher?->name,
+            'teacherAvatar' => $course->teacher?->avatar,
             'lessons' => $lessons,
         ];
     }

@@ -104,10 +104,6 @@ class StudentAccessService extends BaseService
             return true;
         }
 
-        if ($courseId !== null && Course::where('id', $courseId)->where('status', CourseStatus::PUBLISHED)->where('price_egp', '<=', 0)->exists()) {
-            return true;
-        }
-
         return in_array((int) $teacherId, $entitlements['teacher_ids'], true);
     }
 

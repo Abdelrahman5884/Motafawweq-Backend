@@ -141,13 +141,23 @@ class StudentBillingService extends BaseService
                 $teacherId = (int) $course->teacher_id;
                 $itemTitleAr = $course->title_ar;
                 $groupForCourse = StudyGroup::where('course_id', $course->id)->where('status', 'active')->first();
-                $basePriceEgp = $groupForCourse ? (float) $groupForCourse->price_egp : 450.0;
+                $basePriceEgp = $course->price_egp !== null ? (float) $course->price_egp : ($groupForCourse ? (float) $groupForCourse->price_egp : 0.0);
             } else {
                 throw ValidationException::withMessages(['target' => ['يرجى تحديد المجموعة أو الكورس المراد سداد اشتراكه.']]);
             }
 
-            if ($basePriceEgp <= 0) {
-                $basePriceEgp = 450.0;
+            if ($basePriceEgp < 0) {
+                $basePriceEgp = 0.0;
+            }
+
+            if ($course) {
+                $alreadyPending = StudentDirectPayment::where('student_id', $student->id)
+                    ->where('course_id', $course->id)
+                    ->where('status', DirectPaymentStatus::PENDING)
+                    ->first();
+                if ($alreadyPending) {
+                    return $alreadyPending;
+                }
             }
 
             $payoutAccountId = null;
