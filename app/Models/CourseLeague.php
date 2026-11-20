@@ -79,9 +79,9 @@ class CourseLeague extends Model
             return 0;
         }
 
-        $diff = (int) Carbon::now()->diffInDays($this->ends_at, false);
+        $hours = Carbon::now()->diffInHours($this->ends_at, false);
 
-        return max(0, $diff);
+        return $hours > 0 ? (int) ceil($hours / 24) : 0;
     }
 
     /**

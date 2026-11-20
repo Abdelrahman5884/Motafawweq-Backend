@@ -26,6 +26,13 @@ class StudentGamificationController extends BaseApiController
         return $this->successResponse($leagues);
     }
 
+    public function generalLeaderboard(): JsonResponse
+    {
+        $data = $this->gamificationService->getGeneralLeaderboard($this->authenticatedUser());
+
+        return $this->successResponse($data);
+    }
+
     public function leaderboard(string $uuid): JsonResponse
     {
         $data = $this->gamificationService->getLeagueLeaderboard($this->authenticatedUser(), $uuid);

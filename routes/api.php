@@ -250,6 +250,8 @@ Route::prefix('v1')->group(function () {
                     ->middleware('throttle:student-read');
                 Route::get('/leagues', [StudentGamificationController::class, 'leagues'])
                     ->middleware('throttle:student-read');
+                Route::get('/leagues/general/leaderboard', [StudentGamificationController::class, 'generalLeaderboard'])
+                    ->middleware('throttle:student-read');
                 Route::get('/leagues/{uuid}/leaderboard', [StudentGamificationController::class, 'leaderboard'])
                     ->whereUuid('uuid')
                     ->middleware('throttle:student-read');

@@ -24,6 +24,7 @@ use App\Models\StudentXpLedger;
 use App\Models\TeacherPayoutAccount;
 use App\Models\User;
 use App\Services\BaseService;
+use App\Services\V1\LeagueRulesService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\URL;
@@ -43,7 +44,8 @@ class StudentCourseLessonService extends BaseService
     ];
 
     public function __construct(
-        protected StudentAccessService $accessService
+        protected StudentAccessService $accessService,
+        protected LeagueRulesService $leagueRulesService
     ) {}
 
     /**
@@ -700,11 +702,23 @@ class StudentCourseLessonService extends BaseService
             $student->id,
             'lesson_completed',
             $lesson->id,
-            self::LESSON_COMPLETION_XP,
+            LeagueRulesService::XP_LESSON_COMPLETED,
             "إتمام محاضرة: {$lesson->title_ar}"
         );
 
-        return ($entry && $entry->wasRecentlyCreated) ? (int) $entry->points : 0;
+        if ($entry && $entry->wasRecentlyCreated) {
+            $points = (int) $entry->points;
+            $this->leagueRulesService->creditActiveLeagues(
+                $student,
+                $points,
+                $lesson->teacher_id ? (int) $lesson->teacher_id : null,
+                $lesson->course_id ? (int) $lesson->course_id : null
+            );
+
+            return $points;
+        }
+
+        return 0;
     }
 
     protected function formatNote(StudentLessonNote $note): array

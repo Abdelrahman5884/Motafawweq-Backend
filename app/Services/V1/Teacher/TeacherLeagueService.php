@@ -8,10 +8,12 @@ use App\Models\Course;
 use App\Models\CourseLeague;
 use App\Models\GroupEnrollment;
 use App\Models\LeagueParticipant;
+use App\Models\StudentXpLedger;
 use App\Models\StudyGroup;
 use App\Models\User;
 use App\Repositories\Contracts\CourseLeagueRepositoryInterface;
 use App\Services\BaseService;
+use App\Services\V1\LeagueRulesService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Validation\ValidationException;
@@ -19,7 +21,8 @@ use Illuminate\Validation\ValidationException;
 class TeacherLeagueService extends BaseService
 {
     public function __construct(
-        protected CourseLeagueRepositoryInterface $leagueRepository
+        protected CourseLeagueRepositoryInterface $leagueRepository,
+        protected LeagueRulesService $leagueRulesService
     ) {}
 
     /**
@@ -128,15 +131,18 @@ class TeacherLeagueService extends BaseService
 
             $enrollments = $enrollmentsQuery->get();
 
-            // Insert initial participants
-            $seenStudentIds = [];
-            foreach ($enrollments as $enrollment) {
-                if (in_array($enrollment->student_id, $seenStudentIds, true)) {
-                    continue;
-                }
-                $seenStudentIds[] = $enrollment->student_id;
+            // Insert initial participants using real rule-based XP and metrics (ZERO fabricated base XP)
+            $uniqueEnrollments = $enrollments->unique('student_id');
+            $metricsMap = $this->leagueRulesService->computeMetricsForStudents(
+                $uniqueEnrollments->pluck('student_id')->all(),
+                $teacher->id,
+                $course->id
+            );
 
-                $initialXp = 1000 + ($enrollment->streak_days * 20);
+            foreach ($uniqueEnrollments as $enrollment) {
+                $m = $metricsMap[$enrollment->student_id] ?? null;
+                $streakDays = (int) ($m['streakDays'] ?? $enrollment->streak_days ?? 0);
+                $initialXp = (int) ($m['ruleXp'] ?? ($streakDays * LeagueRulesService::XP_STREAK_PER_DAY));
 
                 LeagueParticipant::create([
                     'course_league_id' => $league->id,
@@ -144,16 +150,16 @@ class TeacherLeagueService extends BaseService
                     'rank' => 1,
                     'previous_rank' => null,
                     'xp_points' => $initialXp,
-                    'streak_days' => (int) $enrollment->streak_days,
+                    'streak_days' => $streakDays,
                     'badge_title_ar' => 'منافس نشط',
                     'tier' => LeagueTier::resolveFromXp($initialXp)->value,
                     'movement' => 'same',
-                    'school_ar' => 'مدرسة المتفوقين',
+                    'school_ar' => $m['schoolAr'] ?: null,
                     'group_ar' => $enrollment->group?->name_ar ?? $groupNameAr,
-                    'perfect_exams_count' => 0,
-                    'exams_solved_count' => 0,
-                    'homework_rate' => (int) $enrollment->attendance_rate,
-                    'attendance_rate' => (int) $enrollment->attendance_rate,
+                    'perfect_exams_count' => (int) ($m['perfectExams'] ?? 0),
+                    'exams_solved_count' => (int) ($m['examsSolved'] ?? 0),
+                    'homework_rate' => (int) ($m['homeworkRate'] ?? 0),
+                    'attendance_rate' => (int) ($m['attendanceRate'] ?? $enrollment->attendance_rate ?? 0),
                 ]);
             }
 
@@ -255,8 +261,18 @@ class TeacherLeagueService extends BaseService
                     ->with(['group'])
                     ->get();
 
-                foreach ($enrollments as $enrollment) {
-                    $initialXp = 1000 + ((int) $enrollment->streak_days * 20);
+                $uniqueEnrollments = $enrollments->unique('student_id');
+                $metricsMap = $this->leagueRulesService->computeMetricsForStudents(
+                    $uniqueEnrollments->pluck('student_id')->all(),
+                    $teacher->id,
+                    $league->course_id ? (int) $league->course_id : null
+                );
+
+                foreach ($uniqueEnrollments as $enrollment) {
+                    $m = $metricsMap[$enrollment->student_id] ?? null;
+                    $streakDays = (int) ($m['streakDays'] ?? $enrollment->streak_days ?? 0);
+                    $initialXp = (int) ($m['ruleXp'] ?? ($streakDays * LeagueRulesService::XP_STREAK_PER_DAY));
+
                     LeagueParticipant::firstOrCreate(
                         [
                             'course_league_id' => $league->id,
@@ -266,16 +282,16 @@ class TeacherLeagueService extends BaseService
                             'rank' => 1,
                             'previous_rank' => null,
                             'xp_points' => $initialXp,
-                            'streak_days' => (int) $enrollment->streak_days,
+                            'streak_days' => $streakDays,
                             'badge_title_ar' => 'منافس نشط',
                             'tier' => LeagueTier::resolveFromXp($initialXp)->value,
                             'movement' => 'same',
-                            'school_ar' => 'مدرسة المتفوقين',
+                            'school_ar' => $m['schoolAr'] ?: null,
                             'group_ar' => $enrollment->group?->name_ar ?? ($updates['group_name_ar'] ?? $league->group_name_ar),
-                            'perfect_exams_count' => 0,
-                            'exams_solved_count' => 0,
-                            'homework_rate' => (int) $enrollment->attendance_rate,
-                            'attendance_rate' => (int) $enrollment->attendance_rate,
+                            'perfect_exams_count' => (int) ($m['perfectExams'] ?? 0),
+                            'exams_solved_count' => (int) ($m['examsSolved'] ?? 0),
+                            'homework_rate' => (int) ($m['homeworkRate'] ?? 0),
+                            'attendance_rate' => (int) ($m['attendanceRate'] ?? $enrollment->attendance_rate ?? 0),
                         ]
                     );
                 }
@@ -333,7 +349,15 @@ class TeacherLeagueService extends BaseService
         }
 
         return $this->transaction(function () use ($teacher, $league, $student, $data) {
-            $initialXp = isset($data['initial_xp']) ? max(0, (int) $data['initial_xp']) : 1000;
+            $metrics = $this->leagueRulesService->computeMetricsForStudents(
+                [$student->id],
+                $teacher->id,
+                $league->course_id ? (int) $league->course_id : null
+            )[$student->id] ?? null;
+
+            $initialXp = array_key_exists('initial_xp', $data) && $data['initial_xp'] !== null
+                ? max(0, (int) $data['initial_xp'])
+                : (int) ($metrics['ruleXp'] ?? 0);
 
             $enrollment = GroupEnrollment::where('student_id', $student->id)
                 ->where('status', 'enrolled')
@@ -351,16 +375,16 @@ class TeacherLeagueService extends BaseService
                 'rank' => 1,
                 'previous_rank' => null,
                 'xp_points' => $initialXp,
-                'streak_days' => (int) ($enrollment?->streak_days ?? 0),
+                'streak_days' => (int) ($metrics['streakDays'] ?? $enrollment?->streak_days ?? 0),
                 'badge_title_ar' => 'منافس نشط',
                 'tier' => LeagueTier::resolveFromXp($initialXp)->value,
                 'movement' => 'same',
-                'school_ar' => 'مدرسة المتفوقين',
+                'school_ar' => $metrics['schoolAr'] ?: null,
                 'group_ar' => $groupName,
-                'perfect_exams_count' => 0,
-                'exams_solved_count' => 0,
-                'homework_rate' => (int) ($enrollment?->attendance_rate ?? 0),
-                'attendance_rate' => (int) ($enrollment?->attendance_rate ?? 0),
+                'perfect_exams_count' => (int) ($metrics['perfectExams'] ?? 0),
+                'exams_solved_count' => (int) ($metrics['examsSolved'] ?? 0),
+                'homework_rate' => (int) ($metrics['homeworkRate'] ?? 0),
+                'attendance_rate' => (int) ($metrics['attendanceRate'] ?? $enrollment?->attendance_rate ?? 0),
             ]);
 
             $league->recalculateRanksAndMetrics();
@@ -400,6 +424,14 @@ class TeacherLeagueService extends BaseService
         }
 
         return $this->transaction(function () use ($teacher, $league, $student, $data) {
+            $metrics = $this->leagueRulesService->computeMetricsForStudents(
+                [$student->id],
+                $teacher->id,
+                $league->course_id ? (int) $league->course_id : null
+            )[$student->id] ?? null;
+
+            $baseXp = (int) ($metrics['ruleXp'] ?? 0);
+
             /** @var LeagueParticipant $participant */
             $participant = LeagueParticipant::firstOrCreate(
                 [
@@ -408,15 +440,34 @@ class TeacherLeagueService extends BaseService
                 ],
                 [
                     'rank' => 1,
-                    'xp_points' => 1000,
+                    'xp_points' => $baseXp,
+                    'streak_days' => (int) ($metrics['streakDays'] ?? 0),
                     'badge_title_ar' => 'منافس نشط',
-                    'tier' => 'Bronze',
+                    'tier' => LeagueTier::resolveFromXp($baseXp)->value,
                     'movement' => 'same',
+                    'school_ar' => $metrics['schoolAr'] ?: null,
+                    'group_ar' => $metrics['groupAr'] ?: $league->group_name_ar,
+                    'perfect_exams_count' => (int) ($metrics['perfectExams'] ?? 0),
+                    'exams_solved_count' => (int) ($metrics['examsSolved'] ?? 0),
+                    'homework_rate' => (int) ($metrics['homeworkRate'] ?? 0),
+                    'attendance_rate' => (int) ($metrics['attendanceRate'] ?? 0),
                 ]
             );
 
             $xpToAdd = max(1, (int) ($data['xp_amount'] ?? 50));
             $participant->increment('xp_points', $xpToAdd);
+
+            $nextBonusId = ((int) StudentXpLedger::where('student_id', $student->id)
+                ->where('source_type', 'teacher_league_bonus')
+                ->max('source_id')) + 1;
+
+            StudentXpLedger::awardOnce(
+                $student->id,
+                'teacher_league_bonus',
+                $nextBonusId,
+                $xpToAdd,
+                trim((string) ($data['reason_ar'] ?? "مكافأة المعلم في {$league->title_ar}"))
+            );
 
             // Re-order and refresh all participants
             $league->recalculateRanksAndMetrics();
@@ -446,6 +497,7 @@ class TeacherLeagueService extends BaseService
         $league = $this->leagueRepository->findByUuidForTeacher($leagueUuid, $teacher);
 
         return $this->transaction(function () use ($teacher, $league) {
+            $this->leagueRulesService->syncCourseLeague($league);
             $league->recalculateRanksAndMetrics();
 
             $this->logSecurityEvent(

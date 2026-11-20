@@ -15,6 +15,7 @@ use App\Models\StudentRiskSignal;
 use App\Models\StudentXpLedger;
 use App\Models\User;
 use App\Services\BaseService;
+use App\Services\V1\LeagueRulesService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Validation\ValidationException;
@@ -22,7 +23,8 @@ use Illuminate\Validation\ValidationException;
 class StudentExamTakingService extends BaseService
 {
     public function __construct(
-        protected StudentAccessService $accessService
+        protected StudentAccessService $accessService,
+        protected LeagueRulesService $leagueRulesService
     ) {}
 
     /**
@@ -407,8 +409,11 @@ class StudentExamTakingService extends BaseService
             $exam->recalculateMetrics();
             $exam->recalculatePerformanceMetrics();
 
-            // Award immutable XP for completing the exam
-            $xpPoints = $submission->is_full_mark ? 50 : ($submission->is_passed ? 30 : 10);
+            // Award immutable XP for completing the exam & sync active leagues
+            $xpPoints = $this->leagueRulesService->resolveExamXp(
+                (bool) $submission->is_full_mark,
+                (bool) $submission->is_passed
+            );
             $xpEntry = StudentXpLedger::awardOnce(
                 $student->id,
                 'exam_submitted',
@@ -416,6 +421,15 @@ class StudentExamTakingService extends BaseService
                 $xpPoints,
                 "إتمام امتحان: {$exam->title_ar}"
             );
+
+            if ($xpEntry && $xpEntry->wasRecentlyCreated) {
+                $this->leagueRulesService->creditActiveLeagues(
+                    $student,
+                    $xpPoints,
+                    $exam->teacher_id ? (int) $exam->teacher_id : null,
+                    $exam->course_id ? (int) $exam->course_id : null
+                );
+            }
 
             // Log anti-cheat risk signal if abnormal tab switching occurred
             if ($tabSwitches >= 5) {
