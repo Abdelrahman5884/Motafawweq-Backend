@@ -191,7 +191,7 @@ class TeacherLeagueTest extends TestCase
             'course_league_id' => $league->id,
             'student_id' => $stdA->id,
             'rank' => 1,
-            'xp_points' => 2000,
+            'xp_points' => 100,
             'tier' => 'Silver',
         ]);
 
@@ -199,16 +199,16 @@ class TeacherLeagueTest extends TestCase
             'course_league_id' => $league->id,
             'student_id' => $stdB->id,
             'rank' => 2,
-            'xp_points' => 1500,
+            'xp_points' => 50,
             'tier' => 'Bronze',
         ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
-        // Award 1800 XP to Student B so their total becomes 3300 (> 2000 of Student A)
+        // Award 220 XP to Student B so their total becomes 270 (Diamond >= 251, > 100 of Student A)
         $payload = [
             'studentId' => $stdB->id,
-            'xpAmount' => 1800,
+            'xpAmount' => 220,
             'reasonAr' => 'جائزة التميز في الواجب والامتحان',
         ];
 

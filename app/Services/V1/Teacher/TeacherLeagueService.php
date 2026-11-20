@@ -131,34 +131,35 @@ class TeacherLeagueService extends BaseService
 
             $enrollments = $enrollmentsQuery->get();
 
-            // Insert initial participants using real rule-based XP and metrics (ZERO fabricated base XP)
+            // Every new league starts fresh at 0 points for all participants (NO pre-league points carried over!)
             $uniqueEnrollments = $enrollments->unique('student_id');
             $metricsMap = $this->leagueRulesService->computeMetricsForStudents(
                 $uniqueEnrollments->pluck('student_id')->all(),
                 $teacher->id,
-                $course->id
+                $course->id,
+                $startsAt,
+                $endsAt
             );
 
             foreach ($uniqueEnrollments as $enrollment) {
                 $m = $metricsMap[$enrollment->student_id] ?? null;
                 $streakDays = (int) ($m['streakDays'] ?? $enrollment->streak_days ?? 0);
-                $initialXp = (int) ($m['ruleXp'] ?? ($streakDays * LeagueRulesService::XP_STREAK_PER_DAY));
 
                 LeagueParticipant::create([
                     'course_league_id' => $league->id,
                     'student_id' => $enrollment->student_id,
                     'rank' => 1,
                     'previous_rank' => null,
-                    'xp_points' => $initialXp,
+                    'xp_points' => 0,
                     'streak_days' => $streakDays,
                     'badge_title_ar' => 'منافس نشط',
-                    'tier' => LeagueTier::resolveFromXp($initialXp)->value,
+                    'tier' => LeagueTier::BRONZE->value,
                     'movement' => 'same',
                     'school_ar' => $m['schoolAr'] ?: null,
                     'group_ar' => $enrollment->group?->name_ar ?? $groupNameAr,
-                    'perfect_exams_count' => (int) ($m['perfectExams'] ?? 0),
-                    'exams_solved_count' => (int) ($m['examsSolved'] ?? 0),
-                    'homework_rate' => (int) ($m['homeworkRate'] ?? 0),
+                    'perfect_exams_count' => 0,
+                    'exams_solved_count' => 0,
+                    'homework_rate' => 0,
                     'attendance_rate' => (int) ($m['attendanceRate'] ?? $enrollment->attendance_rate ?? 0),
                 ]);
             }
@@ -265,13 +266,14 @@ class TeacherLeagueService extends BaseService
                 $metricsMap = $this->leagueRulesService->computeMetricsForStudents(
                     $uniqueEnrollments->pluck('student_id')->all(),
                     $teacher->id,
-                    $league->course_id ? (int) $league->course_id : null
+                    $league->course_id ? (int) $league->course_id : null,
+                    $league->starts_at,
+                    $league->ends_at
                 );
 
                 foreach ($uniqueEnrollments as $enrollment) {
                     $m = $metricsMap[$enrollment->student_id] ?? null;
                     $streakDays = (int) ($m['streakDays'] ?? $enrollment->streak_days ?? 0);
-                    $initialXp = (int) ($m['ruleXp'] ?? ($streakDays * LeagueRulesService::XP_STREAK_PER_DAY));
 
                     LeagueParticipant::firstOrCreate(
                         [
@@ -281,10 +283,10 @@ class TeacherLeagueService extends BaseService
                         [
                             'rank' => 1,
                             'previous_rank' => null,
-                            'xp_points' => $initialXp,
+                            'xp_points' => 0,
                             'streak_days' => $streakDays,
                             'badge_title_ar' => 'منافس نشط',
-                            'tier' => LeagueTier::resolveFromXp($initialXp)->value,
+                            'tier' => LeagueTier::BRONZE->value,
                             'movement' => 'same',
                             'school_ar' => $m['schoolAr'] ?: null,
                             'group_ar' => $enrollment->group?->name_ar ?? ($updates['group_name_ar'] ?? $league->group_name_ar),
@@ -352,12 +354,14 @@ class TeacherLeagueService extends BaseService
             $metrics = $this->leagueRulesService->computeMetricsForStudents(
                 [$student->id],
                 $teacher->id,
-                $league->course_id ? (int) $league->course_id : null
+                $league->course_id ? (int) $league->course_id : null,
+                $league->starts_at,
+                $league->ends_at
             )[$student->id] ?? null;
 
             $initialXp = array_key_exists('initial_xp', $data) && $data['initial_xp'] !== null
                 ? max(0, (int) $data['initial_xp'])
-                : (int) ($metrics['ruleXp'] ?? 0);
+                : 0;
 
             $enrollment = GroupEnrollment::where('student_id', $student->id)
                 ->where('status', 'enrolled')
@@ -427,10 +431,10 @@ class TeacherLeagueService extends BaseService
             $metrics = $this->leagueRulesService->computeMetricsForStudents(
                 [$student->id],
                 $teacher->id,
-                $league->course_id ? (int) $league->course_id : null
+                $league->course_id ? (int) $league->course_id : null,
+                $league->starts_at,
+                $league->ends_at
             )[$student->id] ?? null;
-
-            $baseXp = (int) ($metrics['ruleXp'] ?? 0);
 
             /** @var LeagueParticipant $participant */
             $participant = LeagueParticipant::firstOrCreate(
@@ -440,10 +444,10 @@ class TeacherLeagueService extends BaseService
                 ],
                 [
                     'rank' => 1,
-                    'xp_points' => $baseXp,
+                    'xp_points' => 0,
                     'streak_days' => (int) ($metrics['streakDays'] ?? 0),
                     'badge_title_ar' => 'منافس نشط',
-                    'tier' => LeagueTier::resolveFromXp($baseXp)->value,
+                    'tier' => LeagueTier::BRONZE->value,
                     'movement' => 'same',
                     'school_ar' => $metrics['schoolAr'] ?: null,
                     'group_ar' => $metrics['groupAr'] ?: $league->group_name_ar,

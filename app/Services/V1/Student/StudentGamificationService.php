@@ -14,6 +14,7 @@ use App\Models\ExamSubmission;
 use App\Models\HomeworkSubmission;
 use App\Models\LeagueParticipant;
 use App\Models\Lesson;
+use App\Models\RepublicLeague;
 use App\Models\StudentDailyActivity;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentProfile;
@@ -127,6 +128,7 @@ class StudentGamificationService extends BaseService
                 'id' => $l->uuid,
                 'category' => 'teachers',
                 'isRepublicLeague' => false,
+                'hasStarted' => true,
                 'titleAr' => $l->title_ar,
                 'courseTitleAr' => $l->course_name_ar,
                 'groupNameAr' => $l->group_name_ar,
@@ -338,11 +340,39 @@ class StudentGamificationService extends BaseService
     }
 
     /**
-     * Retrieve live General Republic League leaderboard computed strictly from official XP ledger + daily streak rules.
+     * Retrieve live General Republic League leaderboard (ONLY active once started by Platform Admin).
+     * When Admin has not started a Republic League round yet, returns hasStarted = false with an empty leaderboard.
      */
     public function getGeneralLeaderboard(User $student): array
     {
-        $rankedRows = $this->computeGeneralRankedStudents($student);
+        $republicLeague = RepublicLeague::currentActive();
+
+        if (! $republicLeague) {
+            return [
+                'leagueId' => 'general',
+                'category' => 'general',
+                'isRepublicLeague' => true,
+                'hasStarted' => false,
+                'titleAr' => 'دوري الجمهورية العام',
+                'courseTitleAr' => 'المجموع التراكمي لجميع المواد',
+                'groupNameAr' => 'جميع طلاب المنصة',
+                'teacherName' => null,
+                'durationType' => LeagueDuration::MONTHLY->value,
+                'durationLabelAr' => 'يُطلق من إدارة المنصة',
+                'isActive' => false,
+                'startsAt' => null,
+                'endsAt' => null,
+                'daysRemaining' => 0,
+                'totalCompetitors' => 0,
+                'myStanding' => null,
+                'leaderboard' => [],
+                'rules' => $this->leagueRulesService->getScoringRules(),
+                'tiers' => $this->leagueRulesService->getTiersDefinition(),
+                'prizes' => $this->leagueRulesService->getPrizesForLeague(LeagueDuration::MONTHLY->value, true),
+            ];
+        }
+
+        $rankedRows = $this->computeGeneralRankedStudents($student, $republicLeague);
         $totalCompetitors = count($rankedRows);
 
         $topRows = array_slice($rankedRows, 0, 100);
@@ -352,7 +382,13 @@ class StudentGamificationService extends BaseService
             ? StudentProfile::whereIn('student_id', $topStudentIds)->get()->keyBy('student_id')
             : collect();
 
-        $metricsMap = $this->leagueRulesService->computeMetricsForStudents($topStudentIds);
+        $metricsMap = $this->leagueRulesService->computeMetricsForStudents(
+            $topStudentIds,
+            null,
+            null,
+            $republicLeague->starts_at,
+            $republicLeague->ends_at
+        );
 
         $leaderboard = [];
         foreach ($topRows as $row) {
@@ -395,22 +431,25 @@ class StudentGamificationService extends BaseService
         $myStreak = (int) ($myRow['streakDays'] ?? 0);
         $tierProgress = $this->leagueRulesService->resolveTierProgress($myXp);
 
-        $roundBounds = $this->getWeeklyRoundBounds();
+        $durationEnum = $republicLeague->duration_type instanceof LeagueDuration
+            ? $republicLeague->duration_type
+            : (LeagueDuration::tryFrom((string) $republicLeague->duration_type) ?? LeagueDuration::MONTHLY);
 
         return [
             'leagueId' => 'general',
             'category' => 'general',
             'isRepublicLeague' => true,
-            'titleAr' => 'دوري الجمهورية العام',
+            'hasStarted' => true,
+            'titleAr' => $republicLeague->title_ar ?: 'دوري الجمهورية العام',
             'courseTitleAr' => 'المجموع التراكمي لجميع المواد',
             'groupNameAr' => 'جميع طلاب المنصة',
             'teacherName' => null,
-            'durationType' => LeagueDuration::WEEKLY->value,
-            'durationLabelAr' => LeagueDuration::WEEKLY->labelAr(),
+            'durationType' => $durationEnum->value,
+            'durationLabelAr' => $durationEnum->labelAr(),
             'isActive' => true,
-            'startsAt' => $roundBounds['startsAt'],
-            'endsAt' => $roundBounds['endsAt'],
-            'daysRemaining' => $roundBounds['daysRemaining'],
+            'startsAt' => $republicLeague->starts_at?->format('Y-m-d'),
+            'endsAt' => $republicLeague->ends_at?->format('Y-m-d'),
+            'daysRemaining' => $republicLeague->roundDaysRemaining(),
             'totalCompetitors' => $totalCompetitors,
             'myStanding' => [
                 'rank' => $myRank,
@@ -426,7 +465,7 @@ class StudentGamificationService extends BaseService
             'leaderboard' => $leaderboard,
             'rules' => $this->leagueRulesService->getScoringRules(),
             'tiers' => $this->leagueRulesService->getTiersDefinition(),
-            'prizes' => $this->leagueRulesService->getPrizesForLeague(LeagueDuration::WEEKLY->value, true),
+            'prizes' => $this->leagueRulesService->getPrizesForLeague($durationEnum->value, true),
         ];
     }
 
@@ -464,7 +503,9 @@ class StudentGamificationService extends BaseService
         $metricsMap = $this->leagueRulesService->computeMetricsForStudents(
             $studentIds,
             (int) $league->teacher_id,
-            $league->course_id ? (int) $league->course_id : null
+            $league->course_id ? (int) $league->course_id : null,
+            $league->starts_at,
+            $league->ends_at
         );
 
         $leaderboard = [];
@@ -530,6 +571,7 @@ class StudentGamificationService extends BaseService
             'leagueId' => $league->uuid,
             'category' => 'teachers',
             'isRepublicLeague' => false,
+            'hasStarted' => true,
             'titleAr' => $league->title_ar,
             'courseTitleAr' => $league->course_name_ar,
             'groupNameAr' => $league->group_name_ar,
@@ -561,34 +603,66 @@ class StudentGamificationService extends BaseService
 
     /**
      * Build General Republic League summary row for listLeagues().
+     * Strictly reflects whether Platform Admin has started an active Republic League round.
      */
     protected function buildGeneralLeagueSummary(User $student): array
     {
-        $ranked = $this->computeGeneralRankedStudents($student);
+        $republicLeague = RepublicLeague::currentActive();
+
+        if (! $republicLeague) {
+            return [
+                'id' => 'general',
+                'category' => 'general',
+                'isRepublicLeague' => true,
+                'hasStarted' => false,
+                'titleAr' => 'دوري الجمهورية العام',
+                'courseTitleAr' => 'المجموع التراكمي لجميع المواد',
+                'groupNameAr' => 'جميع طلاب المنصة',
+                'teacherName' => null,
+                'durationType' => LeagueDuration::MONTHLY->value,
+                'durationLabelAr' => 'لم يبدأ بعد',
+                'tier' => LeagueTier::BRONZE->value,
+                'tierLabelAr' => LeagueTier::BRONZE->labelAr(),
+                'participantsCount' => 0,
+                'isActive' => false,
+                'startsAt' => null,
+                'endsAt' => null,
+                'daysRemaining' => 0,
+                'myRank' => null,
+                'myXp' => 0,
+                'myStreak' => 0,
+                'myBadgeAr' => null,
+            ];
+        }
+
+        $ranked = $this->computeGeneralRankedStudents($student, $republicLeague);
         $myRow = collect($ranked)->firstWhere('studentId', (int) $student->id);
         $myXp = (int) ($myRow['xpPoints'] ?? 0);
         $myRank = $myRow ? (int) $myRow['rank'] : null;
         $myStreak = (int) ($myRow['streakDays'] ?? 0);
         $tierEnum = LeagueTier::resolveFromXp($myXp);
-        $roundBounds = $this->getWeeklyRoundBounds();
+        $durationEnum = $republicLeague->duration_type instanceof LeagueDuration
+            ? $republicLeague->duration_type
+            : (LeagueDuration::tryFrom((string) $republicLeague->duration_type) ?? LeagueDuration::MONTHLY);
 
         return [
             'id' => 'general',
             'category' => 'general',
             'isRepublicLeague' => true,
-            'titleAr' => 'دوري الجمهورية العام',
+            'hasStarted' => true,
+            'titleAr' => $republicLeague->title_ar ?: 'دوري الجمهورية العام',
             'courseTitleAr' => 'المجموع التراكمي لجميع المواد',
             'groupNameAr' => 'جميع طلاب المنصة',
             'teacherName' => null,
-            'durationType' => LeagueDuration::WEEKLY->value,
-            'durationLabelAr' => LeagueDuration::WEEKLY->labelAr(),
+            'durationType' => $durationEnum->value,
+            'durationLabelAr' => $durationEnum->labelAr(),
             'tier' => $tierEnum->value,
             'tierLabelAr' => $tierEnum->labelAr(),
             'participantsCount' => count($ranked),
             'isActive' => true,
-            'startsAt' => $roundBounds['startsAt'],
-            'endsAt' => $roundBounds['endsAt'],
-            'daysRemaining' => $roundBounds['daysRemaining'],
+            'startsAt' => $republicLeague->starts_at?->format('Y-m-d'),
+            'endsAt' => $republicLeague->ends_at?->format('Y-m-d'),
+            'daysRemaining' => $republicLeague->roundDaysRemaining(),
             'myRank' => $myRank,
             'myXp' => $myXp,
             'myStreak' => $myStreak,
@@ -597,12 +671,12 @@ class StudentGamificationService extends BaseService
     }
 
     /**
-     * Compute authoritative ranked student list for the General Republic League strictly by official league rules:
+     * Compute authoritative ranked student list for an active Admin-started Republic League strictly within its window:
      * True/False (+1) + MCQ (+3) + Essay (+5) + Exam Full Mark Bonus (+3) + Daily Streak (+3/day) + Teacher Bonus.
      *
      * @return array<int, array<string, mixed>>
      */
-    protected function computeGeneralRankedStudents(User $currentStudent): array
+    protected function computeGeneralRankedStudents(User $currentStudent, RepublicLeague $republicLeague): array
     {
         $activeStudents = User::query()
             ->where('role', UserRole::STUDENT)
@@ -610,12 +684,20 @@ class StudentGamificationService extends BaseService
             ->get(['id', 'name', 'avatar']);
 
         $studentIds = $activeStudents->pluck('id')->map(fn ($id) => (int) $id)->all();
-        $metricsMap = $this->leagueRulesService->computeMetricsForStudents($studentIds);
+        $metricsMap = $this->leagueRulesService->computeMetricsForStudents(
+            $studentIds,
+            null,
+            null,
+            $republicLeague->starts_at,
+            $republicLeague->ends_at
+        );
 
         $teacherBonusByStudent = ! empty($studentIds)
             ? StudentXpLedger::query()
                 ->whereIn('student_id', $studentIds)
                 ->where('source_type', 'teacher_league_bonus')
+                ->where('created_at', '>=', $republicLeague->starts_at)
+                ->when($republicLeague->ends_at, fn ($q) => $q->where('created_at', '<=', $republicLeague->ends_at))
                 ->select(['student_id', DB::raw('SUM(points) as bonus_xp')])
                 ->groupBy('student_id')
                 ->pluck('bonus_xp', 'student_id')
@@ -625,12 +707,12 @@ class StudentGamificationService extends BaseService
         foreach ($activeStudents as $u) {
             $sid = (int) $u->id;
             $m = $metricsMap[$sid] ?? [];
-            $streakDays = (int) ($m['streakDays'] ?? 0);
+            $streakDays = (int) ($m['windowStreakDays'] ?? 0);
             $ruleXp = (int) ($m['ruleXp'] ?? 0);
             $teacherBonus = (int) ($teacherBonusByStudent[$sid] ?? 0);
             $totalXp = $ruleXp + $teacherBonus;
 
-            // Include students who have earned league points, plus always include current user
+            // Include students who have earned league points in this round, plus always include current user
             if ($totalXp <= 0 && $sid !== (int) $currentStudent->id) {
                 continue;
             }
@@ -661,25 +743,6 @@ class StudentGamificationService extends BaseService
         unset($row);
 
         return $rows;
-    }
-
-    /**
-     * Compute current weekly round start/end dates (Saturday -> Friday 23:59).
-     *
-     * @return array{startsAt: string, endsAt: string, daysRemaining: int}
-     */
-    protected function getWeeklyRoundBounds(): array
-    {
-        $now = Carbon::now();
-        $weekStart = $now->copy()->startOfWeek(Carbon::SATURDAY);
-        $weekEnd = $weekStart->copy()->addDays(6)->endOfDay();
-        $hoursRemaining = $now->diffInHours($weekEnd, false);
-
-        return [
-            'startsAt' => $weekStart->format('Y-m-d'),
-            'endsAt' => $weekEnd->format('Y-m-d'),
-            'daysRemaining' => $hoursRemaining > 0 ? (int) ceil($hoursRemaining / 24) : 0,
-        ];
     }
 
     /**

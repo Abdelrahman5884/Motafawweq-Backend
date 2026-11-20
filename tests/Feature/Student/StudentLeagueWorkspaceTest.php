@@ -271,6 +271,14 @@ class StudentLeagueWorkspaceTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.myStanding.rank', 1)
             ->assertJsonPath('data.myStanding.xpPoints', 15)
+            ->assertJsonPath('data.myStanding.tier', 'Bronze')
+            ->assertJsonPath('data.myStanding.nextTier', 'Silver')
+            ->assertJsonPath('data.myStanding.xpToNextTier', 51)
+            ->assertJsonPath('data.tiers.0.minXp', 251)
+            ->assertJsonPath('data.tiers.1.minXp', 151)
+            ->assertJsonPath('data.tiers.2.minXp', 66)
+            ->assertJsonPath('data.tiers.3.minXp', 0)
+            ->assertJsonPath('data.tiers.3.maxXp', 65)
             ->assertJsonPath('data.leaderboard.0.isCurrentUser', true)
             ->assertJsonPath('data.leaderboard.0.xpPoints', 15)
             ->assertJsonPath('data.leaderboard.0.examsSolved', 2)
@@ -285,14 +293,57 @@ class StudentLeagueWorkspaceTest extends TestCase
             ->assertJsonPath('data.rules.3.points', 3)
             ->assertJsonPath('data.rules.4.points', 3);
 
-        // 5. General Republic League = 15 exam pts + (3 streak days * 3 = 9 pts) = 24 pts (ZERO lesson/homework inflation!)
+        // 5. General Republic League has NOT started yet (only Admin can start it!)
         $this->getJson('/api/v1/student/leagues/general/leaderboard')
             ->assertOk()
             ->assertJsonPath('data.leagueId', 'general')
-            ->assertJsonPath('data.myStanding.rank', 1)
-            ->assertJsonPath('data.myStanding.xpPoints', 24)
-            ->assertJsonPath('data.leaderboard.0.xpPoints', 24)
-            ->assertJsonPath('data.leaderboard.0.streakDays', 3);
+            ->assertJsonPath('data.hasStarted', false)
+            ->assertJsonPath('data.isActive', false)
+            ->assertJsonPath('data.totalCompetitors', 0)
+            ->assertJsonCount(0, 'data.leaderboard');
+
+        // Student cannot start Republic League (403)
+        $this->postJson('/api/v1/admin/leagues/republic/start')->assertForbidden();
+
+        // Admin starts a fresh General Republic League NOW -> everyone starts at 0 pts (pre-start exams do NOT count!)
+        $admin = User::factory()->create([
+            'name' => 'مدير المنصة',
+            'email' => 'admin.lg@motafawweq.com',
+            'role' => UserRole::ADMIN,
+            'status' => UserStatus::ACTIVE,
+            'email_verified_at' => now(),
+        ]);
+
+        Carbon::setTestNow(now()->addMinute());
+        Sanctum::actingAs($admin, [TokenType::ACCESS->value]);
+        $this->postJson('/api/v1/admin/leagues/republic/start', [
+            'title_ar' => 'دوري الجمهورية العام — الجولة الأولى',
+            'duration' => 'monthly',
+        ])->assertCreated()
+            ->assertJsonPath('data.isActive', true);
+
+        // Immediately after Admin starts Republic League, Student A starts cleanly at 0 pts (old exams ignored!)
+        Sanctum::actingAs($studentA, [TokenType::ACCESS->value]);
+        $this->getJson('/api/v1/student/leagues/general/leaderboard')
+            ->assertOk()
+            ->assertJsonPath('data.hasStarted', true)
+            ->assertJsonPath('data.isActive', true)
+            ->assertJsonPath('data.myStanding.xpPoints', 0);
+
+        // Recreating a brand-new teacher Course League ALSO starts everyone cleanly at 0 pts (NO old points carried over!)
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+        $freshLeagueRes = $this->postJson('/api/v1/teacher/leagues', [
+            'courseId' => $course->uuid,
+            'duration' => 'monthly',
+            'titleAr' => 'دوري جديد من الصفر',
+        ])->assertCreated();
+
+        $freshLeagueUuid = $freshLeagueRes->json('data.id');
+        Sanctum::actingAs($studentA, [TokenType::ACCESS->value]);
+        $this->getJson("/api/v1/student/leagues/{$freshLeagueUuid}/leaderboard")
+            ->assertOk()
+            ->assertJsonPath('data.myStanding.xpPoints', 0)
+            ->assertJsonPath('data.leaderboard.0.xpPoints', 0);
 
         // 6. Unenrolled outsider is blocked (403 IDOR)
         Sanctum::actingAs($outsider, [TokenType::ACCESS->value]);
@@ -367,8 +418,8 @@ class StudentLeagueWorkspaceTest extends TestCase
             'course_league_id' => $expiredLeague->id,
             'student_id' => $student->id,
             'rank' => 1,
-            'xp_points' => 3100,
-            'tier' => 'Bronze', // Stale tier should auto-fix to Diamond (>= 3000)
+            'xp_points' => 260,
+            'tier' => 'Bronze', // Stale tier should auto-fix to Diamond (>= 251)
         ]);
 
         Sanctum::actingAs($student, [TokenType::ACCESS->value]);

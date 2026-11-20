@@ -14,6 +14,7 @@ use App\Models\GroupEnrollment;
 use App\Models\Homework;
 use App\Models\HomeworkSubmission;
 use App\Models\LeagueParticipant;
+use App\Models\StudentDailyActivity;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentProfile;
 use App\Models\User;
@@ -346,12 +347,18 @@ class LeagueRulesService
 
     /**
      * Compute real, batched performance metrics and rule-based league points for a list of students (zero N+1).
+     * When $since is provided, ONLY activities occurring on or after $since (and before $until) are counted!
      *
      * @param  array<int, int>  $studentIds
      * @return array<int, array<string, mixed>>
      */
-    public function computeMetricsForStudents(array $studentIds, ?int $teacherId = null, ?int $courseId = null): array
-    {
+    public function computeMetricsForStudents(
+        array $studentIds,
+        ?int $teacherId = null,
+        ?int $courseId = null,
+        ?Carbon $since = null,
+        ?Carbon $until = null
+    ): array {
         $ids = array_values(array_unique(array_filter(array_map('intval', $studentIds))));
         if (empty($ids)) {
             return [];
@@ -371,13 +378,20 @@ class LeagueRulesService
         }
         $enrollmentsByStudent = $enrollmentQuery->get()->groupBy('student_id');
 
-        // 3. Exam submissions (real solved & full-mark counts)
+        // 3. Exam submissions (real solved & full-mark counts within optional league window)
         $examQuery = ExamSubmission::query()
             ->whereIn('exam_submissions.student_id', $ids)
             ->whereIn('exam_submissions.status', [
                 ExamSubmissionStatus::SUBMITTED->value,
                 ExamSubmissionStatus::GRADED->value,
             ]);
+
+        if ($since !== null) {
+            $examQuery->where('exam_submissions.submitted_at', '>=', $since);
+        }
+        if ($until !== null) {
+            $examQuery->where('exam_submissions.submitted_at', '<=', $until);
+        }
 
         if ($teacherId !== null || $courseId !== null) {
             $examQuery->join('exams', 'exams.id', '=', 'exam_submissions.exam_id');
@@ -412,6 +426,13 @@ class LeagueRulesService
             ])
             ->where('exam_submission_answers.is_correct', true);
 
+        if ($since !== null) {
+            $answersQuery->where('exam_submissions.submitted_at', '>=', $since);
+        }
+        if ($until !== null) {
+            $answersQuery->where('exam_submissions.submitted_at', '<=', $until);
+        }
+
         if ($teacherId !== null || $courseId !== null) {
             $answersQuery->join('exams', 'exams.id', '=', 'exam_submissions.exam_id');
             if ($teacherId !== null) {
@@ -435,10 +456,32 @@ class LeagueRulesService
             ->get()
             ->keyBy('student_id');
 
-        // 5. Completed lessons (for student profile display metrics)
+        // 5. Daily active streak days strictly inside the league window (when $since is set)
+        $windowActiveDaysByStudent = collect();
+        if ($since !== null) {
+            $actQuery = StudentDailyActivity::query()
+                ->whereIn('student_id', $ids)
+                ->where('first_seen_at', '>=', $since);
+            if ($until !== null) {
+                $actQuery->where('first_seen_at', '<=', $until);
+            }
+            $windowActiveDaysByStudent = $actQuery
+                ->select(['student_id', DB::raw('COUNT(DISTINCT activity_date) as active_days')])
+                ->groupBy('student_id')
+                ->pluck('active_days', 'student_id');
+        }
+
+        // 6. Completed lessons (for student profile display metrics)
         $lessonQuery = StudentLessonProgress::query()
             ->whereIn('student_lesson_progresses.student_id', $ids)
             ->where('student_lesson_progresses.is_completed', true);
+
+        if ($since !== null) {
+            $lessonQuery->where('student_lesson_progresses.completed_at', '>=', $since);
+        }
+        if ($until !== null) {
+            $lessonQuery->where('student_lesson_progresses.completed_at', '<=', $until);
+        }
 
         if ($courseId !== null) {
             $lessonQuery->where('student_lesson_progresses.course_id', $courseId);
@@ -455,7 +498,7 @@ class LeagueRulesService
             ->groupBy('student_lesson_progresses.student_id')
             ->pluck('lessons_completed', 'student_id');
 
-        // 6. Homeworks (for student profile display metrics)
+        // 7. Homeworks (for student profile display metrics)
         $hwBaseQuery = Homework::query();
         if ($teacherId !== null) {
             $hwBaseQuery->where('teacher_id', $teacherId);
@@ -472,6 +515,8 @@ class LeagueRulesService
             ? HomeworkSubmission::query()
                 ->whereIn('student_id', $ids)
                 ->whereIn('homework_id', $scopedHomeworkIds)
+                ->when($since !== null, fn ($q) => $q->where('submitted_at', '>=', $since))
+                ->when($until !== null, fn ($q) => $q->where('submitted_at', '<=', $until))
                 ->select(['student_id', DB::raw('COUNT(DISTINCT homework_id) as hw_submitted')])
                 ->groupBy('student_id')
                 ->pluck('hw_submitted', 'student_id')
@@ -489,6 +534,10 @@ class LeagueRulesService
                 (int) ($prof?->current_streak_days ?? 0),
                 (int) ($stdEnrollments->max('streak_days') ?? 0)
             );
+            $windowStreakDays = $since !== null
+                ? min($streakDays, (int) ($windowActiveDaysByStudent[$sid] ?? 0))
+                : $streakDays;
+
             $attendanceRate = $stdEnrollments->isNotEmpty()
                 ? (int) round((float) $stdEnrollments->avg('attendance_rate'))
                 : 0;
@@ -508,19 +557,20 @@ class LeagueRulesService
                 ? (int) min(100, round(($homeworksSubmitted / $totalScopedHomeworks) * 100))
                 : 0;
 
-            // Exact Official League Formula:
+            // Exact Official League Formula (strictly within league window when $since is set):
             // True/False (+1) + MCQ (+3) + Essay (+5) + Full Mark Bonus (+3) + Daily Streak (+3/day)
             $ruleXp = ($correctTf * self::XP_QUESTION_TRUE_FALSE)
                 + ($correctMcq * self::XP_QUESTION_MCQ)
                 + ($correctEssay * self::XP_QUESTION_ESSAY)
                 + ($perfectExams * self::XP_EXAM_FULL_MARK_BONUS)
-                + ($streakDays * self::XP_STREAK_PER_DAY);
+                + ($windowStreakDays * self::XP_STREAK_PER_DAY);
 
             $schoolAr = trim((string) ($prof?->school_name ?: $prof?->governorate ?: $firstEnrollment?->group?->center_name ?: ''));
             $groupAr = trim((string) ($firstEnrollment?->group?->name_ar ?: ''));
 
             $result[$sid] = [
                 'streakDays' => $streakDays,
+                'windowStreakDays' => $windowStreakDays,
                 'attendanceRate' => min(100, max(0, $attendanceRate)),
                 'homeworkRate' => $homeworkRate,
                 'examsSolved' => $examsSolved,
@@ -552,6 +602,9 @@ class LeagueRulesService
         $activeLeagues = CourseLeague::query()
             ->where('is_active', true)
             ->where(function ($q) use ($now) {
+                $q->whereNull('starts_at')->orWhere('starts_at', '<=', $now);
+            })
+            ->where(function ($q) use ($now) {
                 $q->whereNull('ends_at')->orWhere('ends_at', '>=', $now);
             })
             ->where(function ($q) use ($teacherId, $courseId) {
@@ -581,7 +634,13 @@ class LeagueRulesService
                 continue;
             }
 
-            $metrics = $this->computeMetricsForStudents([$student->id], (int) $league->teacher_id, $league->course_id ? (int) $league->course_id : null)[$student->id] ?? null;
+            $metrics = $this->computeMetricsForStudents(
+                [$student->id],
+                (int) $league->teacher_id,
+                $league->course_id ? (int) $league->course_id : null,
+                $league->starts_at,
+                $league->ends_at
+            )[$student->id] ?? null;
 
             /** @var LeagueParticipant|null $participant */
             $participant = LeagueParticipant::where('course_league_id', $league->id)
@@ -601,16 +660,16 @@ class LeagueRulesService
                     'group_ar' => $metrics['groupAr'] ?: $participant->group_ar,
                 ]);
             } else {
-                $initialXp = max($xpDelta, (int) ($metrics['ruleXp'] ?? $xpDelta));
+                // First activity in this league starts cleanly from $xpDelta (no pre-league points carried over!)
                 LeagueParticipant::create([
                     'course_league_id' => $league->id,
                     'student_id' => $student->id,
                     'rank' => 1,
                     'previous_rank' => null,
-                    'xp_points' => $initialXp,
+                    'xp_points' => $xpDelta,
                     'streak_days' => (int) ($metrics['streakDays'] ?? 0),
                     'badge_title_ar' => 'منافس نشط',
-                    'tier' => LeagueTier::resolveFromXp($initialXp)->value,
+                    'tier' => LeagueTier::resolveFromXp($xpDelta)->value,
                     'movement' => 'same',
                     'school_ar' => $metrics['schoolAr'] ?: null,
                     'group_ar' => $metrics['groupAr'] ?: $league->group_name_ar,
@@ -646,6 +705,7 @@ class LeagueRulesService
 
             $isLeagueActive = $league
                 && $league->is_active
+                && (! $league->starts_at || $league->starts_at->lte($now))
                 && (! $league->ends_at || $league->ends_at->gte($now));
 
             $deltaDays = $newStreakDays - $oldStreak;
@@ -664,7 +724,8 @@ class LeagueRulesService
     }
 
     /**
-     * Enforce expiration rules and synchronize live participant metrics on a CourseLeague without clobbering manual bonuses.
+     * Enforce expiration rules and synchronize live participant metrics on a CourseLeague.
+     * Newly enrolled students ALWAYS start at 0 points (strictly fresh-start per league).
      */
     public function syncCourseLeague(CourseLeague $league): CourseLeague
     {
@@ -674,7 +735,7 @@ class LeagueRulesService
 
         $changed = false;
 
-        // Auto-enroll eligible enrolled students who joined after the league started
+        // Auto-enroll eligible enrolled students who joined after the league started (starting at 0 points!)
         if ($league->is_active) {
             $eligibleEnrollments = GroupEnrollment::where('status', EnrollmentStatus::ENROLLED)
                 ->whereHas('group', function ($q) use ($league) {
@@ -697,11 +758,16 @@ class LeagueRulesService
 
             if ($missingEnrollments->isNotEmpty()) {
                 $missingIds = $missingEnrollments->pluck('student_id')->all();
-                $metricsMap = $this->computeMetricsForStudents($missingIds, (int) $league->teacher_id, $league->course_id ? (int) $league->course_id : null);
+                $metricsMap = $this->computeMetricsForStudents(
+                    $missingIds,
+                    (int) $league->teacher_id,
+                    $league->course_id ? (int) $league->course_id : null,
+                    $league->starts_at,
+                    $league->ends_at
+                );
 
                 foreach ($missingEnrollments as $enrollment) {
                     $m = $metricsMap[$enrollment->student_id] ?? null;
-                    $initialXp = (int) ($m['ruleXp'] ?? 0);
 
                     LeagueParticipant::firstOrCreate(
                         [
@@ -711,10 +777,10 @@ class LeagueRulesService
                         [
                             'rank' => 1,
                             'previous_rank' => null,
-                            'xp_points' => $initialXp,
+                            'xp_points' => 0,
                             'streak_days' => (int) ($m['streakDays'] ?? $enrollment->streak_days ?? 0),
                             'badge_title_ar' => 'منافس نشط',
-                            'tier' => LeagueTier::resolveFromXp($initialXp)->value,
+                            'tier' => LeagueTier::BRONZE->value,
                             'movement' => 'same',
                             'school_ar' => $m['schoolAr'] ?: null,
                             'group_ar' => $enrollment->group?->name_ar ?: $league->group_name_ar,
@@ -729,13 +795,15 @@ class LeagueRulesService
             }
         }
 
-        // Refresh live study metrics & ensure tier matches current xp_points
+        // Refresh live study metrics scoped to this league's window & ensure tier matches xp_points
         $participants = LeagueParticipant::where('course_league_id', $league->id)->get();
         if ($participants->isNotEmpty()) {
             $metricsMap = $this->computeMetricsForStudents(
                 $participants->pluck('student_id')->all(),
                 (int) $league->teacher_id,
-                $league->course_id ? (int) $league->course_id : null
+                $league->course_id ? (int) $league->course_id : null,
+                $league->starts_at,
+                $league->ends_at
             );
 
             foreach ($participants as $p) {

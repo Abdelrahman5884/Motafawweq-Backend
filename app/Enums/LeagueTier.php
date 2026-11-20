@@ -12,9 +12,9 @@ enum LeagueTier: string
     public static function resolveFromXp(int $xp): self
     {
         return match (true) {
-            $xp >= 3000 => self::DIAMOND,
-            $xp >= 2500 => self::GOLD,
-            $xp >= 1900 => self::SILVER,
+            $xp >= 251 => self::DIAMOND,
+            $xp >= 151 => self::GOLD,
+            $xp >= 66 => self::SILVER,
             default => self::BRONZE,
         };
     }
@@ -22,9 +22,9 @@ enum LeagueTier: string
     public function minXp(): int
     {
         return match ($this) {
-            self::DIAMOND => 3000,
-            self::GOLD => 2500,
-            self::SILVER => 1900,
+            self::DIAMOND => 251,
+            self::GOLD => 151,
+            self::SILVER => 66,
             self::BRONZE => 0,
         };
     }

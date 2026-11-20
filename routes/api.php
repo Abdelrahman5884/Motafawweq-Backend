@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\AdminRepublicLeagueController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
@@ -315,6 +316,11 @@ Route::prefix('v1')->group(function () {
                 Route::get('/users', [UserController::class, 'index']);
                 Route::get('/users/{id}', [UserController::class, 'show'])->whereNumber('id');
                 Route::delete('/users/{id}', [UserController::class, 'destroy'])->whereNumber('id');
+
+                // Admin-controlled General Republic League
+                Route::get('/leagues/republic', [AdminRepublicLeagueController::class, 'show']);
+                Route::post('/leagues/republic/start', [AdminRepublicLeagueController::class, 'start']);
+                Route::post('/leagues/republic/stop', [AdminRepublicLeagueController::class, 'stop']);
             });
 
             // Teacher Portal area (strictly isolated to active, verified teachers)
