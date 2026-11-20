@@ -30,7 +30,8 @@ class SaveStudentScheduleNoteRequest extends BaseApiRequest
             $merged['text'] = trim(strip_tags((string) $text));
         }
         if ($time !== null) {
-            $merged['time'] = trim(strip_tags((string) $time));
+            $cleanTime = trim(strip_tags((string) $time));
+            $merged['time'] = $cleanTime === '' ? null : $cleanTime;
         }
         if ($priority !== null) {
             $merged['priority'] = strtolower(trim((string) $priority));
@@ -49,8 +50,23 @@ class SaveStudentScheduleNoteRequest extends BaseApiRequest
         return [
             'day_of_week' => ['required', 'string', Rule::in(DayOfWeek::values())],
             'text' => ['required', 'string', 'min:1', 'max:500'],
-            'time' => ['nullable', 'string', 'max:20'],
+            'time' => ['nullable', 'string', 'regex:/^([01]?\d|2[0-3]):[0-5]\d$/'],
             'priority' => ['nullable', 'string', Rule::in(['low', 'medium', 'high'])],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'day_of_week.required' => 'يرجى تحديد يوم الملحوظة.',
+            'day_of_week.in' => 'اليوم المحدد غير صالح.',
+            'text.required' => 'يرجى كتابة نص الملحوظة.',
+            'text.max' => 'نص الملحوظة يجب ألا يتجاوز 500 حرف.',
+            'time.regex' => 'صيغة الوقت غير صالحة (HH:MM).',
+            'priority.in' => 'مستوى الأولوية المحدد غير صالح.',
         ];
     }
 }

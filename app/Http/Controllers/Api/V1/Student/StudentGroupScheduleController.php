@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Api\V1\Student;
 
+use App\Enums\DayOfWeek;
 use App\Http\Controllers\Api\BaseApiController;
 use App\Http\Requests\V1\Student\JoinGroupByCodeRequest;
 use App\Http\Requests\V1\Student\SaveStudentScheduleNoteRequest;
 use App\Http\Requests\V1\Student\SaveStudentStudySessionRequest;
 use App\Http\Resources\V1\Teacher\PendingStudentResource;
+use App\Models\StudentStudySession;
 use App\Services\V1\Student\StudentGroupScheduleService;
 use App\Services\V1\Teacher\TeacherRosterService;
 use Illuminate\Http\JsonResponse;
@@ -75,18 +77,10 @@ class StudentGroupScheduleController extends BaseApiController
             $request->validated()
         );
 
-        return $this->createdResponse([
-            'id' => $session->uuid,
-            'day' => $session->day_of_week->value ?? (string) $session->day_of_week,
-            'subject' => $session->subject_ar,
-            'title' => $session->title_ar,
-            'startTime' => $session->start_time,
-            'endTime' => $session->end_time,
-            'durationMinutes' => (int) $session->duration_minutes,
-            'isCompleted' => (bool) $session->is_completed,
-            'color' => $session->color,
-            'notes' => $session->notes,
-        ], 'تمت إضافة جلسة المذاكرة بنجاح.');
+        return $this->createdResponse(
+            $this->formatStudySession($session),
+            'تمت إضافة جلسة المذاكرة بنجاح.'
+        );
     }
 
     /**
@@ -100,18 +94,10 @@ class StudentGroupScheduleController extends BaseApiController
             $request->validated()
         );
 
-        return $this->successResponse([
-            'id' => $session->uuid,
-            'day' => $session->day_of_week->value ?? (string) $session->day_of_week,
-            'subject' => $session->subject_ar,
-            'title' => $session->title_ar,
-            'startTime' => $session->start_time,
-            'endTime' => $session->end_time,
-            'durationMinutes' => (int) $session->duration_minutes,
-            'isCompleted' => (bool) $session->is_completed,
-            'color' => $session->color,
-            'notes' => $session->notes,
-        ], 'تم تحديث جلسة المذاكرة بنجاح.');
+        return $this->successResponse(
+            $this->formatStudySession($session),
+            'تم تحديث جلسة المذاكرة بنجاح.'
+        );
     }
 
     /**
@@ -124,10 +110,7 @@ class StudentGroupScheduleController extends BaseApiController
             $uuid
         );
 
-        return $this->successResponse([
-            'id' => $session->uuid,
-            'isCompleted' => (bool) $session->is_completed,
-        ]);
+        return $this->successResponse($this->formatStudySession($session));
     }
 
     /**
@@ -167,6 +150,20 @@ class StudentGroupScheduleController extends BaseApiController
     }
 
     /**
+     * PUT /api/v1/student/schedule/notes/{uuid}
+     */
+    public function updateScheduleNote(SaveStudentScheduleNoteRequest $request, string $uuid): JsonResponse
+    {
+        $note = $this->groupScheduleService->updateScheduleNote(
+            $this->authenticatedUser(),
+            $uuid,
+            $request->validated()
+        );
+
+        return $this->successResponse($note, 'تم تحديث الملحوظة بنجاح.');
+    }
+
+    /**
      * PATCH /api/v1/student/schedule/notes/{uuid}/toggle
      */
     public function toggleScheduleNote(string $uuid): JsonResponse
@@ -190,5 +187,30 @@ class StudentGroupScheduleController extends BaseApiController
         );
 
         return $this->successResponse(null, 'تم حذف الملحوظة بنجاح.');
+    }
+
+    /**
+     * Format a StudentStudySession consistently for API JSON responses.
+     *
+     * @return array<string, mixed>
+     */
+    private function formatStudySession(StudentStudySession $session): array
+    {
+        return [
+            'id' => $session->uuid,
+            'uuid' => $session->uuid,
+            'type' => 'study_session',
+            'day' => $session->day_of_week instanceof DayOfWeek
+                ? $session->day_of_week->value
+                : strtolower((string) $session->day_of_week),
+            'subject' => $session->subject_ar,
+            'title' => $session->title_ar,
+            'startTime' => $session->start_time,
+            'endTime' => $session->end_time,
+            'durationMinutes' => (int) $session->duration_minutes,
+            'isCompleted' => (bool) $session->is_completed,
+            'color' => $session->color ?: '#1588C7',
+            'notes' => $session->notes,
+        ];
     }
 }

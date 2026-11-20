@@ -265,6 +265,9 @@ Route::prefix('v1')->group(function () {
                 // Phase 12: Schedule Notes, Converted Lectures Archive & Extended Gamification
                 Route::post('/schedule/notes', [StudentGroupScheduleController::class, 'storeScheduleNote'])
                     ->middleware('throttle:student-write');
+                Route::put('/schedule/notes/{uuid}', [StudentGroupScheduleController::class, 'updateScheduleNote'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
                 Route::patch('/schedule/notes/{uuid}/toggle', [StudentGroupScheduleController::class, 'toggleScheduleNote'])
                     ->whereUuid('uuid')
                     ->middleware('throttle:student-write');

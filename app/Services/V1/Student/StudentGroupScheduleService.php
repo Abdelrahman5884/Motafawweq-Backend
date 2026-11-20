@@ -146,7 +146,7 @@ class StudentGroupScheduleService extends BaseService
     }
 
     /**
-     * Get the student's aggregated weekly timetable (enrolled group classes + personal study sessions).
+     * Get the student's aggregated weekly timetable (confirmed enrolled group classes + personal study sessions + notes + summary).
      */
     public function getWeeklySchedule(User $student): array
     {
@@ -154,9 +154,16 @@ class StudentGroupScheduleService extends BaseService
             ->where('status', 'active')
             ->whereHas('enrollments', function ($q) use ($student) {
                 $q->where('student_id', $student->id)
-                    ->whereIn('status', [EnrollmentStatus::ENROLLED, EnrollmentStatus::PENDING]);
+                    ->where('status', EnrollmentStatus::ENROLLED);
             })
-            ->with(['scheduleSlots', 'teacher:id,name'])
+            ->with([
+                'scheduleSlots',
+                'teacher:id,name',
+                'enrollments' => fn ($q) => $q
+                    ->where('student_id', $student->id)
+                    ->where('status', EnrollmentStatus::ENROLLED)
+                    ->select(['id', 'study_group_id', 'student_id', 'attendance_rate', 'status']),
+            ])
             ->get();
 
         $studySessions = StudentStudySession::forStudent($student->id)
@@ -165,17 +172,22 @@ class StudentGroupScheduleService extends BaseService
 
         $classSessions = [];
         foreach ($enrolledGroups as $group) {
+            $enrollment = $group->enrollments->first();
             foreach ($group->scheduleSlots as $slot) {
-                $day = $slot->day_of_week instanceof DayOfWeek ? $slot->day_of_week->value : (string) $slot->day_of_week;
+                $day = $slot->day_of_week instanceof DayOfWeek ? $slot->day_of_week->value : strtolower((string) $slot->day_of_week);
                 $classSessions[] = [
                     'id' => $slot->uuid,
                     'type' => 'group_class',
                     'groupId' => $group->uuid,
                     'groupName' => $group->name_ar,
+                    'groupNameEn' => $group->name_en ?: $group->name_ar,
                     'subject' => $group->subject_ar,
-                    'teacherName' => $group->teacher?->name,
+                    'subjectEn' => $group->subject_en ?: $group->subject_ar,
+                    'teacherName' => $group->teacher?->name ?? '',
                     'centerName' => $group->center_name,
                     'hallName' => $slot->hall_name ?: $group->hall_name,
+                    'joinCode' => strtoupper(trim((string) ($group->join_code ?? ''))),
+                    'attendanceRate' => (int) ($enrollment?->attendance_rate ?? 100),
                     'day' => $day,
                     'startTime' => $slot->start_time,
                     'endTime' => $slot->end_time,
@@ -187,14 +199,14 @@ class StudentGroupScheduleService extends BaseService
             'id' => $s->uuid,
             'uuid' => $s->uuid,
             'type' => 'study_session',
-            'day' => $s->day_of_week instanceof DayOfWeek ? $s->day_of_week->value : (string) $s->day_of_week,
+            'day' => $s->day_of_week instanceof DayOfWeek ? $s->day_of_week->value : strtolower((string) $s->day_of_week),
             'subject' => $s->subject_ar,
             'title' => $s->title_ar,
             'startTime' => $s->start_time,
             'endTime' => $s->end_time,
             'durationMinutes' => (int) $s->duration_minutes,
             'isCompleted' => (bool) $s->is_completed,
-            'color' => $s->color,
+            'color' => $s->color ?: '#1588C7',
             'notes' => $s->notes,
         ])->values()->all();
 
@@ -212,24 +224,38 @@ class StudentGroupScheduleService extends BaseService
             ->orderBy('created_at')
             ->get();
 
+        $completedNotes = 0;
         foreach ($notes as $n) {
             $d = strtolower((string) $n->day_of_week);
             if (! isset($notesMap[$d])) {
                 $notesMap[$d] = [];
             }
-            $notesMap[$d][] = [
-                'id' => $n->uuid,
-                'text' => $n->text,
-                'time' => $n->time,
-                'priority' => $n->priority,
-                'isDone' => (bool) $n->is_done,
-            ];
+            if ($n->is_done) {
+                $completedNotes++;
+            }
+            $notesMap[$d][] = $this->formatScheduleNote($n);
         }
+
+        $totalStudySessions = $studySessions->count();
+        $completedStudySessions = $studySessions->where('is_completed', true)->count();
+        $totalStudyMinutes = (int) $studySessions->sum('duration_minutes');
+        $completionRate = $totalStudySessions > 0
+            ? (int) round(($completedStudySessions / $totalStudySessions) * 100)
+            : 0;
 
         return [
             'classSessions' => $classSessions,
             'personalSessions' => $personalSessions,
             'scheduleNotes' => $notesMap,
+            'summary' => [
+                'totalCenterSessions' => count($classSessions),
+                'totalStudySessions' => $totalStudySessions,
+                'completedStudySessions' => $completedStudySessions,
+                'totalStudyMinutes' => $totalStudyMinutes,
+                'completionRate' => $completionRate,
+                'totalNotes' => $notes->count(),
+                'completedNotes' => $completedNotes,
+            ],
         ];
     }
 
@@ -248,23 +274,67 @@ class StudentGroupScheduleService extends BaseService
             throw ValidationException::withMessages(['text' => ['يرجى إدخال نص الملحوظة.']]);
         }
 
+        $rawTime = isset($data['time']) && trim((string) $data['time']) !== ''
+            ? $this->normalizeTime(trim(strip_tags((string) $data['time'])))
+            : null;
+
         $note = StudentScheduleNote::create([
             'student_id' => $student->id,
             'day_of_week' => $day,
             'text' => mb_substr($text, 0, 500),
-            'time' => isset($data['time']) && trim((string) $data['time']) !== '' ? mb_substr(trim(strip_tags((string) $data['time'])), 0, 20) : null,
+            'time' => $rawTime,
             'priority' => in_array($data['priority'] ?? 'medium', ['low', 'medium', 'high'], true) ? $data['priority'] : 'medium',
             'is_done' => false,
         ]);
 
-        return [
-            'id' => $note->uuid,
-            'day' => $note->day_of_week,
-            'text' => $note->text,
-            'time' => $note->time,
-            'priority' => $note->priority,
-            'isDone' => (bool) $note->is_done,
-        ];
+        return $this->formatScheduleNote($note);
+    }
+
+    /**
+     * Update an existing daily schedule note (text, day, time, priority) with strict ownership check.
+     */
+    public function updateScheduleNote(User $student, string $uuid, array $data): array
+    {
+        /** @var StudentScheduleNote|null $note */
+        $note = StudentScheduleNote::where('uuid', $uuid)->first();
+        if (! $note) {
+            throw (new ModelNotFoundException)->setModel(StudentScheduleNote::class, [$uuid]);
+        }
+        $note->assertOwnedByStudent($student);
+
+        $previousDay = strtolower((string) $note->day_of_week);
+        $day = strtolower(trim((string) ($data['day_of_week'] ?? $data['day'] ?? $previousDay)));
+        if (! in_array($day, DayOfWeek::values(), true)) {
+            throw ValidationException::withMessages(['day_of_week' => ['اليوم المحدد غير صالح.']]);
+        }
+
+        $text = array_key_exists('text', $data)
+            ? trim(strip_tags((string) $data['text']))
+            : $note->text;
+        if ($text === '') {
+            throw ValidationException::withMessages(['text' => ['يرجى إدخال نص الملحوظة.']]);
+        }
+
+        $time = $note->time;
+        if (array_key_exists('time', $data)) {
+            $clean = trim(strip_tags((string) ($data['time'] ?? '')));
+            $time = $clean === '' ? null : $this->normalizeTime($clean);
+        }
+
+        $priority = isset($data['priority']) && in_array($data['priority'], ['low', 'medium', 'high'], true)
+            ? $data['priority']
+            : $note->priority;
+
+        $note->update([
+            'day_of_week' => $day,
+            'text' => mb_substr($text, 0, 500),
+            'time' => $time,
+            'priority' => $priority,
+        ]);
+
+        return array_merge($this->formatScheduleNote($note->fresh()), [
+            'previousDay' => $previousDay,
+        ]);
     }
 
     /**
@@ -280,9 +350,20 @@ class StudentGroupScheduleService extends BaseService
         $note->assertOwnedByStudent($student);
         $note->update(['is_done' => ! $note->is_done]);
 
+        return $this->formatScheduleNote($note->fresh());
+    }
+
+    /**
+     * Normalize a schedule note record for consistent JSON responses.
+     */
+    protected function formatScheduleNote(StudentScheduleNote $note): array
+    {
         return [
             'id' => $note->uuid,
-            'day' => $note->day_of_week,
+            'day' => strtolower((string) $note->day_of_week),
+            'text' => $note->text,
+            'time' => $note->time,
+            'priority' => $note->priority ?: 'medium',
             'isDone' => (bool) $note->is_done,
         ];
     }
