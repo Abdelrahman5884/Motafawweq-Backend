@@ -21,6 +21,7 @@ use App\Models\StudentDirectPayment;
 use App\Models\StudentLessonNote;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentXpLedger;
+use App\Models\TeacherPayoutAccount;
 use App\Models\User;
 use App\Services\BaseService;
 use Carbon\Carbon;
@@ -46,7 +47,8 @@ class StudentCourseLessonService extends BaseService
     ) {}
 
     /**
-     * List all published courses across teachers with the student's enrollment and progress status.
+     * List all published courses across teachers with the student's enrollment, progress,
+     * next resume lesson, computed duration, and active teacher payout accounts (zero N+1).
      */
     public function listCourses(User $student): array
     {
@@ -56,6 +58,7 @@ class StudentCourseLessonService extends BaseService
             ->where('status', CourseStatus::PUBLISHED)
             ->with(['teacher:id,name,avatar'])
             ->withCount(['lessons as published_lessons_count' => fn ($q) => $q->where('status', LessonStatus::PUBLISHED)])
+            ->withSum(['lessons as published_duration_seconds' => fn ($q) => $q->where('status', LessonStatus::PUBLISHED)], 'duration_seconds')
             ->latest()
             ->get();
 
@@ -63,51 +66,131 @@ class StudentCourseLessonService extends BaseService
             return [];
         }
 
-        $completedByCourse = StudentLessonProgress::query()
+        $courseIds = $courses->pluck('id')->all();
+        $teacherIds = $courses->pluck('teacher_id')->filter()->unique()->values()->all();
+
+        $progressRecords = StudentLessonProgress::query()
             ->where('student_id', $student->id)
-            ->where('is_completed', true)
-            ->whereIn('course_id', $courses->pluck('id'))
-            ->selectRaw('course_id, COUNT(*) as completed_count')
-            ->groupBy('course_id')
-            ->pluck('completed_count', 'course_id');
+            ->whereIn('course_id', $courseIds)
+            ->get(['course_id', 'lesson_id', 'is_completed', 'last_heartbeat_at']);
+
+        $completedByCourse = [];
+        $completedLessonIds = [];
+        foreach ($progressRecords as $prog) {
+            if ($prog->is_completed) {
+                $cid = (int) $prog->course_id;
+                $completedByCourse[$cid] = ($completedByCourse[$cid] ?? 0) + 1;
+                $completedLessonIds[(int) $prog->lesson_id] = true;
+            }
+        }
 
         $pendingCourseIds = StudentDirectPayment::query()
             ->where('student_id', $student->id)
             ->where('status', DirectPaymentStatus::PENDING)
-            ->whereIn('course_id', $courses->pluck('id'))
+            ->whereIn('course_id', $courseIds)
             ->pluck('course_id')
             ->map(fn ($id) => (int) $id)
             ->all();
 
-        return $courses->map(function (Course $course) use ($completedByCourse, $entitlements, $pendingCourseIds) {
-            $publishedLessons = (int) $course->published_lessons_count;
-            $totalLessons = max($publishedLessons, (int) $course->lessons_count);
-            $completed = (int) ($completedByCourse[$course->id] ?? 0);
-            $progressPercent = $publishedLessons > 0 ? min(100, (int) round(($completed / $publishedLessons) * 100)) : 0;
-            $priceEgp = (float) ($course->price_egp ?? 0);
+        // Bulk-load published lesson UUIDs for enrolled courses to determine exact next resume lesson
+        $enrolledCourseIds = array_values(array_intersect(
+            array_map('intval', $courseIds),
+            $entitlements['course_ids']
+        ));
+
+        $nextLessonByCourse = [];
+        if (! empty($enrolledCourseIds)) {
+            $enrolledLessons = Lesson::query()
+                ->whereIn('course_id', $enrolledCourseIds)
+                ->where('status', LessonStatus::PUBLISHED)
+                ->orderBy('id')
+                ->get(['id', 'uuid', 'course_id'])
+                ->groupBy('course_id');
+
+            foreach ($enrolledLessons as $cid => $lessonsForCourse) {
+                $firstIncomplete = $lessonsForCourse->first(
+                    fn (Lesson $l) => ! isset($completedLessonIds[(int) $l->id])
+                );
+                $chosen = $firstIncomplete ?: $lessonsForCourse->first();
+                if ($chosen) {
+                    $nextLessonByCourse[(int) $cid] = $chosen->uuid;
+                }
+            }
+        }
+
+        // Bulk-load active payout accounts per teacher for transparent enrollment checkout
+        $payoutsByTeacher = ! empty($teacherIds)
+            ? TeacherPayoutAccount::query()
+                ->whereIn('teacher_id', $teacherIds)
+                ->where('is_active', true)
+                ->orderByDesc('is_default')
+                ->orderBy('id')
+                ->get()
+                ->groupBy('teacher_id')
+            : collect();
+
+        $mapped = $courses->map(function (Course $course) use (
+            $completedByCourse,
+            $entitlements,
+            $pendingCourseIds,
+            $nextLessonByCourse,
+            $payoutsByTeacher
+        ) {
+            $publishedLessons = (int) ($course->published_lessons_count ?? 0);
+            $publishedDurationSec = max(0, (int) ($course->published_duration_seconds ?? 0));
+            $completed = min($publishedLessons, (int) ($completedByCourse[(int) $course->id] ?? 0));
+            $progressPercent = $publishedLessons > 0
+                ? min(100, (int) round(($completed / $publishedLessons) * 100))
+                : 0;
+            $priceEgp = max(0.0, (float) ($course->price_egp ?? 0));
             $isEnrolled = in_array((int) $course->id, $entitlements['course_ids'], true);
             $isPending = ! $isEnrolled && in_array((int) $course->id, $pendingCourseIds, true);
+
+            $teacherAccounts = ($payoutsByTeacher->get($course->teacher_id) ?? collect())
+                ->map(fn (TeacherPayoutAccount $acc) => [
+                    'id' => $acc->uuid,
+                    'type' => $acc->type?->value ?? (string) $acc->type,
+                    'labelAr' => $acc->label_ar ?: ($acc->type?->defaultLabelAr() ?? ''),
+                    'labelEn' => $acc->label_en ?: ($acc->type?->defaultLabelEn() ?? ''),
+                    'accountIdentifier' => (string) $acc->account_identifier,
+                    'isDefault' => (bool) $acc->is_default,
+                ])
+                ->values()
+                ->all();
 
             return [
                 'id' => $course->uuid,
                 'uuid' => $course->uuid,
                 'titleAr' => $course->title_ar,
-                'titleEn' => $course->title_en ?? $course->title_ar,
+                'titleEn' => $course->title_en ?: $course->title_ar,
                 'subjectAr' => $course->subject_ar ?: $course->grade_ar,
-                'stage' => $course->stage_name_ar ?: ($course->stage?->value ?? ''),
-                'gradeAr' => $course->grade_ar,
-                'descriptionAr' => $course->description_ar,
+                'subjectEn' => $course->subject_en ?: ($course->subject_ar ?: $course->grade_ar),
+                'stage' => $course->stage_name_ar ?: (string) ($course->stage_id ?? ''),
+                'gradeAr' => $course->grade_ar ?: '',
+                'descriptionAr' => $course->description_ar ?: '',
+                'descriptionEn' => $course->description_en ?: ($course->description_ar ?: ''),
+                'coverUrl' => $course->cover_url ?: '',
                 'priceEgp' => $priceEgp,
                 'isEnrolled' => $isEnrolled,
                 'isPending' => $isPending,
-                'teacherName' => $course->teacher?->name,
-                'teacherAvatar' => $course->teacher?->avatar,
-                'hoursTotal' => $course->hours_total,
-                'lessonsCount' => $totalLessons,
+                'teacherName' => $course->teacher?->name ?? '',
+                'teacherAvatar' => $course->teacher?->avatar ?? '',
+                'hoursTotal' => $course->hours_total ?: '',
+                'publishedDurationSeconds' => $publishedDurationSec,
+                'lessonsCount' => $publishedLessons,
                 'completedLessons' => $completed,
                 'progressPercent' => $progressPercent,
+                'studentsCount' => max(0, (int) ($course->students_count ?? 0)),
+                'nextLessonId' => $isEnrolled ? ($nextLessonByCourse[(int) $course->id] ?? null) : null,
+                'payoutAccounts' => $teacherAccounts,
             ];
-        })->values()->all();
+        });
+
+        // Sort: Enrolled first, then Pending, then Available (preserving recency inside each bucket)
+        return $mapped
+            ->sortBy(fn (array $item) => $item['isEnrolled'] ? 0 : ($item['isPending'] ? 1 : 2))
+            ->values()
+            ->all();
     }
 
     /**

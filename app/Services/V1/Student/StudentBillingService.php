@@ -2,6 +2,7 @@
 
 namespace App\Services\V1\Student;
 
+use App\Enums\CourseStatus;
 use App\Enums\DirectPaymentStatus;
 use App\Enums\PaymentMethod;
 use App\Models\Course;
@@ -46,16 +47,21 @@ class StudentBillingService extends BaseService
         $payoutAccounts = ! empty($entitlements['teacher_ids'])
             ? TeacherPayoutAccount::query()
                 ->whereIn('teacher_id', $entitlements['teacher_ids'])
+                ->where('is_active', true)
                 ->with('teacher:id,name')
+                ->orderByDesc('is_default')
                 ->get()
                 ->map(fn (TeacherPayoutAccount $acc) => [
                     'id' => $acc->uuid,
                     'teacherName' => $acc->teacher?->name,
                     'type' => $acc->type?->value ?? (string) $acc->type,
-                    'labelAr' => $acc->label_ar,
-                    'accountHolder' => $acc->account_holder,
-                    'accountNumber' => $acc->account_number,
-                    'isPrimary' => (bool) $acc->is_primary,
+                    'labelAr' => $acc->label_ar ?: ($acc->type?->defaultLabelAr() ?? ''),
+                    'labelEn' => $acc->label_en ?: ($acc->type?->defaultLabelEn() ?? ''),
+                    'accountHolder' => $acc->teacher?->name ?? '',
+                    'accountNumber' => (string) $acc->account_identifier,
+                    'accountIdentifier' => (string) $acc->account_identifier,
+                    'isPrimary' => (bool) $acc->is_default,
+                    'isDefault' => (bool) $acc->is_default,
                 ])->values()->all()
             : [];
 
@@ -134,9 +140,15 @@ class StudentBillingService extends BaseService
                 $itemTitleAr = $group->name_ar;
             } elseif (! empty($data['course_uuid'])) {
                 /** @var Course|null $course */
-                $course = Course::where('uuid', $data['course_uuid'])->first();
+                $course = Course::where('uuid', $data['course_uuid'])
+                    ->where('status', CourseStatus::PUBLISHED)
+                    ->first();
                 if (! $course) {
-                    throw ValidationException::withMessages(['course_uuid' => ['الكورس غير موجود.']]);
+                    throw ValidationException::withMessages(['course_uuid' => ['المقرر غير موجود أو غير متاح للتسجيل حالياً.']]);
+                }
+                $this->accessService->clearCache($student);
+                if ($this->accessService->canAccessCourse($student, $course)) {
+                    throw ValidationException::withMessages(['course_uuid' => ['أنت مشترك بالفعل في هذا المقرر ويمكنك تصفح حصصه مباشرة.']]);
                 }
                 $teacherId = (int) $course->teacher_id;
                 $itemTitleAr = $course->title_ar;
@@ -150,7 +162,7 @@ class StudentBillingService extends BaseService
                 $basePriceEgp = 0.0;
             }
 
-            if ($course) {
+            if ($course && ! $group) {
                 $alreadyPending = StudentDirectPayment::where('student_id', $student->id)
                     ->where('course_id', $course->id)
                     ->where('status', DirectPaymentStatus::PENDING)
@@ -164,9 +176,10 @@ class StudentBillingService extends BaseService
             if (! empty($data['payout_account_uuid'])) {
                 $payoutAcc = TeacherPayoutAccount::where('uuid', $data['payout_account_uuid'])
                     ->where('teacher_id', $teacherId)
+                    ->where('is_active', true)
                     ->first();
                 if (! $payoutAcc) {
-                    throw ValidationException::withMessages(['payout_account_uuid' => ['حساب الدفع المختار لا ينتمي لهذا المدرس.']]);
+                    throw ValidationException::withMessages(['payout_account_uuid' => ['حساب الدفع المختار غير متاح أو لا ينتمي لهذا المعلم.']]);
                 }
                 $payoutAccountId = $payoutAcc->id;
             }

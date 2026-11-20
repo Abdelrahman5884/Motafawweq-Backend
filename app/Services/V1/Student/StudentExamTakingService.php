@@ -26,7 +26,7 @@ class StudentExamTakingService extends BaseService
     ) {}
 
     /**
-     * List all accessible exams for the authenticated student with their submission status.
+     * List all accessible exams for the authenticated student with accurate submission & schedule state.
      */
     public function listExams(User $student): array
     {
@@ -47,8 +47,13 @@ class StudentExamTakingService extends BaseService
                 }
             })
             ->with(['teacher:id,name'])
+            ->withCount('questions')
             ->latest()
             ->get();
+
+        if ($exams->isEmpty()) {
+            return [];
+        }
 
         $submissionsByExam = ExamSubmission::query()
             ->where('student_id', $student->id)
@@ -56,14 +61,22 @@ class StudentExamTakingService extends BaseService
             ->get()
             ->keyBy('exam_id');
 
-        return $exams->map(function (Exam $exam) use ($submissionsByExam) {
+        $now = Carbon::now();
+
+        return $exams->map(function (Exam $exam) use ($submissionsByExam, $now) {
             /** @var ExamSubmission|null $sub */
             $sub = $submissionsByExam->get($exam->id);
             $subStatus = $sub?->status instanceof ExamSubmissionStatus
                 ? $sub->status->value
                 : ($sub?->status ?? 'not_started');
 
-            $showResults = (bool) $exam->show_results && $subStatus === ExamSubmissionStatus::GRADED->value;
+            $showResults = (bool) $exam->show_results;
+            $canRevealScore = $showResults && $subStatus === ExamSubmissionStatus::GRADED->value;
+            $isUpcoming = $exam->starts_at && $exam->starts_at->greaterThan($now);
+            $remainingSeconds = null;
+            if ($sub && $subStatus === ExamSubmissionStatus::IN_PROGRESS->value && $sub->expires_at) {
+                $remainingSeconds = max(0, (int) $now->diffInSeconds($sub->expires_at, false));
+            }
 
             return [
                 'id' => $exam->uuid,
@@ -71,19 +84,53 @@ class StudentExamTakingService extends BaseService
                 'titleAr' => $exam->title_ar,
                 'titleEn' => $exam->title_en ?? $exam->title_ar,
                 'courseTitleAr' => $exam->course_title_ar,
-                'teacherName' => $exam->teacher?->name,
+                'teacherName' => $exam->teacher?->name ?? '',
                 'durationMinutes' => (int) $exam->duration_minutes,
                 'fullMark' => (int) $exam->full_mark,
                 'passScore' => (int) $exam->pass_score,
-                'questionsCount' => (int) $exam->questions_count,
+                'questionsCount' => max((int) ($exam->questions_count ?? 0), (int) $exam->questions_count),
                 'status' => $exam->status instanceof ExamStatus ? $exam->status->value : (string) $exam->status,
+                'isUpcoming' => (bool) $isUpcoming,
+                'isBubbleSheet' => (bool) $exam->is_bubble_sheet,
+                'showResults' => $showResults,
+                'startsAt' => $exam->starts_at?->toIso8601String(),
                 'dueDate' => $exam->due_date?->format('Y-m-d'),
                 'submissionStatus' => $subStatus,
-                'score' => $showResults ? (float) $sub->score : null,
-                'percentage' => $showResults ? (float) $sub->percentage : null,
-                'isPassed' => $showResults ? (bool) $sub->is_passed : null,
+                'remainingSeconds' => $remainingSeconds,
+                'submittedAt' => $sub?->submitted_at?->toIso8601String(),
+                'score' => $canRevealScore ? (float) $sub->score : null,
+                'percentage' => $canRevealScore ? (float) $sub->percentage : null,
+                'isPassed' => $canRevealScore ? (bool) $sub->is_passed : null,
+                'isFullMark' => $canRevealScore ? (bool) $sub->is_full_mark : null,
             ];
         })->values()->all();
+    }
+
+    /**
+     * Retrieve the authenticated student's completed/submitted result for an exam.
+     */
+    public function getExamResult(User $student, string $examUuid): ExamSubmission
+    {
+        /** @var Exam|null $exam */
+        $exam = Exam::where('uuid', $examUuid)->first();
+        if (! $exam) {
+            throw (new ModelNotFoundException)->setModel(Exam::class, [$examUuid]);
+        }
+
+        $this->accessService->assertCanAccess($student, $exam, (int) $exam->teacher_id, $exam->course_id ? (int) $exam->course_id : null);
+
+        /** @var ExamSubmission|null $submission */
+        $submission = ExamSubmission::where('exam_id', $exam->id)
+            ->where('student_id', $student->id)
+            ->whereIn('status', [ExamSubmissionStatus::SUBMITTED, ExamSubmissionStatus::GRADED])
+            ->with(['exam', 'answers.question'])
+            ->first();
+
+        if (! $submission) {
+            throw (new ModelNotFoundException)->setModel(ExamSubmission::class, [$examUuid]);
+        }
+
+        return $submission;
     }
 
     /**
@@ -105,7 +152,20 @@ class StudentExamTakingService extends BaseService
             ]);
         }
 
-        $attempt = $this->transaction(function () use ($student, $exam) {
+        if ($exam->starts_at && $exam->starts_at->isFuture()) {
+            throw ValidationException::withMessages([
+                'exam' => ['لم يحن موعد بدء هذا الامتحان بعد.'],
+            ]);
+        }
+
+        if ($exam->questions->isEmpty()) {
+            throw ValidationException::withMessages([
+                'exam' => ['لا توجد أسئلة مضافة لهذا الامتحان بعد. يرجى التواصل مع المعلم.'],
+            ]);
+        }
+
+        $expiredFinalized = false;
+        $attempt = $this->transaction(function () use ($student, $exam, &$expiredFinalized) {
             /** @var ExamSubmission|null $existing */
             $existing = ExamSubmission::where('exam_id', $exam->id)
                 ->where('student_id', $student->id)
@@ -119,6 +179,24 @@ class StudentExamTakingService extends BaseService
             }
 
             if ($existing) {
+                $now = Carbon::now();
+                // If an earlier attempt already expired beyond the grace window, commit auto-finalization cleanly
+                if ($existing->expires_at && $now->greaterThan($existing->expires_at->copy()->addSeconds(60))) {
+                    $existing->update([
+                        'submitted_at' => $existing->expires_at,
+                        'score' => 0,
+                        'percentage' => 0,
+                        'is_passed' => false,
+                        'is_full_mark' => false,
+                        'status' => ExamSubmissionStatus::GRADED,
+                        'graded_at' => $now,
+                    ]);
+                    $exam->recalculatePerformanceMetrics();
+                    $expiredFinalized = true;
+
+                    return $existing;
+                }
+
                 return $existing;
             }
 
@@ -136,6 +214,12 @@ class StudentExamTakingService extends BaseService
             ]);
         });
 
+        if ($expiredFinalized) {
+            throw ValidationException::withMessages([
+                'exam' => ['انتهى الوقت المحدد لمحاولتك السابقة في هذا الامتحان وتم إغلاقها.'],
+            ]);
+        }
+
         // Strip correct answers and explanations from questions returned during active exam
         $sanitizedQuestions = $exam->questions->map(fn (ExamQuestion $q) => [
             'id' => $q->uuid,
@@ -143,19 +227,28 @@ class StudentExamTakingService extends BaseService
             'questionNumber' => (int) $q->question_number,
             'type' => $q->type instanceof ExamQuestionType ? $q->type->value : (string) $q->type,
             'points' => (int) $q->points,
+            'difficulty' => $q->difficulty ?: 'medium',
             'questionAr' => $q->question_ar,
-            'optionsAr' => $q->options_ar ?? [],
+            'questionEn' => $q->question_en ?: $q->question_ar,
+            'optionsAr' => is_array($q->options_ar) ? array_values($q->options_ar) : [],
         ])->values()->all();
+
+        $remainingSeconds = $attempt->expires_at
+            ? max(0, (int) Carbon::now()->diffInSeconds($attempt->expires_at, false))
+            : ((int) $exam->duration_minutes * 60);
 
         return [
             'attemptId' => $attempt->uuid,
             'examId' => $exam->uuid,
             'titleAr' => $exam->title_ar,
+            'courseTitleAr' => $exam->course_title_ar,
             'durationMinutes' => (int) $exam->duration_minutes,
             'fullMark' => (int) $exam->full_mark,
+            'passScore' => (int) $exam->pass_score,
+            'showResults' => (bool) $exam->show_results,
             'startedAt' => $attempt->started_at?->toIso8601String(),
             'expiresAt' => $attempt->expires_at?->toIso8601String(),
-            'remainingSeconds' => $attempt->expires_at ? max(0, Carbon::now()->diffInSeconds($attempt->expires_at, false)) : ((int) $exam->duration_minutes * 60),
+            'remainingSeconds' => $remainingSeconds,
             'questions' => $sanitizedQuestions,
         ];
     }
@@ -261,7 +354,9 @@ class StudentExamTakingService extends BaseService
                 });
 
                 $selectedIndex = isset($studentAnswer['selected_index']) ? (int) $studentAnswer['selected_index'] : null;
-                $selectedBool = isset($studentAnswer['selected_bool']) ? (bool) $studentAnswer['selected_bool'] : null;
+                $selectedBool = array_key_exists('selected_bool', (array) $studentAnswer) && $studentAnswer['selected_bool'] !== null
+                    ? (bool) $studentAnswer['selected_bool']
+                    : null;
                 $essayText = isset($studentAnswer['essay_answer_text']) ? trim((string) $studentAnswer['essay_answer_text']) : null;
 
                 $isCorrect = null;
@@ -314,7 +409,7 @@ class StudentExamTakingService extends BaseService
 
             // Award immutable XP for completing the exam
             $xpPoints = $submission->is_full_mark ? 50 : ($submission->is_passed ? 30 : 10);
-            StudentXpLedger::awardOnce(
+            $xpEntry = StudentXpLedger::awardOnce(
                 $student->id,
                 'exam_submitted',
                 $submission->id,
@@ -333,7 +428,10 @@ class StudentExamTakingService extends BaseService
                 ]);
             }
 
-            return $submission->fresh(['exam', 'answers']);
+            $fresh = $submission->fresh(['exam', 'answers.question']);
+            $fresh->xp_awarded_runtime = $xpEntry ? (int) $xpEntry->points : 0;
+
+            return $fresh;
         });
     }
 

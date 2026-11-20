@@ -220,6 +220,9 @@ Route::prefix('v1')->group(function () {
                 // Phase 5: Exams, Server-Timed Attempts, Auto-Graded Submission & Mistake Bank
                 Route::get('/exams', [StudentExamTakingController::class, 'index'])
                     ->middleware('throttle:student-read');
+                Route::get('/exams/{uuid}/result', [StudentExamTakingController::class, 'result'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-read');
                 Route::post('/exams/{uuid}/start', [StudentExamTakingController::class, 'start'])
                     ->whereUuid('uuid')
                     ->middleware(['throttle:exam-submit', 'idempotent']);

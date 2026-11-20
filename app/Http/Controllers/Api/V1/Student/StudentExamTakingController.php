@@ -26,6 +26,20 @@ class StudentExamTakingController extends BaseApiController
     }
 
     /**
+     * GET /api/v1/student/exams/{uuid}/result
+     * Retrieve the authenticated student's submitted/graded exam result and review breakdown.
+     */
+    public function result(string $uuid): JsonResponse
+    {
+        $submission = $this->examTakingService->getExamResult(
+            $this->authenticatedUser(),
+            $uuid
+        );
+
+        return $this->successResponse(new StudentExamSubmissionResource($submission));
+    }
+
+    /**
      * POST /api/v1/student/exams/{uuid}/start
      * Start or resume a server-timed exam session.
      */
