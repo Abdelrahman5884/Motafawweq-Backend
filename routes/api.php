@@ -201,11 +201,17 @@ Route::prefix('v1')->group(function () {
                 Route::post('/lessons/{uuid}/progress', [StudentCourseLessonController::class, 'recordProgress'])
                     ->whereUuid('uuid')
                     ->middleware('throttle:progress-heartbeat');
+                Route::post('/lessons/{uuid}/toggle-complete', [StudentCourseLessonController::class, 'toggleComplete'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
                 Route::post('/lessons/{uuid}/bookmark', [StudentCourseLessonController::class, 'toggleBookmark'])
                     ->whereUuid('uuid')
                     ->middleware('throttle:student-write');
                 Route::post('/lessons/{uuid}/notes', [StudentCourseLessonController::class, 'storeNote'])
                     ->whereUuid('uuid')
+                    ->middleware('throttle:student-write');
+                Route::put('/lessons/notes/{noteUuid}', [StudentCourseLessonController::class, 'updateNote'])
+                    ->whereUuid('noteUuid')
                     ->middleware('throttle:student-write');
                 Route::delete('/lessons/notes/{noteUuid}', [StudentCourseLessonController::class, 'destroyNote'])
                     ->whereUuid('noteUuid')

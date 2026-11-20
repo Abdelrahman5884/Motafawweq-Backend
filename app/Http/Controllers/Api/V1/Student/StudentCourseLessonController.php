@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\V1\Student;
 
 use App\Http\Controllers\Api\BaseApiController;
+use App\Http\Requests\V1\Student\RecordLessonProgressRequest;
+use App\Http\Requests\V1\Student\SaveLessonNoteRequest;
 use App\Models\Lesson;
 use App\Models\LessonAttachment;
 use App\Services\V1\Student\StudentCourseLessonService;
@@ -38,21 +40,38 @@ class StudentCourseLessonController extends BaseApiController
         return $this->successResponse($lesson);
     }
 
-    public function recordProgress(Request $request, string $uuid): JsonResponse
+    public function recordProgress(RecordLessonProgressRequest $request, string $uuid): JsonResponse
     {
-        $validated = $request->validate([
-            'position_seconds' => ['nullable', 'integer', 'min:0', 'max:14400'],
-            'watched_delta_seconds' => ['nullable', 'integer', 'min:0', 'max:60'],
-            'duration_seconds' => ['nullable', 'integer', 'min:60', 'max:14400'],
-        ]);
-
         $progress = $this->courseLessonService->recordProgressHeartbeat(
             $this->authenticatedUser(),
             $uuid,
-            $validated
+            $request->validated()
         );
 
         return $this->successResponse($progress);
+    }
+
+    public function toggleComplete(Request $request, string $uuid): JsonResponse
+    {
+        $validated = $request->validate([
+            'is_completed' => ['nullable', 'boolean'],
+        ]);
+
+        $targetCompleted = array_key_exists('is_completed', $validated) && $validated['is_completed'] !== null
+            ? (bool) $validated['is_completed']
+            : null;
+
+        $result = $this->courseLessonService->toggleComplete(
+            $this->authenticatedUser(),
+            $uuid,
+            $targetCompleted
+        );
+
+        $message = $result['isCompleted']
+            ? 'تم تسجيل إتمام الحصة بنجاح.'
+            : 'تم إرجاع حالة الحصة إلى قيد المذاكرة.';
+
+        return $this->successResponse($result, $message);
     }
 
     public function toggleBookmark(string $uuid): JsonResponse
@@ -62,20 +81,26 @@ class StudentCourseLessonController extends BaseApiController
         return $this->successResponse($result);
     }
 
-    public function storeNote(Request $request, string $uuid): JsonResponse
+    public function storeNote(SaveLessonNoteRequest $request, string $uuid): JsonResponse
     {
-        $validated = $request->validate([
-            'timestamp_seconds' => ['nullable', 'integer', 'min:0', 'max:14400'],
-            'content' => ['required', 'string', 'min:1', 'max:2000'],
-        ]);
-
         $note = $this->courseLessonService->createLessonNote(
             $this->authenticatedUser(),
             $uuid,
-            $validated
+            $request->validated()
         );
 
         return $this->createdResponse($note, 'تم حفظ الملاحظة بنجاح.');
+    }
+
+    public function updateNote(SaveLessonNoteRequest $request, string $noteUuid): JsonResponse
+    {
+        $note = $this->courseLessonService->updateLessonNote(
+            $this->authenticatedUser(),
+            $noteUuid,
+            $request->validated()
+        );
+
+        return $this->successResponse($note, 'تم تحديث الملاحظة بنجاح.');
     }
 
     public function destroyNote(string $noteUuid): JsonResponse
@@ -86,7 +111,7 @@ class StudentCourseLessonController extends BaseApiController
     }
 
     /**
-     * GET /api/v1/student/lessons/{uuid}/media/stream (signed URL)
+     * GET /api/v1/media/student-lessons/{uuid}/media/stream (signed URL)
      */
     public function streamMedia(Request $request, string $uuid): Response
     {
@@ -101,15 +126,15 @@ class StudentCourseLessonController extends BaseApiController
             return $this->notFoundResponse(__('messages.not_found'));
         }
 
+        $headers = [
+            'Content-Type' => $lesson->media_mime_type ?: 'video/mp4',
+            'Content-Disposition' => $this->buildContentDisposition('inline', $lesson->media_original_name ?: 'lesson-media'),
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'private, max-age=3600',
+        ];
+
         if ($disk === 'local' || $disk === 'public') {
-            return response()->file(
-                Storage::disk($disk)->path($lesson->media_path),
-                [
-                    'Content-Type' => $lesson->media_mime_type ?: 'video/mp4',
-                    'Content-Disposition' => 'inline; filename="'.($lesson->media_original_name ?: 'lesson-media').'"',
-                    'Cache-Control' => 'private, max-age=3600',
-                ]
-            );
+            return response()->file(Storage::disk($disk)->path($lesson->media_path), $headers);
         }
 
         if (method_exists(Storage::disk($disk), 'temporaryUrl')) {
@@ -123,17 +148,12 @@ class StudentCourseLessonController extends BaseApiController
         return response(
             Storage::disk($disk)->get($lesson->media_path),
             200,
-            [
-                'Content-Type' => $lesson->media_mime_type ?: 'video/mp4',
-                'Content-Disposition' => 'inline; filename="'.($lesson->media_original_name ?: 'lesson-media').'"',
-                'Accept-Ranges' => 'bytes',
-                'Cache-Control' => 'private, max-age=3600',
-            ]
+            array_merge($headers, ['Accept-Ranges' => 'bytes'])
         );
     }
 
     /**
-     * GET /api/v1/student/lessons/{uuid}/attachments/{attachmentUuid}/stream (signed URL)
+     * GET /api/v1/media/student-lessons/{uuid}/attachments/{attachmentUuid}/stream (signed URL)
      */
     public function streamAttachment(Request $request, string $uuid, string $attachmentUuid): Response
     {
@@ -151,22 +171,42 @@ class StudentCourseLessonController extends BaseApiController
             return $this->notFoundResponse(__('messages.not_found'));
         }
 
+        $dispositionType = $request->boolean('download') ? 'attachment' : 'inline';
+        $filename = $attachment->original_file_name ?: ($attachment->title ?: 'lesson-attachment');
+        $headers = [
+            'Content-Type' => $attachment->mime_type ?: 'application/octet-stream',
+            'Content-Disposition' => $this->buildContentDisposition($dispositionType, $filename),
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'private, max-age=3600',
+        ];
+
+        if ($disk === 'local' || $disk === 'public') {
+            return response()->file(Storage::disk($disk)->path($attachment->storage_path), $headers);
+        }
+
         if (method_exists(Storage::disk($disk), 'temporaryUrl')) {
             try {
                 return redirect()->away(Storage::disk($disk)->temporaryUrl($attachment->storage_path, now()->addMinutes(60)));
             } catch (\Throwable) {
-                // fall back to direct response
+                // fall back to direct response below
             }
         }
 
         return response(
             Storage::disk($disk)->get($attachment->storage_path),
             200,
-            [
-                'Content-Type' => $attachment->mime_type ?: 'application/octet-stream',
-                'Content-Disposition' => 'inline; filename="'.$attachment->original_filename.'"',
-                'Cache-Control' => 'private, max-age=3600',
-            ]
+            $headers
         );
+    }
+
+    /**
+     * Build an RFC 5987 safe Content-Disposition header supporting Arabic & Unicode filenames.
+     */
+    private function buildContentDisposition(string $type, string $filename): string
+    {
+        $clean = str_replace(["\r", "\n", '"', '\\'], '', trim($filename)) ?: 'file';
+        $asciiFallback = preg_replace('/[^\x20-\x7E]/', '_', $clean) ?: 'file';
+
+        return sprintf('%s; filename="%s"; filename*=UTF-8\'\'%s', $type, $asciiFallback, rawurlencode($clean));
     }
 }
