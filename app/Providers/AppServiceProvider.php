@@ -168,6 +168,13 @@ class AppServiceProvider extends ServiceProvider
                 ->response($tooMany('messages.rate_limit_api'));
         });
 
+        // Student daily platform activity & streak heartbeat: 15 per minute per student
+        RateLimiter::for('activity-heartbeat', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(15)
+                ->by('act-hb:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
         // Student homework/receipt uploads: 10 per minute per student
         RateLimiter::for('student-uploads', function (Request $request) use ($tooMany) {
             return Limit::perMinute(10)

@@ -2,11 +2,13 @@
 
 namespace App\Services\V1\Student;
 
+use App\Enums\AttendanceStatus;
 use App\Enums\DayOfWeek;
 use App\Enums\EnrollmentStatus;
 use App\Models\GroupAttendanceRecord;
 use App\Models\GroupEnrollment;
 use App\Models\GroupScheduleSlot;
+use App\Models\StudentProfile;
 use App\Models\StudentScheduleNote;
 use App\Models\StudentStudySession;
 use App\Models\StudyGroup;
@@ -17,6 +19,16 @@ use Illuminate\Validation\ValidationException;
 
 class StudentGroupScheduleService extends BaseService
 {
+    private const DAY_LABELS = [
+        'saturday' => ['ar' => 'السبت', 'en' => 'Saturday'],
+        'sunday' => ['ar' => 'الأحد', 'en' => 'Sunday'],
+        'monday' => ['ar' => 'الاثنين', 'en' => 'Monday'],
+        'tuesday' => ['ar' => 'الثلاثاء', 'en' => 'Tuesday'],
+        'wednesday' => ['ar' => 'الأربعاء', 'en' => 'Wednesday'],
+        'thursday' => ['ar' => 'الخميس', 'en' => 'Thursday'],
+        'friday' => ['ar' => 'الجمعة', 'en' => 'Friday'],
+    ];
+
     public function __construct(
         protected StudentAccessService $accessService
     ) {}
@@ -30,7 +42,12 @@ class StudentGroupScheduleService extends BaseService
             ->where('student_id', $student->id)
             ->whereIn('status', [EnrollmentStatus::ENROLLED, EnrollmentStatus::PENDING])
             ->whereHas('group', fn ($q) => $q->where('status', 'active'))
-            ->with(['group.scheduleSlots', 'group.teacher:id,name'])
+            ->with([
+                'group' => fn ($q) => $q->withCount('enrolledEnrollments'),
+                'group.scheduleSlots',
+                'group.teacher:id,name',
+                'group.course:id,uuid,title_ar,title_en',
+            ])
             ->latest()
             ->get();
 
@@ -39,33 +56,51 @@ class StudentGroupScheduleService extends BaseService
             $status = $enrollment->status instanceof EnrollmentStatus
                 ? $enrollment->status->value
                 : (string) $enrollment->status;
+            $isEnrolled = $status === EnrollmentStatus::ENROLLED->value;
 
             return [
                 'enrollmentId' => $enrollment->uuid,
                 'groupId' => $group?->uuid,
+                'courseId' => $group?->course?->uuid,
                 'nameAr' => $group?->name_ar,
-                'nameEn' => $group?->name_en ?? $group?->name_ar,
+                'nameEn' => $group?->name_en ?: $group?->name_ar,
                 'subjectAr' => $group?->subject_ar,
+                'subjectEn' => $group?->subject_en ?: $group?->subject_ar,
                 'gradeAr' => $group?->grade_ar,
+                'gradeEn' => $group?->grade_en ?: $group?->grade_ar,
                 'centerName' => $group?->center_name,
                 'hallName' => $group?->hall_name,
                 'scheduleAr' => $group?->schedule_ar,
+                'scheduleEn' => $group?->schedule_en ?: $group?->schedule_ar,
                 'priceEgp' => (float) ($group?->price_egp ?? 0),
-                'joinCode' => $group?->join_code,
-                'teacherName' => $group?->teacher?->name,
+                'joinCode' => strtoupper(trim((string) ($group?->join_code ?? ''))),
+                'maxStudents' => (int) ($group?->max_students ?? 50),
+                'enrolledCount' => (int) ($group?->enrolled_enrollments_count ?? 0),
+                'teacherName' => $group?->teacher?->name ?? '',
+                'teacherNameAr' => $group?->teacher?->name ?? '',
+                'teacherNameEn' => $group?->teacher?->name ?? '',
                 'enrollmentStatus' => $status,
-                'studentBarcode' => $status === EnrollmentStatus::ENROLLED->value ? $enrollment->student_barcode : null,
-                'studentPasscode' => $status === EnrollmentStatus::ENROLLED->value ? $enrollment->student_passcode : null,
+                'studentBarcode' => $isEnrolled ? $enrollment->student_barcode : null,
+                'studentPasscode' => $isEnrolled ? $enrollment->student_passcode : null,
                 'attendanceRate' => (int) $enrollment->attendance_rate,
                 'attendedSessions' => (int) $enrollment->attended_sessions,
                 'totalSessions' => (int) $enrollment->total_sessions,
-                'scheduleSlots' => ($group?->scheduleSlots ?? collect())->map(fn (GroupScheduleSlot $s) => [
-                    'id' => $s->uuid,
-                    'day' => $s->day_of_week instanceof DayOfWeek ? $s->day_of_week->value : (string) $s->day_of_week,
-                    'startTime' => $s->start_time,
-                    'endTime' => $s->end_time,
-                    'hall' => $s->hall_name ?: $group?->hall_name,
-                ])->values()->all(),
+                'enrolledAt' => $enrollment->enrolled_at?->toIso8601String(),
+                'requestedAt' => ($enrollment->requested_at ?? $enrollment->created_at)?->toIso8601String(),
+                'scheduleSlots' => ($group?->scheduleSlots ?? collect())->map(function (GroupScheduleSlot $s) use ($group) {
+                    $dayKey = $s->day_of_week instanceof DayOfWeek ? $s->day_of_week->value : strtolower((string) $s->day_of_week);
+                    $dayMeta = self::DAY_LABELS[$dayKey] ?? ['ar' => $dayKey, 'en' => ucfirst($dayKey)];
+
+                    return [
+                        'id' => $s->uuid,
+                        'day' => $dayKey,
+                        'dayAr' => $dayMeta['ar'],
+                        'dayEn' => $dayMeta['en'],
+                        'startTime' => $s->start_time,
+                        'endTime' => $s->end_time,
+                        'hall' => $s->hall_name ?: $group?->hall_name,
+                    ];
+                })->values()->all(),
             ];
         })->values()->all();
     }
@@ -204,6 +239,10 @@ class StudentGroupScheduleService extends BaseService
     public function createScheduleNote(User $student, array $data): array
     {
         $day = strtolower(trim((string) ($data['day_of_week'] ?? $data['day'] ?? 'saturday')));
+        if (! in_array($day, DayOfWeek::values(), true)) {
+            throw ValidationException::withMessages(['day_of_week' => ['اليوم المحدد غير صالح.']]);
+        }
+
         $text = trim(strip_tags((string) ($data['text'] ?? '')));
         if ($text === '') {
             throw ValidationException::withMessages(['text' => ['يرجى إدخال نص الملحوظة.']]);
@@ -212,8 +251,8 @@ class StudentGroupScheduleService extends BaseService
         $note = StudentScheduleNote::create([
             'student_id' => $student->id,
             'day_of_week' => $day,
-            'text' => $text,
-            'time' => isset($data['time']) ? trim(strip_tags((string) $data['time'])) : null,
+            'text' => mb_substr($text, 0, 500),
+            'time' => isset($data['time']) && trim((string) $data['time']) !== '' ? mb_substr(trim(strip_tags((string) $data['time'])), 0, 20) : null,
             'priority' => in_array($data['priority'] ?? 'medium', ['low', 'medium', 'high'], true) ? $data['priority'] : 'medium',
             'is_done' => false,
         ]);
@@ -361,14 +400,19 @@ class StudentGroupScheduleService extends BaseService
     }
 
     /**
-     * Retrieve student's attendance records and a rotating HMAC-signed QR token (60s TTL).
+     * Retrieve student's digital & printable center ID pass data, attendance summary,
+     * permanent scannable QR/Barcode codes, and signed live attendance token.
      */
     public function getAttendanceAndBarcode(User $student): array
     {
+        $profile = StudentProfile::where('student_id', $student->id)->first();
+
         $enrollments = GroupEnrollment::query()
             ->where('student_id', $student->id)
             ->where('status', EnrollmentStatus::ENROLLED)
-            ->with('group:id,uuid,name_ar,center_name')
+            ->whereHas('group', fn ($q) => $q->where('status', 'active'))
+            ->with(['group.teacher:id,name'])
+            ->latest('enrolled_at')
             ->get();
 
         $records = GroupAttendanceRecord::query()
@@ -376,26 +420,85 @@ class StudentGroupScheduleService extends BaseService
             ->with(['session.group:id,uuid,name_ar'])
             ->latest('recorded_at')
             ->limit(60)
-            ->get()
-            ->map(fn (GroupAttendanceRecord $r) => [
-                'id' => $r->uuid,
-                'groupNameAr' => $r->session?->group?->name_ar,
-                'sessionDate' => $r->session?->session_date?->format('Y-m-d'),
-                'status' => $r->status?->value ?? (string) $r->status,
-                'recordedAt' => $r->recorded_at?->toIso8601String(),
-            ])->values()->all();
+            ->get();
 
-        $primaryBarcode = $enrollments->first()?->student_barcode ?? ($student->student_code ?: "STD-{$student->id}");
+        $presentCount = 0;
+        $lateCount = 0;
+        $absentCount = 0;
+        foreach ($records as $r) {
+            $statusVal = $r->status instanceof AttendanceStatus ? $r->status->value : (string) $r->status;
+            if ($statusVal === AttendanceStatus::PRESENT->value) {
+                $presentCount++;
+            } elseif ($statusVal === AttendanceStatus::LATE->value) {
+                $lateCount++;
+            } elseif ($statusVal === AttendanceStatus::ABSENT->value) {
+                $absentCount++;
+            }
+        }
+        $totalRecords = $records->count();
+        $overallRate = $totalRecords > 0
+            ? (int) round((($presentCount + $lateCount) / $totalRecords) * 100)
+            : ($enrollments->isNotEmpty() ? (int) round((float) $enrollments->avg('attendance_rate')) : 100);
+
+        $canonicalStudentCode = strtoupper(trim((string) ($student->student_code ?: "STD-{$student->id}")));
+        $firstEnrollment = $enrollments->first();
+        $primaryBarcode = $firstEnrollment?->student_barcode
+            ? strtoupper(trim((string) $firstEnrollment->student_barcode))
+            : $canonicalStudentCode;
+        $primaryPasscode = $firstEnrollment?->student_passcode;
+
         $timestamp = now()->timestamp;
         $secret = (string) config('app.key', 'motafawweq-secret');
         $signature = substr(hash_hmac('sha256', "{$student->id}|{$primaryBarcode}|{$timestamp}", $secret), 0, 16);
 
         return [
-            'studentCode' => $student->student_code,
+            'studentName' => $student->name,
+            'studentPhone' => $student->phone,
+            'studentAvatar' => $student->avatar,
+            'gradeAr' => $profile?->grade_ar ?: 'الصف الثالث الثانوي',
+            'trackAr' => $profile?->track_ar ?: '',
+            'schoolName' => $profile?->school_name ?: '',
+            'centerName' => $firstEnrollment?->group?->center_name ?: ($profile?->center_name ?: ''),
+            'studentCode' => $canonicalStudentCode,
             'primaryBarcode' => $primaryBarcode,
-            'rotatingQrPayload' => "MOTAFAWWEQ:ATT:{$primaryBarcode}:{$timestamp}:{$signature}",
-            'qrExpiresInSec' => 60,
-            'records' => $records,
+            'primaryPasscode' => $primaryPasscode,
+            // Permanent QR payload that works across all active groups even when printed on physical paper/plastic cards
+            'permanentQrPayload' => "MOTAFAWWEQ:STUDENT:{$canonicalStudentCode}",
+            // Live HMAC-signed QR token for on-screen gate check-in
+            'rotatingQrPayload' => "MOTAFAWWEQ:ATT:{$student->id}:{$primaryBarcode}:{$timestamp}:{$signature}",
+            'qrExpiresInSec' => 300,
+            'issuedAt' => now()->format('Y-m-d'),
+            'enrolledGroups' => $enrollments->map(fn (GroupEnrollment $e) => [
+                'id' => $e->group?->uuid,
+                'enrollmentId' => $e->uuid,
+                'nameAr' => $e->group?->name_ar,
+                'nameEn' => $e->group?->name_en ?: $e->group?->name_ar,
+                'subjectAr' => $e->group?->subject_ar,
+                'teacherName' => $e->group?->teacher?->name ?? '',
+                'centerName' => $e->group?->center_name,
+                'hallName' => $e->group?->hall_name,
+                'scheduleAr' => $e->group?->schedule_ar,
+                'joinCode' => strtoupper(trim((string) ($e->group?->join_code ?? ''))),
+                'barcode' => $e->student_barcode ?: $canonicalStudentCode,
+                'passcode' => $e->student_passcode,
+                'attendanceRate' => (int) $e->attendance_rate,
+                'attendedSessions' => (int) $e->attended_sessions,
+                'totalSessions' => (int) $e->total_sessions,
+            ])->values()->all(),
+            'attendanceSummary' => [
+                'totalRecords' => $totalRecords,
+                'presentCount' => $presentCount,
+                'lateCount' => $lateCount,
+                'absentCount' => $absentCount,
+                'overallRate' => min(100, max(0, $overallRate)),
+            ],
+            'records' => $records->map(fn (GroupAttendanceRecord $r) => [
+                'id' => $r->uuid,
+                'groupNameAr' => $r->session?->group?->name_ar,
+                'sessionDate' => $r->session?->session_date?->format('Y-m-d'),
+                'status' => $r->status instanceof AttendanceStatus ? $r->status->value : (string) $r->status,
+                'recordedAt' => $r->recorded_at?->toIso8601String(),
+            ])->values()->all(),
         ];
     }
 

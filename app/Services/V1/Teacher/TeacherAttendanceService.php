@@ -313,7 +313,46 @@ class TeacherAttendanceService extends BaseService
             }
         }
 
-        // 4. Structured QR Token: MOTAFAWWEQ:STUDENT:{code}
+        // 3b. Signed Student Center Pass Token:
+        // New format:    MOTAFAWWEQ:ATT:{studentId}:{primaryBarcode}:{timestamp}:{hmac16}
+        // Legacy format: MOTAFAWWEQ:ATT:{primaryBarcode}:{timestamp}:{hmac16}
+        if (str_starts_with($clean, 'MOTAFAWWEQ:ATT:')) {
+            $parts = explode(':', $trimmed);
+            $secret = (string) config('app.key', 'motafawweq-secret');
+
+            if (count($parts) === 6 && is_numeric($parts[2])) {
+                $tokenStudentId = (int) $parts[2];
+                $tokenBarcode = strtoupper(trim($parts[3]));
+                $tokenTimestamp = (int) $parts[4];
+                $tokenHmac = strtolower(trim($parts[5]));
+
+                if (abs(time() - $tokenTimestamp) < 86400) {
+                    $expectedHmac = strtolower(substr(hash_hmac('sha256', "{$tokenStudentId}|{$tokenBarcode}|{$tokenTimestamp}", $secret), 0, 16));
+                    if (hash_equals($expectedHmac, $tokenHmac)) {
+                        return GroupEnrollment::where('study_group_id', $group->id)
+                            ->where('status', EnrollmentStatus::ENROLLED->value)
+                            ->where('student_id', $tokenStudentId)
+                            ->first();
+                    }
+                }
+            } elseif (count($parts) === 5) {
+                $tokenBarcode = strtoupper(trim($parts[2]));
+                $tokenTimestamp = (int) $parts[3];
+                $tokenHmac = strtolower(trim($parts[4]));
+
+                if (abs(time() - $tokenTimestamp) < 86400) {
+                    $candidate = $this->resolveEnrollmentByCode($group, $tokenBarcode);
+                    if ($candidate) {
+                        $expectedHmac = strtolower(substr(hash_hmac('sha256', "{$candidate->student_id}|{$tokenBarcode}|{$tokenTimestamp}", $secret), 0, 16));
+                        if (hash_equals($expectedHmac, $tokenHmac)) {
+                            return $candidate;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Structured Permanent Student Card QR Token: MOTAFAWWEQ:STUDENT:{code}
         if (str_starts_with($clean, 'MOTAFAWWEQ:STUDENT:')) {
             $subCode = trim(substr($clean, strlen('MOTAFAWWEQ:STUDENT:')));
 

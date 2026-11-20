@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1\Student;
 
 use App\Http\Controllers\Api\BaseApiController;
 use App\Http\Requests\V1\Student\JoinGroupByCodeRequest;
+use App\Http\Requests\V1\Student\SaveStudentScheduleNoteRequest;
 use App\Http\Requests\V1\Student\SaveStudentStudySessionRequest;
 use App\Http\Resources\V1\Teacher\PendingStudentResource;
 use App\Services\V1\Student\StudentGroupScheduleService;
@@ -155,11 +156,11 @@ class StudentGroupScheduleController extends BaseApiController
     /**
      * POST /api/v1/student/schedule/notes
      */
-    public function storeScheduleNote(\Illuminate\Http\Request $request): JsonResponse
+    public function storeScheduleNote(SaveStudentScheduleNoteRequest $request): JsonResponse
     {
         $note = $this->groupScheduleService->createScheduleNote(
             $this->authenticatedUser(),
-            $request->only(['day_of_week', 'day', 'text', 'time', 'priority'])
+            $request->validated()
         );
 
         return $this->createdResponse($note, 'تم حفظ الملحوظة بنجاح.');

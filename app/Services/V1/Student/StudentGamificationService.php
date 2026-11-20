@@ -3,11 +3,14 @@
 namespace App\Services\V1\Student;
 
 use App\Enums\CertificateStatus;
+use App\Enums\LessonStatus;
 use App\Models\CourseCertificate;
 use App\Models\CourseLeague;
 use App\Models\ExamSubmission;
 use App\Models\HomeworkSubmission;
 use App\Models\LeagueParticipant;
+use App\Models\Lesson;
+use App\Models\StudentDailyActivity;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentProfile;
 use App\Models\StudentXpLedger;
@@ -19,17 +22,19 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 class StudentGamificationService extends BaseService
 {
     public function __construct(
-        protected StudentAccessService $accessService
+        protected StudentAccessService $accessService,
+        protected StudentActivityService $activityService
     ) {}
 
     /**
-     * Retrieve student's total server-verified XP, level, badges, and recent immutable XP ledger entries.
+     * Retrieve student's total server-verified XP, level, streak, and recent immutable XP ledger entries.
      */
     public function getGamificationSummary(User $student): array
     {
         $totalXp = (int) StudentXpLedger::forStudent($student->id)->sum('points');
         $level = max(1, (int) floor($totalXp / 100) + 1);
         $nextLevelXp = $level * 100;
+        $activity = $this->activityService->getActivitySnapshot($student);
 
         $recentLedger = StudentXpLedger::forStudent($student->id)
             ->latest('created_at')
@@ -47,6 +52,10 @@ class StudentGamificationService extends BaseService
             'totalXp' => $totalXp,
             'level' => $level,
             'nextLevelXp' => $nextLevelXp,
+            'streakDays' => $activity['streakDays'],
+            'longestStreakDays' => $activity['longestStreakDays'],
+            'todayActiveSeconds' => $activity['activeSecondsToday'],
+            'todayActiveMinutes' => $activity['activeMinutesToday'],
             'recentLedger' => $recentLedger,
         ];
     }
@@ -113,28 +122,35 @@ class StudentGamificationService extends BaseService
     }
 
     /**
-     * 52-week daily activity heatmap computed from lesson progress, exam submissions and XP ledger.
+     * 52-week daily activity heatmap computed from daily platform presence, lesson progress, exam submissions and XP ledger.
      */
     public function getActivityHeatmap(User $student): array
     {
-        $start = Carbon::now()->startOfDay()->subDays(363);
+        $profile = StudentProfile::where('student_id', $student->id)->first();
+        $timezone = $this->activityService->resolveTimezone($profile);
+        $start = Carbon::now($timezone)->startOfDay()->subDays(363);
+
+        $dailyActivities = StudentDailyActivity::forStudent($student->id)
+            ->whereDate('activity_date', '>=', $start->toDateString())
+            ->get(['activity_date', 'active_seconds'])
+            ->keyBy(fn (StudentDailyActivity $row) => $row->activity_date->toDateString());
 
         $xpByDay = StudentXpLedger::forStudent($student->id)
-            ->where('created_at', '>=', $start)
+            ->where('created_at', '>=', $start->copy()->setTimezone('UTC')->subDay())
             ->get(['points', 'created_at'])
-            ->groupBy(fn ($e) => $e->created_at->format('Y-m-d'));
+            ->groupBy(fn ($e) => $e->created_at->copy()->setTimezone($timezone)->format('Y-m-d'));
 
         $lessonMinutesByDay = StudentLessonProgress::forStudent($student->id)
-            ->where('updated_at', '>=', $start)
+            ->where('updated_at', '>=', $start->copy()->setTimezone('UTC')->subDay())
             ->get(['watched_seconds', 'updated_at'])
-            ->groupBy(fn ($p) => $p->updated_at->format('Y-m-d'))
+            ->groupBy(fn ($p) => $p->updated_at->copy()->setTimezone($timezone)->format('Y-m-d'))
             ->map(fn ($g) => (int) round($g->sum('watched_seconds') / 60));
 
         $examsByDay = ExamSubmission::forStudent($student->id)
-            ->where('submitted_at', '>=', $start)
+            ->where('submitted_at', '>=', $start->copy()->setTimezone('UTC')->subDay())
             ->whereNotNull('submitted_at')
             ->get(['submitted_at'])
-            ->groupBy(fn ($s) => $s->submitted_at->format('Y-m-d'))
+            ->groupBy(fn ($s) => $s->submitted_at->copy()->setTimezone($timezone)->format('Y-m-d'))
             ->map->count();
 
         $dayNamesAr = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
@@ -145,10 +161,14 @@ class StudentGamificationService extends BaseService
         $activeDays = 0;
         for ($i = 0; $i < 364; $i++) {
             $key = $cursor->format('Y-m-d');
-            $minutes = (int) ($lessonMinutesByDay[$key] ?? 0);
+            /** @var StudentDailyActivity|null $dailyRow */
+            $dailyRow = $dailyActivities->get($key);
+            $platformMinutes = $dailyRow ? intdiv((int) $dailyRow->active_seconds, 60) : 0;
+            $minutes = max($platformMinutes, (int) ($lessonMinutesByDay[$key] ?? 0));
             $quizzes = (int) ($examsByDay[$key] ?? 0);
             $xp = (int) (isset($xpByDay[$key]) ? $xpByDay[$key]->sum('points') : 0);
-            $score = $minutes + ($quizzes * 15) + (int) round($xp / 5);
+            $hasVisit = $dailyRow !== null;
+            $score = $minutes + ($quizzes * 15) + (int) round($xp / 5) + ($hasVisit ? 1 : 0);
             $level = $score <= 0 ? 0 : ($score < 15 ? 1 : ($score < 40 ? 2 : ($score < 80 ? 3 : 4)));
             if ($level > 0) {
                 $activeDays++;
@@ -258,8 +278,8 @@ class StudentGamificationService extends BaseService
 
         $completedCourses = 0;
         foreach ($entitlements['course_ids'] as $courseId) {
-            $total = \App\Models\Lesson::where('course_id', $courseId)
-                ->where('status', \App\Enums\LessonStatus::PUBLISHED)
+            $total = Lesson::where('course_id', $courseId)
+                ->where('status', LessonStatus::PUBLISHED)
                 ->count();
             if ($total === 0) {
                 continue;

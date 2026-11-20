@@ -252,9 +252,11 @@ Route::prefix('v1')->group(function () {
                 Route::post('/billing/payments', [StudentBillingController::class, 'storePayment'])
                     ->middleware(['throttle:student-checkout', 'idempotent']);
 
-                // Phase 10: Dashboard, Analytics & Revision Hub
+                // Phase 10: Dashboard, Daily Activity Heartbeat, Analytics & Revision Hub
                 Route::get('/dashboard', [StudentDashboardController::class, 'dashboard'])
                     ->middleware('throttle:student-read');
+                Route::post('/activity/heartbeat', [StudentDashboardController::class, 'heartbeat'])
+                    ->middleware('throttle:activity-heartbeat');
                 Route::get('/analytics', [StudentDashboardController::class, 'analytics'])
                     ->middleware('throttle:student-read');
                 Route::get('/revision', [StudentDashboardController::class, 'revision'])

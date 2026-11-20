@@ -51,6 +51,12 @@ class StudyGroup extends Model
                 $model->join_code = static::generateUniqueJoinCode();
             }
         });
+
+        static::saving(function (self $model) {
+            if (! empty($model->join_code)) {
+                $model->join_code = strtoupper(trim((string) $model->join_code));
+            }
+        });
     }
 
     public function course(): BelongsTo

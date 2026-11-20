@@ -11,7 +11,6 @@ use App\Models\Exam;
 use App\Models\ExamSubmission;
 use App\Models\Homework;
 use App\Models\HomeworkSubmission;
-use App\Models\LeagueParticipant;
 use App\Models\Lesson;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentStudySession;
@@ -19,78 +18,31 @@ use App\Models\StudentXpLedger;
 use App\Models\User;
 use App\Services\BaseService;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class StudentDashboardService extends BaseService
 {
     public function __construct(
         protected StudentAccessService $accessService,
-        protected StudentExamTakingService $examService
+        protected StudentExamTakingService $examService,
+        protected StudentActivityService $activityService
     ) {}
 
     /**
-     * Aggregated Student Dashboard: KPIs, weekly activity, subject mastery, continue-watching lesson, today's tasks, upcoming deadlines, and smart recommendation.
+     * Aggregated Student Dashboard: KPIs, daily streak & live platform minutes, 7-day activity,
+     * subject mastery, continue-watching lesson, today's tasks, upcoming deadlines, and smart recommendation.
      */
-    public function getDashboard(User $student): array
+    public function getDashboard(User $student, ?string $timezone = null): array
     {
+        // 1. Record today's platform visit (updates consecutive daily streak & returns authoritative daily time)
+        $activity = $this->activityService->recordHeartbeat($student, 0, $timezone, true);
+        $resolvedTimezone = $activity['timezone'];
+
         $entitlements = $this->accessService->getEntitlements($student);
         $courseIds = $entitlements['course_ids'] ?? [];
         $teacherIds = $entitlements['teacher_ids'] ?? [];
 
-        $completedLessons = StudentLessonProgress::forStudent($student->id)
-            ->where('is_completed', true)
-            ->count();
-
-        $totalEnrolledLessons = ! empty($courseIds)
-            ? Lesson::query()
-                ->whereIn('course_id', $courseIds)
-                ->where('status', LessonStatus::PUBLISHED)
-                ->count()
-            : $completedLessons;
-
-        $totalWatchedSeconds = (int) StudentLessonProgress::forStudent($student->id)
-            ->sum('watched_seconds');
-
-        $todayWatchedSeconds = (int) StudentLessonProgress::forStudent($student->id)
-            ->whereDate('updated_at', Carbon::today())
-            ->sum('watched_seconds');
-
-        $todayStudySessionMinutes = (int) StudentStudySession::forStudent($student->id)
-            ->where('is_completed', true)
-            ->whereDate('updated_at', Carbon::today())
-            ->sum('duration_minutes');
-
-        $studyMinutesToday = (int) round($todayWatchedSeconds / 60) + $todayStudySessionMinutes;
-
-        $gradedSubmissions = ExamSubmission::forStudent($student->id)
-            ->where('status', ExamSubmissionStatus::GRADED)
-            ->get(['percentage', 'is_passed']);
-
-        $avgExamPercent = $gradedSubmissions->count() > 0
-            ? round((float) $gradedSubmissions->avg('percentage'), 1)
-            : 0.0;
-
-        $fullMarkExamsCount = $gradedSubmissions->filter(fn ($s) => (float) $s->percentage >= 100.0)->count();
-
-        $totalXp = (int) StudentXpLedger::forStudent($student->id)->sum('points');
-
-        // Streak calculation from LeagueParticipant or recent activity days
-        $maxLeagueStreak = (int) LeagueParticipant::where('student_id', $student->id)->max('streak_days');
-        $activeDaysCount = StudentLessonProgress::forStudent($student->id)
-            ->where('updated_at', '>=', Carbon::now()->subDays(30))
-            ->selectRaw('DATE(updated_at) as d')
-            ->distinct()
-            ->count();
-        $streakDays = max($maxLeagueStreak, $activeDaysCount);
-
-        // Batch Rank calculation based on XP ledger across students
-        $higherXpStudents = StudentXpLedger::query()
-            ->selectRaw('student_id, SUM(points) as total_xp')
-            ->groupBy('student_id')
-            ->havingRaw('SUM(points) > ?', [$totalXp])
-            ->count();
-        $batchRank = $totalXp > 0 ? ($higherXpStudents + 1) : null;
-
-        // Load enrolled published courses with lessons & teacher for accurate mastery + continueLesson
+        // 2. Load enrolled published courses with published lessons & teacher
         $enrolledCourses = ! empty($courseIds)
             ? Course::whereIn('id', $courseIds)
                 ->where('status', CourseStatus::PUBLISHED)
@@ -105,16 +57,67 @@ class StudentDashboardService extends BaseService
             ->get()
             ->keyBy('lesson_id');
 
-        // Subject Mastery & Per-Course Continue Lesson
+        $totalWatchedSeconds = (int) $allProgressByLesson->sum('watched_seconds');
+
+        // 3. Graded exam submissions (overall + per-course breakdown for subject filtering)
+        $gradedSubmissions = ExamSubmission::forStudent($student->id)
+            ->where('status', ExamSubmissionStatus::GRADED)
+            ->with('exam:id,course_id')
+            ->get(['id', 'exam_id', 'percentage', 'is_passed', 'is_full_mark']);
+
+        $avgExamPercent = $gradedSubmissions->count() > 0
+            ? round((float) $gradedSubmissions->avg('percentage'), 1)
+            : 0.0;
+
+        $fullMarkExamsCount = $gradedSubmissions
+            ->filter(fn (ExamSubmission $s) => (bool) $s->is_full_mark || (float) $s->percentage >= 100.0)
+            ->count();
+
+        $examStatsByCourse = [];
+        foreach ($gradedSubmissions as $sub) {
+            $cId = $sub->exam?->course_id;
+            if (! $cId) {
+                continue;
+            }
+            if (! isset($examStatsByCourse[$cId])) {
+                $examStatsByCourse[$cId] = ['count' => 0, 'fullMarks' => 0, 'sumPct' => 0.0];
+            }
+            $examStatsByCourse[$cId]['count']++;
+            if ((bool) $sub->is_full_mark || (float) $sub->percentage >= 100.0) {
+                $examStatsByCourse[$cId]['fullMarks']++;
+            }
+            $examStatsByCourse[$cId]['sumPct'] += (float) $sub->percentage;
+        }
+
+        // 4. Immutable XP total & accurate cross-DB batch rank (subquery count works identically in SQLite & MySQL)
+        $totalXp = (int) StudentXpLedger::forStudent($student->id)->sum('points');
+        $batchRank = null;
+        if ($totalXp > 0) {
+            $higherXpSubquery = StudentXpLedger::query()
+                ->select('student_id')
+                ->groupBy('student_id')
+                ->havingRaw('SUM(points) > ?', [$totalXp]);
+
+            $higherXpStudents = DB::query()
+                ->fromSub($higherXpSubquery, 'higher_xp_students')
+                ->count();
+
+            $batchRank = $higherXpStudents + 1;
+        }
+
+        // 5. Subject Mastery, Completed Lessons Totals & Per-Course Continue Lesson
         $colors = ['#0284C7', '#10B981', '#F59E0B', '#6366F1', '#EC4899'];
         $subjectMastery = [];
         $continueLessonsByCourse = [];
         $primaryContinueLesson = null;
         $latestUpdatedAt = null;
+        $enrolledCompletedLessons = 0;
+        $totalEnrolledLessons = 0;
 
         foreach ($enrolledCourses as $idx => $course) {
-            $lessons = $course->lessons;
+            $lessons = $course->lessons->values();
             $totalL = $lessons->count();
+            $totalEnrolledLessons += $totalL;
             $progressSum = 0;
             $doneCount = 0;
 
@@ -144,6 +147,8 @@ class StudentDashboardService extends BaseService
                 }
             }
 
+            $enrolledCompletedLessons += $doneCount;
+
             // If no mid-progress lesson in this course, pick the first uncompleted lesson (or first lesson)
             if (! $targetLesson && $totalL > 0) {
                 foreach ($lessons as $lIdx => $lesson) {
@@ -164,23 +169,32 @@ class StudentDashboardService extends BaseService
 
             $coursePct = $totalL > 0 ? min(100, (int) round($progressSum / $totalL)) : 0;
             $subjectName = $course->title_ar ?: $course->subject_ar ?: $course->grade_ar;
+            $courseExamStat = $examStatsByCourse[$course->id] ?? ['count' => 0, 'fullMarks' => 0, 'sumPct' => 0.0];
 
             $subjectMastery[] = [
                 'id' => $course->uuid,
                 'nameAr' => $subjectName,
-                'nameEn' => $course->title_en ?? $subjectName,
+                'nameEn' => $course->title_en ?: $subjectName,
                 'pct' => $coursePct,
                 'completedLessons' => $doneCount,
                 'totalLessons' => $totalL,
+                'examsCompletedCount' => $courseExamStat['count'],
+                'fullMarkExamsCount' => $courseExamStat['fullMarks'],
+                'avgExamPercentage' => $courseExamStat['count'] > 0
+                    ? round($courseExamStat['sumPct'] / $courseExamStat['count'], 1)
+                    : 0.0,
                 'color' => $colors[$idx % count($colors)],
             ];
 
             if ($targetLesson) {
-                $nextLessonObj = $lessons->get($targetLessonIndex); // 0-based index of (targetLessonIndex + 1) is $targetLessonIndex
+                $nextLessonObj = $lessons->get($targetLessonIndex);
                 $durationSec = max(60, (int) ($targetLesson->duration_seconds ?: ($targetProgress?->duration_seconds ?: 1800)));
                 $pausedSec = min($durationSec, (int) ($targetProgress?->max_position_seconds ?: ($targetProgress?->watched_seconds ?: 0)));
-                $remainingMins = max(1, (int) ceil(max(0, $durationSec - $pausedSec) / 60));
-                $progPct = $targetProgress?->is_completed
+                $isLessonCompleted = (bool) ($targetProgress?->is_completed ?? false);
+                $remainingMins = $isLessonCompleted
+                    ? 0
+                    : max(1, (int) ceil(max(0, $durationSec - $pausedSec) / 60));
+                $progPct = $isLessonCompleted
                     ? 100
                     : (int) ($targetProgress?->progress_percent ?: round(($pausedSec / $durationSec) * 100));
 
@@ -188,22 +202,23 @@ class StudentDashboardService extends BaseService
                     'courseId' => $course->uuid,
                     'courseTitleAr' => $subjectName,
                     'subjectAr' => $subjectName,
-                    'subjectEn' => $course->title_en ?? $subjectName,
+                    'subjectEn' => $course->title_en ?: $subjectName,
                     'teacherAr' => $course->teacher?->name ?? '',
                     'teacherEn' => $course->teacher?->name ?? '',
                     'lessonId' => $targetLesson->uuid,
                     'lessonTitleAr' => $targetLesson->title_ar,
                     'titleAr' => $targetLesson->title_ar,
-                    'titleEn' => $targetLesson->title_ar,
+                    'titleEn' => $targetLesson->title_en ?: $targetLesson->title_ar,
                     'lessonNumber' => $targetLessonIndex,
                     'totalLessons' => max(1, $totalL),
                     'progressPercent' => min(100, max(0, $progPct)),
+                    'isCompleted' => $isLessonCompleted,
                     'pausedMinute' => $this->formatSeconds($pausedSec),
                     'totalDuration' => $targetLesson->duration_label ?: $this->formatSeconds($durationSec),
                     'durationLabel' => $targetLesson->duration_label ?: $this->formatSeconds($durationSec),
                     'remainingMinutes' => $remainingMins,
                     'nextLessonTitleAr' => $nextLessonObj ? $nextLessonObj->title_ar : 'مراجعة وإتمام المقرر',
-                    'nextLessonTitleEn' => $nextLessonObj ? $nextLessonObj->title_ar : 'Course Review & Completion',
+                    'nextLessonTitleEn' => $nextLessonObj ? ($nextLessonObj->title_en ?: $nextLessonObj->title_ar) : 'Course Review & Completion',
                     'route' => '/student/lesson',
                 ];
 
@@ -218,11 +233,17 @@ class StudentDashboardService extends BaseService
             }
         }
 
-        // Fallback if student has progress record outside enrolledCourses collection
+        // If student is not enrolled in published courses yet, fall back to raw completed progress count
+        $completedLessons = $enrolledCourses->isNotEmpty()
+            ? $enrolledCompletedLessons
+            : $allProgressByLesson->where('is_completed', true)->count();
+        $totalEnrolledLessons = max($completedLessons, $totalEnrolledLessons);
+
+        // Fallback if student has in-progress lesson outside current enrolledCourses collection
         if (! $primaryContinueLesson) {
             $lastProgress = StudentLessonProgress::forStudent($student->id)
                 ->where('is_completed', false)
-                ->with(['lesson:id,uuid,title_ar,duration_label,duration_seconds', 'course:id,uuid,title_ar,teacher_id', 'course.teacher:id,name'])
+                ->with(['lesson:id,uuid,title_ar,title_en,duration_label,duration_seconds', 'course:id,uuid,title_ar,title_en,teacher_id', 'course.teacher:id,name'])
                 ->latest('updated_at')
                 ->first();
 
@@ -233,57 +254,80 @@ class StudentDashboardService extends BaseService
                     'courseId' => $lastProgress->course?->uuid,
                     'courseTitleAr' => $lastProgress->course?->title_ar ?? '',
                     'subjectAr' => $lastProgress->course?->title_ar ?? '',
-                    'subjectEn' => $lastProgress->course?->title_ar ?? '',
+                    'subjectEn' => $lastProgress->course?->title_en ?: ($lastProgress->course?->title_ar ?? ''),
                     'teacherAr' => $lastProgress->course?->teacher?->name ?? '',
                     'teacherEn' => $lastProgress->course?->teacher?->name ?? '',
                     'lessonId' => $lastProgress->lesson->uuid,
                     'lessonTitleAr' => $lastProgress->lesson->title_ar,
                     'titleAr' => $lastProgress->lesson->title_ar,
-                    'titleEn' => $lastProgress->lesson->title_ar,
+                    'titleEn' => $lastProgress->lesson->title_en ?: $lastProgress->lesson->title_ar,
                     'lessonNumber' => 1,
                     'totalLessons' => max(1, $totalEnrolledLessons),
                     'progressPercent' => (int) $lastProgress->progress_percent,
+                    'isCompleted' => false,
                     'pausedMinute' => $this->formatSeconds($pausedSec),
                     'totalDuration' => $lastProgress->lesson->duration_label ?: $this->formatSeconds($durationSec),
                     'durationLabel' => $lastProgress->lesson->duration_label ?: $this->formatSeconds($durationSec),
                     'remainingMinutes' => max(1, (int) ceil(max(0, $durationSec - $pausedSec) / 60)),
                     'nextLessonTitleAr' => $lastProgress->course?->title_ar ?? 'الدرس التالي',
-                    'nextLessonTitleEn' => $lastProgress->course?->title_ar ?? 'Next Lesson',
+                    'nextLessonTitleEn' => $lastProgress->course?->title_en ?: ($lastProgress->course?->title_ar ?? 'Next Lesson'),
                     'route' => '/student/lesson',
                 ];
             }
         }
 
-        // Upcoming Active Exams (excluding already submitted/graded by this student)
-        $upcomingExams = ! empty($teacherIds)
+        // 6. Upcoming Active Exams (matching both teacher_ids & course_ids, sorted soonest due_date first)
+        $hasAccessScope = ! empty($teacherIds) || ! empty($courseIds);
+
+        $upcomingExams = $hasAccessScope
             ? Exam::query()
-                ->whereIn('teacher_id', $teacherIds)
                 ->where('status', ExamStatus::ACTIVE)
+                ->where(function ($q) use ($teacherIds, $courseIds) {
+                    if (! empty($teacherIds)) {
+                        $q->whereIn('teacher_id', $teacherIds);
+                    }
+                    if (! empty($courseIds)) {
+                        $q->orWhereIn('course_id', $courseIds);
+                    }
+                })
                 ->whereDoesntHave('submissions', fn ($q) => $q->where('student_id', $student->id)
                     ->whereIn('status', [ExamSubmissionStatus::SUBMITTED, ExamSubmissionStatus::GRADED]))
-                ->with('course:id,uuid,title_ar')
-                ->latest()
+                ->with('course:id,uuid,title_ar,title_en')
+                ->orderByRaw('CASE WHEN due_date IS NULL THEN 1 ELSE 0 END ASC')
+                ->orderBy('due_date', 'asc')
+                ->latest('created_at')
                 ->limit(6)
-                ->get(['id', 'uuid', 'course_id', 'title_ar', 'course_title_ar', 'due_date', 'duration_minutes', 'full_mark'])
+                ->get(['id', 'uuid', 'course_id', 'title_ar', 'title_en', 'course_title_ar', 'due_date', 'duration_minutes', 'full_mark'])
                 ->map(fn (Exam $e) => [
                     'id' => $e->uuid,
                     'type' => 'exam',
                     'courseId' => $e->course?->uuid,
                     'titleAr' => $e->title_ar,
+                    'titleEn' => $e->title_en ?: $e->title_ar,
                     'courseTitleAr' => $e->course_title_ar ?: ($e->course?->title_ar ?? ''),
+                    'courseTitleEn' => $e->course?->title_en ?: ($e->course_title_ar ?: ($e->course?->title_ar ?? '')),
                     'dueDate' => $e->due_date?->format('Y-m-d'),
                     'durationMinutes' => (int) ($e->duration_minutes ?: 30),
                     'totalMarks' => (int) ($e->full_mark ?: 100),
                 ])->values()->all()
             : [];
 
-        // Upcoming Pending Homeworks (excluding already submitted by this student)
-        $upcomingHomeworks = ! empty($teacherIds)
+        // 7. Upcoming Pending Homeworks (matching both teacher_ids & course_ids, sorted soonest due_date first)
+        $upcomingHomeworks = $hasAccessScope
             ? Homework::query()
-                ->whereIn('teacher_id', $teacherIds)
+                ->where(function ($q) use ($teacherIds, $courseIds) {
+                    if (! empty($teacherIds)) {
+                        $q->whereIn('teacher_id', $teacherIds);
+                    }
+                    if (! empty($courseIds)) {
+                        $q->orWhereIn('course_id', $courseIds);
+                    }
+                })
                 ->whereDoesntHave('submissions', fn ($q) => $q->where('student_id', $student->id))
-                ->with('course:id,uuid,title_ar')
-                ->latest()
+                ->with('course:id,uuid,title_ar,title_en')
+                ->orderByRaw('CASE WHEN due_date IS NULL THEN 1 ELSE 0 END ASC')
+                ->orderBy('due_date', 'asc')
+                ->latest('created_at')
                 ->limit(6)
                 ->get(['id', 'uuid', 'course_id', 'title_ar', 'course_title_ar', 'due_date', 'max_grade'])
                 ->map(fn (Homework $h) => [
@@ -291,29 +335,78 @@ class StudentDashboardService extends BaseService
                     'type' => 'homework',
                     'courseId' => $h->course?->uuid,
                     'titleAr' => $h->title_ar,
+                    'titleEn' => $h->title_ar,
                     'courseTitleAr' => $h->course_title_ar ?: ($h->course?->title_ar ?? ''),
+                    'courseTitleEn' => $h->course?->title_en ?: ($h->course_title_ar ?: ($h->course?->title_ar ?? '')),
                     'dueDate' => $h->due_date?->format('Y-m-d'),
                     'maxScore' => (int) ($h->max_grade ?: 20),
                 ])->values()->all()
             : [];
 
-        // Build Today's Tasks (Lessons + Quizzes + Homeworks)
+        // 8. Today's Tasks (Personal Study Sessions for today + Lessons + Quizzes + Homeworks)
         $todayTasks = [];
+        $todayDayKey = strtolower(Carbon::now($resolvedTimezone)->englishDayOfWeek);
+
+        $todayStudySessions = StudentStudySession::forStudent($student->id)
+            ->where('day_of_week', $todayDayKey)
+            ->orderBy('start_time')
+            ->get();
+
+        foreach ($todayStudySessions as $session) {
+            $durMins = (int) ($session->duration_minutes ?: 60);
+            $timeWindow = trim("{$session->start_time} - {$session->end_time}");
+
+            $todayTasks[] = [
+                'id' => 'session-'.$session->uuid,
+                'source' => 'study_session',
+                'sessionUuid' => $session->uuid,
+                'courseId' => null,
+                'titleAr' => $session->title_ar,
+                'titleEn' => $session->title_ar,
+                'subjectAr' => $session->subject_ar,
+                'subjectEn' => $session->subject_ar,
+                'type' => 'lesson',
+                'duration' => "{$durMins} دقيقة",
+                'durationAr' => "{$durMins} دقيقة",
+                'durationEn' => "{$durMins} min",
+                'deadline' => $timeWindow !== '-' ? "الموعد: {$timeWindow}" : 'جلسة مذاكرة اليوم',
+                'deadlineAr' => $timeWindow !== '-' ? "الموعد: {$timeWindow}" : 'جلسة مذاكرة اليوم',
+                'deadlineEn' => $timeWindow !== '-' ? "Time: {$timeWindow}" : 'Today\'s Study Session',
+                'priority' => 'normal',
+                'status' => $session->is_completed ? 'completed' : 'pending',
+                'isCompleted' => (bool) $session->is_completed,
+                'actionRoute' => '/student/schedule',
+            ];
+        }
+
         foreach ($continueLessonsByCourse as $cUuid => $heroLesson) {
+            $isDone = (bool) ($heroLesson['isCompleted'] ?? false);
+            $pct = (int) ($heroLesson['progressPercent'] ?? 0);
+
             $todayTasks[] = [
                 'id' => 'lesson-'.$heroLesson['lessonId'],
+                'source' => 'lesson',
                 'courseId' => $cUuid,
                 'titleAr' => 'مذاكرة حصة: '.$heroLesson['titleAr'],
                 'titleEn' => 'Study Lesson: '.$heroLesson['titleEn'],
                 'subjectAr' => $heroLesson['subjectAr'],
+                'subjectEn' => $heroLesson['subjectEn'],
                 'type' => 'lesson',
                 'duration' => $heroLesson['totalDuration'],
-                'deadline' => $heroLesson['progressPercent'] > 0
-                    ? "تم إنجاز {$heroLesson['progressPercent']}%"
-                    : 'حصة جاهزة للمذاكرة',
+                'durationAr' => $heroLesson['totalDuration'],
+                'durationEn' => $heroLesson['totalDuration'],
+                'deadline' => $isDone
+                    ? 'مكتملة 100%'
+                    : ($pct > 0 ? "تم إنجاز {$pct}%" : 'حصة جاهزة للمذاكرة'),
+                'deadlineAr' => $isDone
+                    ? 'مكتملة 100%'
+                    : ($pct > 0 ? "تم إنجاز {$pct}%" : 'حصة جاهزة للمذاكرة'),
+                'deadlineEn' => $isDone
+                    ? '100% Completed'
+                    : ($pct > 0 ? "{$pct}% completed" : 'Ready to study'),
                 'priority' => 'normal',
-                'status' => 'pending',
-                'isCompleted' => false,
+                'status' => $isDone ? 'completed' : 'pending',
+                'isCompleted' => $isDone,
                 'actionRoute' => "/student/lesson?courseId={$cUuid}&lessonId={$heroLesson['lessonId']}",
             ];
         }
@@ -321,77 +414,54 @@ class StudentDashboardService extends BaseService
         foreach ($upcomingExams as $examItem) {
             $todayTasks[] = [
                 'id' => 'exam-'.$examItem['id'],
+                'source' => 'exam',
                 'courseId' => $examItem['courseId'] ?? null,
                 'titleAr' => $examItem['titleAr'],
-                'titleEn' => $examItem['titleAr'],
+                'titleEn' => $examItem['titleEn'] ?: $examItem['titleAr'],
                 'subjectAr' => $examItem['courseTitleAr'] ?: 'اختبار تقييمي',
+                'subjectEn' => $examItem['courseTitleEn'] ?: 'Assessment Exam',
                 'type' => 'quiz',
                 'duration' => "{$examItem['durationMinutes']} دقيقة",
+                'durationAr' => "{$examItem['durationMinutes']} دقيقة",
+                'durationEn' => "{$examItem['durationMinutes']} min",
                 'deadline' => $examItem['dueDate'] ? "آخر موعد: {$examItem['dueDate']}" : 'متاح الآن',
+                'deadlineAr' => $examItem['dueDate'] ? "آخر موعد: {$examItem['dueDate']}" : 'متاح الآن',
+                'deadlineEn' => $examItem['dueDate'] ? "Due: {$examItem['dueDate']}" : 'Available now',
                 'priority' => 'urgent',
                 'status' => 'pending',
                 'isCompleted' => false,
-                'actionRoute' => '/student/exam',
+                'actionRoute' => "/student/exam?examId={$examItem['id']}",
             ];
         }
 
         foreach ($upcomingHomeworks as $hwItem) {
             $todayTasks[] = [
                 'id' => 'hw-'.$hwItem['id'],
+                'source' => 'homework',
                 'courseId' => $hwItem['courseId'] ?? null,
                 'titleAr' => $hwItem['titleAr'],
-                'titleEn' => $hwItem['titleAr'],
+                'titleEn' => $hwItem['titleEn'] ?: $hwItem['titleAr'],
                 'subjectAr' => $hwItem['courseTitleAr'] ?: 'واجب تطبيقي',
+                'subjectEn' => $hwItem['courseTitleEn'] ?: 'Homework',
                 'type' => 'homework',
                 'duration' => "{$hwItem['maxScore']} درجة",
+                'durationAr' => "{$hwItem['maxScore']} درجة",
+                'durationEn' => "{$hwItem['maxScore']} pts",
                 'deadline' => $hwItem['dueDate'] ? "التسليم: {$hwItem['dueDate']}" : 'مطلوب للتسليم',
+                'deadlineAr' => $hwItem['dueDate'] ? "التسليم: {$hwItem['dueDate']}" : 'مطلوب للتسليم',
+                'deadlineEn' => $hwItem['dueDate'] ? "Due: {$hwItem['dueDate']}" : 'Pending submission',
                 'priority' => 'urgent',
                 'status' => 'pending',
                 'isCompleted' => false,
-                'actionRoute' => '/student/homework',
+                'actionRoute' => "/student/homework?homeworkId={$hwItem['id']}",
             ];
         }
 
-        // Weekly Activity (7 days: Sat -> Fri)
-        $daysMeta = [
-            6 => ['dayAr' => 'السبت', 'dayEn' => 'Sat', 'key' => 'saturday'],
-            0 => ['dayAr' => 'الأحد', 'dayEn' => 'Sun', 'key' => 'sunday'],
-            1 => ['dayAr' => 'الإثنين', 'dayEn' => 'Mon', 'key' => 'monday'],
-            2 => ['dayAr' => 'الثلاثاء', 'dayEn' => 'Tue', 'key' => 'tuesday'],
-            3 => ['dayAr' => 'الأربعاء', 'dayEn' => 'Wed', 'key' => 'wednesday'],
-            4 => ['dayAr' => 'الخميس', 'dayEn' => 'Thu', 'key' => 'thursday'],
-            5 => ['dayAr' => 'الجمعة', 'dayEn' => 'Fri', 'key' => 'friday'],
-        ];
-        $todayDow = Carbon::now()->dayOfWeek;
-        $progressLast7Days = StudentLessonProgress::forStudent($student->id)
-            ->where('updated_at', '>=', Carbon::now()->subDays(7))
-            ->get(['watched_seconds', 'is_completed', 'updated_at']);
-        $studySessionsRecent = StudentStudySession::forStudent($student->id)
-            ->where('is_completed', true)
-            ->where('updated_at', '>=', Carbon::now()->subDays(7))
-            ->get(['day_of_week', 'duration_minutes']);
+        // 9. Accurate Last 7 Calendar Days Activity (real platform open minutes + completed lessons)
+        $weeklyActivity = $this->activityService->getLast7DaysActivity($student, $resolvedTimezone);
 
-        $weeklyActivity = [];
-        foreach ($daysMeta as $dow => $meta) {
-            $dayProgress = $progressLast7Days->filter(fn ($p) => $p->updated_at && $p->updated_at->dayOfWeek === $dow);
-            $watchedMins = (int) round($dayProgress->sum('watched_seconds') / 60);
-            $lessonsDone = $dayProgress->where('is_completed', true)->count();
-
-            $plannedMins = (int) $studySessionsRecent
-                ->filter(fn ($s) => ($s->day_of_week?->value ?? (string) $s->day_of_week) === $meta['key'])
-                ->sum('duration_minutes');
-
-            $weeklyActivity[] = [
-                'dayAr' => $meta['dayAr'],
-                'dayEn' => $meta['dayEn'],
-                'minutes' => $watchedMins + $plannedMins,
-                'lessons' => $lessonsDone,
-                'isToday' => $dow === $todayDow,
-            ];
-        }
-
-        // Smart Next Step Recommendation
-        if ($primaryContinueLesson) {
+        // 10. Smart Next Step Recommendation
+        if ($primaryContinueLesson && ! ($primaryContinueLesson['isCompleted'] ?? false)) {
             $smartRecommendation = [
                 'textAr' => "خطوتك التالية الموصى بها الآن: استكمال مذاكرة درس «{$primaryContinueLesson['titleAr']}» ضمن مقرر «{$primaryContinueLesson['subjectAr']}» (نسبة إنجازك الحالية {$primaryContinueLesson['progressPercent']}%).",
                 'textEn' => "Your recommended next step: Continue studying \"{$primaryContinueLesson['titleEn']}\" ({$primaryContinueLesson['progressPercent']}% completed).",
@@ -403,8 +473,8 @@ class StudentDashboardService extends BaseService
             $firstExam = $upcomingExams[0];
             $smartRecommendation = [
                 'textAr' => "خطوتك التالية الموصى بها الآن: الاستعداد وحل الاختبار المتاح «{$firstExam['titleAr']}» لرفع نقاطك في الدوري.",
-                'textEn' => "Your recommended next step: Take the active exam \"{$firstExam['titleAr']}\" to boost your league score.",
-                'route' => '/student/exam',
+                'textEn' => "Your recommended next step: Take the active exam \"{$firstExam['titleEn']}\" to boost your league score.",
+                'route' => "/student/exam?examId={$firstExam['id']}",
                 'buttonAr' => 'بدء الاختبار الآن',
                 'buttonEn' => 'Start Exam Now',
             ];
@@ -412,10 +482,18 @@ class StudentDashboardService extends BaseService
             $firstHw = $upcomingHomeworks[0];
             $smartRecommendation = [
                 'textAr' => "خطوتك التالية الموصى بها الآن: إنجاز وتسليم الواجب المطلوب «{$firstHw['titleAr']}» قبل انتهاء موعد التسليم.",
-                'textEn' => "Your recommended next step: Complete and submit your pending homework \"{$firstHw['titleAr']}\".",
-                'route' => '/student/homework',
+                'textEn' => "Your recommended next step: Complete and submit your pending homework \"{$firstHw['titleEn']}\".",
+                'route' => "/student/homework?homeworkId={$firstHw['id']}",
                 'buttonAr' => 'حل الواجب الآن',
                 'buttonEn' => 'Solve Homework',
+            ];
+        } elseif ($primaryContinueLesson) {
+            $smartRecommendation = [
+                'textAr' => "أحسنت! أتممت دروسك الحالية — يمكنك مراجعة درس «{$primaryContinueLesson['titleAr']}» لتثبيت المعلومات.",
+                'textEn' => "Great job! You've completed your current lessons — review \"{$primaryContinueLesson['titleEn']}\" to reinforce your mastery.",
+                'route' => "/student/lesson?courseId={$primaryContinueLesson['courseId']}&lessonId={$primaryContinueLesson['lessonId']}",
+                'buttonAr' => 'مراجعة الدرس',
+                'buttonEn' => 'Review Lesson',
             ];
         } else {
             $smartRecommendation = [
@@ -432,17 +510,22 @@ class StudentDashboardService extends BaseService
                 'enrolledGroupsCount' => count($entitlements['group_ids']),
                 'accessibleCourses' => count($courseIds),
                 'completedLessons' => $completedLessons,
-                'totalEnrolledLessons' => max($completedLessons, $totalEnrolledLessons),
+                'totalEnrolledLessons' => $totalEnrolledLessons,
                 'watchedHours' => round($totalWatchedSeconds / 3600, 1),
-                'studyMinutesToday' => $studyMinutesToday,
+                'studyMinutesToday' => $activity['activeMinutesToday'],
+                'studySecondsToday' => $activity['activeSecondsToday'],
                 'avgExamPercentage' => $avgExamPercent,
                 'examsCompletedCount' => $gradedSubmissions->count(),
                 'fullMarkExamsCount' => $fullMarkExamsCount,
-                'streakDays' => $streakDays,
-                'longestStreakDays' => $streakDays,
+                'streakDays' => $activity['streakDays'],
+                'longestStreakDays' => $activity['longestStreakDays'],
+                'isActiveToday' => $activity['isActiveToday'],
+                'streakWasReset' => $activity['streakWasReset'],
+                'previousStreakDays' => $activity['previousStreakDays'],
                 'batchRank' => $batchRank,
                 'totalXp' => $totalXp,
             ],
+            'activity' => $activity,
             'weeklyActivity' => $weeklyActivity,
             'subjectMastery' => $subjectMastery,
             'continueLesson' => $primaryContinueLesson,

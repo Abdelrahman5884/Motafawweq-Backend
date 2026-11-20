@@ -267,7 +267,8 @@ class TeacherRosterService extends BaseService
         $cleanCode = strtoupper(trim($joinCode));
 
         /** @var StudyGroup|null $group */
-        $group = StudyGroup::where('join_code', $cleanCode)
+        $group = StudyGroup::query()
+            ->whereRaw('UPPER(join_code) = ?', [$cleanCode])
             ->where('status', 'active')
             ->first();
 
@@ -277,22 +278,15 @@ class TeacherRosterService extends BaseService
             ]);
         }
 
-        // Check group capacity
-        $currentEnrolled = $this->enrollmentRepository->countEnrolledInGroup($group->id);
-        if ($currentEnrolled >= $group->max_students) {
-            throw ValidationException::withMessages([
-                'join_code' => [__('messages.group_capacity_reached', ['max' => $group->max_students])],
-            ]);
-        }
-
         return $this->transaction(function () use ($student, $group, $extraData) {
             /** @var GroupEnrollment|null $existing */
             $existing = GroupEnrollment::withTrashed()
                 ->where('study_group_id', $group->id)
                 ->where('student_id', $student->id)
+                ->lockForUpdate()
                 ->first();
 
-            if ($existing) {
+            if ($existing && ! $existing->trashed()) {
                 if ($existing->status === EnrollmentStatus::ENROLLED) {
                     throw ValidationException::withMessages([
                         'join_code' => [__('messages.student_already_enrolled')],
@@ -303,11 +297,26 @@ class TeacherRosterService extends BaseService
                         'join_code' => [__('messages.student_already_pending')],
                     ]);
                 }
+            }
 
-                $existing->restore();
+            // Check group capacity after verifying student is not already enrolled/pending
+            $currentEnrolled = $this->enrollmentRepository->countEnrolledInGroup($group->id);
+            if ($currentEnrolled >= $group->max_students) {
+                throw ValidationException::withMessages([
+                    'join_code' => [__('messages.group_capacity_reached', ['max' => $group->max_students])],
+                ]);
+            }
+
+            if ($existing) {
+                if ($existing->trashed()) {
+                    $existing->restore();
+                }
                 $existing->update([
                     'status' => EnrollmentStatus::PENDING,
                     'join_method' => JoinMethod::JOIN_CODE,
+                    'student_barcode' => null,
+                    'student_passcode' => null,
+                    'enrolled_at' => null,
                     'student_name_override' => $student->name,
                     'student_phone_override' => $student->phone,
                     'parent_name_ar' => $extraData['parent_name_ar'] ?? $existing->parent_name_ar,
@@ -337,7 +346,7 @@ class TeacherRosterService extends BaseService
                 'join_code' => $group->join_code,
             ], 'info', $enrollment);
 
-            return $enrollment;
+            return $enrollment->load(['student', 'group']);
         });
     }
 
