@@ -374,6 +374,7 @@ class TeacherHomeworkService extends BaseService
             'application/pdf' => 'pdf',
             'image/jpeg' => 'jpg',
             'image/png' => 'png',
+            'image/webp' => 'webp',
         ];
 
         if (! isset($allowedMimes[$detectedMime])) {

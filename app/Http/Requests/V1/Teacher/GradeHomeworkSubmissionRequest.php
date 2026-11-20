@@ -17,8 +17,11 @@ class GradeHomeworkSubmissionRequest extends BaseApiRequest
         parent::prepareForValidation();
 
         $status = $this->input('status') ?? 'graded';
-        $score = $this->input('score');
-        $feedbackAr = $this->input('feedback_ar') ?? $this->input('feedbackAr') ?? $this->input('feedback');
+        $score = $this->input('score') ?? $this->input('grade_score') ?? $this->input('gradeScore');
+        $feedbackAr = $this->input('feedback_ar')
+            ?? $this->input('feedbackAr')
+            ?? $this->input('teacher_feedback_ar')
+            ?? $this->input('feedback');
 
         $merged = [
             'status' => strtolower(trim((string) $status)),

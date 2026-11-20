@@ -93,8 +93,8 @@ class StoreHomeworkRequest extends BaseApiRequest
             'due_time' => ['nullable', 'string', 'max:10'],
             'max_grade' => ['nullable', 'numeric', 'min:1', 'max:500'],
             'total_assigned' => ['nullable', 'integer', 'min:0'],
-            'file' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
-            'attachment' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
+            'file' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg,webp', 'max:25600'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg,webp', 'max:25600'],
         ];
     }
 }
