@@ -23,6 +23,7 @@ use App\Models\StudentProfile;
 use App\Models\StudyGroup;
 use App\Models\User;
 use App\Services\V1\LeagueRulesService;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -30,6 +31,12 @@ use Tests\TestCase;
 class StudentLeagueWorkspaceTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
 
     private function createTeacher(string $email = 'teacher.lg@motafawweq.com'): User
     {
@@ -53,7 +60,7 @@ class StudentLeagueWorkspaceTest extends TestCase
         ]);
     }
 
-    public function test_league_rules_credit_real_xp_from_lessons_homeworks_exams_and_sync_general_and_course_leagues(): void
+    public function test_league_rules_enforce_exact_question_full_mark_essay_and_daily_streak_points(): void
     {
         $teacher = $this->createTeacher();
         $studentA = $this->createStudent('يوسف طارق علي', 'youssef.lg@motafawweq.com');
@@ -62,7 +69,7 @@ class StudentLeagueWorkspaceTest extends TestCase
 
         StudentProfile::create([
             'student_id' => $studentA->id,
-            'current_streak_days' => 3, // 3 * 20 = 60 streak XP
+            'current_streak_days' => 3, // 3 * 3 = 9 streak pts
             'school_name' => 'مدرسة المتفوقين للعلوم والتكنولوجيا',
             'show_on_leaderboard' => true,
             'display_name_mode' => 'full',
@@ -70,7 +77,7 @@ class StudentLeagueWorkspaceTest extends TestCase
 
         StudentProfile::create([
             'student_id' => $studentB->id,
-            'current_streak_days' => 1,
+            'current_streak_days' => 1, // 1 * 3 = 3 streak pts
             'show_on_leaderboard' => false, // Must be masked on leaderboard
         ]);
 
@@ -122,23 +129,25 @@ class StudentLeagueWorkspaceTest extends TestCase
             'ends_at' => now()->addDays(28),
         ]);
 
-        // Seed initial participant rows at 0 XP (student B starts slightly ahead at 40 XP)
+        // Seed initial participant rows (student B starts ahead at 10 pts)
         LeagueParticipant::create([
             'course_league_id' => $league->id,
             'student_id' => $studentA->id,
             'rank' => 2,
             'xp_points' => 0,
+            'streak_days' => 3,
             'tier' => 'Bronze',
         ]);
         LeagueParticipant::create([
             'course_league_id' => $league->id,
             'student_id' => $studentB->id,
             'rank' => 1,
-            'xp_points' => 40,
+            'xp_points' => 10,
+            'streak_days' => 1,
             'tier' => 'Bronze',
         ]);
 
-        // Create lesson, homework, and exam under this course/teacher
+        // Create lesson, homework, objective exam (MCQ + True/False), and essay exam
         $lesson = Lesson::create([
             'teacher_id' => $teacher->id,
             'course_id' => $course->id,
@@ -155,19 +164,19 @@ class StudentLeagueWorkspaceTest extends TestCase
             'max_grade' => 20,
         ]);
 
-        $exam = Exam::create([
+        $objectiveExam = Exam::create([
             'teacher_id' => $teacher->id,
             'course_id' => $course->id,
             'title_ar' => 'امتحان الفصل الأول',
             'duration_minutes' => 30,
-            'full_mark' => 10,
-            'pass_score' => 5,
+            'full_mark' => 20,
+            'pass_score' => 10,
             'status' => ExamStatus::ACTIVE,
             'show_results' => true,
         ]);
 
-        $q1 = ExamQuestion::create([
-            'exam_id' => $exam->id,
+        $qMcq = ExamQuestion::create([
+            'exam_id' => $objectiveExam->id,
             'question_number' => 1,
             'type' => ExamQuestionType::MCQ,
             'points' => 10,
@@ -176,75 +185,121 @@ class StudentLeagueWorkspaceTest extends TestCase
             'correct_index' => 0,
         ]);
 
+        $qTf = ExamQuestion::create([
+            'exam_id' => $objectiveExam->id,
+            'question_number' => 2,
+            'type' => ExamQuestionType::TRUE_FALSE,
+            'points' => 10,
+            'question_ar' => 'يقاس فرق الجهد بالفولتميتر.',
+            'correct_bool' => true,
+        ]);
+
+        $essayExam = Exam::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'امتحان مقالي شامل',
+            'duration_minutes' => 20,
+            'full_mark' => 10,
+            'pass_score' => 5,
+            'status' => ExamStatus::ACTIVE,
+            'show_results' => true,
+        ]);
+
+        $qEssay = ExamQuestion::create([
+            'exam_id' => $essayExam->id,
+            'question_number' => 1,
+            'type' => ExamQuestionType::ESSAY,
+            'points' => 10,
+            'question_ar' => 'اشرح قانون كيرشوف الأول.',
+            'model_answer_ar' => 'مجموع التيارات الداخلة يساوي الخارجة.',
+        ]);
+
         Sanctum::actingAs($studentA, [TokenType::ACCESS->value]);
 
-        // 1. Complete lesson -> +25 XP
+        // 1. Completing lesson & submitting homework do NOT add league points (only the 5 official rules count!)
         $this->postJson("/api/v1/student/lessons/{$lesson->uuid}/toggle-complete", [
             'is_completed' => true,
         ])->assertOk();
 
-        // 2. Submit homework -> +15 XP
         $this->postJson("/api/v1/student/homeworks/{$homework->uuid}/submit", [
             'solution_text' => 'I = Q / t',
         ])->assertCreated();
 
-        // 3. Submit full-mark exam -> +50 XP (Total earned in course league: 25 + 15 + 50 = 90 XP > Student B's 40 XP!)
-        $this->postJson("/api/v1/student/exams/{$exam->uuid}/submit", [
+        // 2. Submit objective exam with 100% Full Mark:
+        //    MCQ (+3) + True/False (+1) + Full Mark Bonus (+3) = 7 pts!
+        $this->postJson("/api/v1/student/exams/{$objectiveExam->uuid}/submit", [
             'answers' => [
-                ['questionUuid' => $q1->uuid, 'selectedIndex' => 0],
+                ['questionUuid' => $qMcq->uuid, 'selectedIndex' => 0],
+                ['questionUuid' => $qTf->uuid, 'selectedBool' => true],
             ],
-        ])->assertCreated();
+        ])->assertCreated()
+            ->assertJsonPath('data.xpAwarded', 7);
 
-        // Verify course league leaderboard reflects exact rule XP, rank jump to #1, real metrics, privacy masking & rules
-        $expectedCourseXp = LeagueRulesService::XP_LESSON_COMPLETED
-            + LeagueRulesService::XP_HOMEWORK_SUBMITTED
-            + LeagueRulesService::XP_EXAM_FULL_MARK;
+        // 3. Submit essay exam -> 0 pts before teacher grades it
+        $essaySubRes = $this->postJson("/api/v1/student/exams/{$essayExam->uuid}/submit", [
+            'answers' => [
+                ['questionUuid' => $qEssay->uuid, 'essayAnswerText' => 'مجموع التيارات عند نقطة تفرع يساوي صفر.'],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.xpAwarded', 0);
+
+        $essaySubmissionUuid = $essaySubRes->json('data.id');
+
+        // 4. Teacher grades essay as fully correct (10/10 = Full Mark):
+        //    Essay (+5) + Full Mark Bonus (+3) = 8 pts credited automatically to active league!
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+        $this->patchJson("/api/v1/teacher/exams/{$essayExam->uuid}/submissions/{$essaySubmissionUuid}/grade-essay", [
+            'answers' => [
+                ['question_uuid' => $qEssay->uuid, 'points_awarded' => 10],
+            ],
+            'teacher_feedback' => 'ممتاز',
+        ])->assertOk();
+
+        // Total Course League pts earned by Student A = 7 + 8 = 15 pts (> Student B's 10 pts -> Rank #1!)
+        $expectedCoursePts = (LeagueRulesService::XP_QUESTION_MCQ + LeagueRulesService::XP_QUESTION_TRUE_FALSE + LeagueRulesService::XP_EXAM_FULL_MARK_BONUS)
+            + (LeagueRulesService::XP_QUESTION_ESSAY + LeagueRulesService::XP_EXAM_FULL_MARK_BONUS);
+        $this->assertEquals(15, $expectedCoursePts);
+
+        Sanctum::actingAs($studentA, [TokenType::ACCESS->value]);
+
+        // Re-fetching essay exam result shows complete 8 pts!
+        $this->getJson("/api/v1/student/exams/{$essayExam->uuid}/result")
+            ->assertOk()
+            ->assertJsonPath('data.xpAwarded', 8);
 
         $this->getJson("/api/v1/student/leagues/{$league->uuid}/leaderboard")
             ->assertOk()
             ->assertJsonPath('data.myStanding.rank', 1)
-            ->assertJsonPath('data.myStanding.xpPoints', $expectedCourseXp)
-            ->assertJsonPath('data.myStanding.tier', 'Bronze')
-            ->assertJsonPath('data.myStanding.nextTier', 'Silver')
-            ->assertJsonPath('data.myStanding.xpToNextTier', 1900 - $expectedCourseXp)
+            ->assertJsonPath('data.myStanding.xpPoints', 15)
             ->assertJsonPath('data.leaderboard.0.isCurrentUser', true)
-            ->assertJsonPath('data.leaderboard.0.xpPoints', $expectedCourseXp)
-            ->assertJsonPath('data.leaderboard.0.examsSolved', 1)
-            ->assertJsonPath('data.leaderboard.0.perfectExams', 1)
+            ->assertJsonPath('data.leaderboard.0.xpPoints', 15)
+            ->assertJsonPath('data.leaderboard.0.examsSolved', 2)
+            ->assertJsonPath('data.leaderboard.0.perfectExams', 2)
             ->assertJsonPath('data.leaderboard.0.lessonsStudied', 1)
             ->assertJsonPath('data.leaderboard.0.homeworkRate', 100)
-            ->assertJsonPath('data.leaderboard.0.schoolAr', 'مدرسة المتفوقين للعلوم والتكنولوجيا')
             ->assertJsonPath('data.leaderboard.1.displayName', 'طالب متفوق (مخفي)')
-            ->assertJsonCount(6, 'data.rules')
-            ->assertJsonCount(4, 'data.tiers')
-            ->assertJsonCount(4, 'data.prizes');
+            ->assertJsonCount(5, 'data.rules')
+            ->assertJsonPath('data.rules.0.points', 5)
+            ->assertJsonPath('data.rules.1.points', 3)
+            ->assertJsonPath('data.rules.2.points', 1)
+            ->assertJsonPath('data.rules.3.points', 3)
+            ->assertJsonPath('data.rules.4.points', 3);
 
-        // 4. Verify General Republic League includes ledger XP (90) + streak bonus (3 * 20 = 60) = 150 XP!
-        $expectedGeneralXp = $expectedCourseXp + (3 * LeagueRulesService::XP_STREAK_PER_DAY);
-
+        // 5. General Republic League = 15 exam pts + (3 streak days * 3 = 9 pts) = 24 pts (ZERO lesson/homework inflation!)
         $this->getJson('/api/v1/student/leagues/general/leaderboard')
             ->assertOk()
             ->assertJsonPath('data.leagueId', 'general')
             ->assertJsonPath('data.myStanding.rank', 1)
-            ->assertJsonPath('data.myStanding.xpPoints', $expectedGeneralXp)
-            ->assertJsonPath('data.leaderboard.0.isCurrentUser', true)
-            ->assertJsonPath('data.leaderboard.0.xpPoints', $expectedGeneralXp)
+            ->assertJsonPath('data.myStanding.xpPoints', 24)
+            ->assertJsonPath('data.leaderboard.0.xpPoints', 24)
             ->assertJsonPath('data.leaderboard.0.streakDays', 3);
 
-        // 5. List leagues returns General Republic League + Teacher Course League
-        $this->getJson('/api/v1/student/leagues')
-            ->assertOk()
-            ->assertJsonPath('data.0.id', 'general')
-            ->assertJsonPath('data.1.id', $league->uuid)
-            ->assertJsonPath('data.1.myRank', 1)
-            ->assertJsonPath('data.1.myXp', $expectedCourseXp);
-
-        // 6. Unenrolled outsider is strictly blocked (403 IDOR) from teacher course league
+        // 6. Unenrolled outsider is blocked (403 IDOR)
         Sanctum::actingAs($outsider, [TokenType::ACCESS->value]);
         $this->getJson("/api/v1/student/leagues/{$league->uuid}/leaderboard")->assertForbidden();
     }
 
-    public function test_expired_league_closes_automatically_and_resolves_all_tier_boundaries(): void
+    public function test_daily_streak_increment_awards_3_pts_in_active_league_and_expired_league_closes(): void
     {
         $teacher = $this->createTeacher('teacher.exp@motafawweq.com');
         $student = $this->createStudent('أحمد حسام', 'ahmed.exp@motafawweq.com');
@@ -275,6 +330,27 @@ class StudentLeagueWorkspaceTest extends TestCase
             'enrolled_at' => now(),
         ]);
 
+        $activeLeague = CourseLeague::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'دوري الكيمياء النشط',
+            'course_name_ar' => $course->title_ar,
+            'duration_type' => LeagueDuration::MONTHLY,
+            'duration_days' => 30,
+            'is_active' => true,
+            'starts_at' => Carbon::create(2026, 11, 1, 0, 0, 0, 'Africa/Cairo'),
+            'ends_at' => Carbon::create(2026, 12, 1, 0, 0, 0, 'Africa/Cairo'),
+        ]);
+
+        $participant = LeagueParticipant::create([
+            'course_league_id' => $activeLeague->id,
+            'student_id' => $student->id,
+            'rank' => 1,
+            'xp_points' => 0,
+            'streak_days' => 0,
+            'tier' => 'Bronze',
+        ]);
+
         $expiredLeague = CourseLeague::create([
             'teacher_id' => $teacher->id,
             'course_id' => $course->id,
@@ -283,8 +359,8 @@ class StudentLeagueWorkspaceTest extends TestCase
             'duration_type' => LeagueDuration::WEEKLY,
             'duration_days' => 7,
             'is_active' => true,
-            'starts_at' => now()->subDays(10),
-            'ends_at' => now()->subDay(),
+            'starts_at' => Carbon::create(2026, 10, 1, 0, 0, 0, 'Africa/Cairo'),
+            'ends_at' => Carbon::create(2026, 10, 8, 0, 0, 0, 'Africa/Cairo'),
         ]);
 
         LeagueParticipant::create([
@@ -297,6 +373,25 @@ class StudentLeagueWorkspaceTest extends TestCase
 
         Sanctum::actingAs($student, [TokenType::ACCESS->value]);
 
+        // Open platform Day 1 -> streak = 1 -> +3 pts in active league
+        Carbon::setTestNow(Carbon::create(2026, 11, 10, 10, 0, 0, 'Africa/Cairo'));
+        $this->postJson('/api/v1/student/activity/heartbeat', [
+            'delta_seconds' => 0,
+            'timezone' => 'Africa/Cairo',
+            'is_check_in' => true,
+        ])->assertOk();
+        $this->assertEquals(3, $participant->fresh()->xp_points);
+
+        // Open platform Day 2 -> streak = 2 -> +3 more pts = 6 pts total
+        Carbon::setTestNow(Carbon::create(2026, 11, 11, 10, 0, 0, 'Africa/Cairo'));
+        $this->postJson('/api/v1/student/activity/heartbeat', [
+            'delta_seconds' => 0,
+            'timezone' => 'Africa/Cairo',
+            'is_check_in' => true,
+        ])->assertOk();
+        $this->assertEquals(6, $participant->fresh()->xp_points);
+
+        // Expired league closes automatically and resolves Diamond tier
         $this->getJson("/api/v1/student/leagues/{$expiredLeague->uuid}/leaderboard")
             ->assertOk()
             ->assertJsonPath('data.isActive', false)

@@ -597,34 +597,40 @@ class StudentGamificationService extends BaseService
     }
 
     /**
-     * Compute authoritative ranked student list for the General Republic League (ledger XP + streak * 20).
+     * Compute authoritative ranked student list for the General Republic League strictly by official league rules:
+     * True/False (+1) + MCQ (+3) + Essay (+5) + Exam Full Mark Bonus (+3) + Daily Streak (+3/day) + Teacher Bonus.
      *
      * @return array<int, array<string, mixed>>
      */
     protected function computeGeneralRankedStudents(User $currentStudent): array
     {
-        $ledgerTotals = StudentXpLedger::query()
-            ->select(['student_id', DB::raw('SUM(points) as total_xp')])
-            ->groupBy('student_id')
-            ->pluck('total_xp', 'student_id');
-
-        $profiles = StudentProfile::query()
-            ->get(['student_id', 'current_streak_days'])
-            ->keyBy('student_id');
-
         $activeStudents = User::query()
             ->where('role', UserRole::STUDENT)
             ->where('status', UserStatus::ACTIVE)
             ->get(['id', 'name', 'avatar']);
 
+        $studentIds = $activeStudents->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $metricsMap = $this->leagueRulesService->computeMetricsForStudents($studentIds);
+
+        $teacherBonusByStudent = ! empty($studentIds)
+            ? StudentXpLedger::query()
+                ->whereIn('student_id', $studentIds)
+                ->where('source_type', 'teacher_league_bonus')
+                ->select(['student_id', DB::raw('SUM(points) as bonus_xp')])
+                ->groupBy('student_id')
+                ->pluck('bonus_xp', 'student_id')
+            : collect();
+
         $rows = [];
         foreach ($activeStudents as $u) {
             $sid = (int) $u->id;
-            $ledgerXp = (int) ($ledgerTotals[$sid] ?? 0);
-            $streakDays = (int) ($profiles->get($sid)?->current_streak_days ?? 0);
-            $totalXp = $ledgerXp + ($streakDays * LeagueRulesService::XP_STREAK_PER_DAY);
+            $m = $metricsMap[$sid] ?? [];
+            $streakDays = (int) ($m['streakDays'] ?? 0);
+            $ruleXp = (int) ($m['ruleXp'] ?? 0);
+            $teacherBonus = (int) ($teacherBonusByStudent[$sid] ?? 0);
+            $totalXp = $ruleXp + $teacherBonus;
 
-            // Include students who have started earning XP or streak, plus always include current user
+            // Include students who have earned league points, plus always include current user
             if ($totalXp <= 0 && $sid !== (int) $currentStudent->id) {
                 continue;
             }

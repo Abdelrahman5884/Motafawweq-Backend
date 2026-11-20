@@ -66,10 +66,10 @@ class StudentExamSubmissionResource extends BaseJsonResource
         if (isset($this->xp_awarded_runtime)) {
             $xpAwarded = (int) $this->xp_awarded_runtime;
         } elseif ($this->id && $this->student_id) {
-            $xpAwarded = (int) (StudentXpLedger::where('student_id', $this->student_id)
-                ->where('source_type', 'exam_submitted')
+            $xpAwarded = (int) StudentXpLedger::where('student_id', $this->student_id)
+                ->whereIn('source_type', ['exam_submitted', 'exam_essay_graded', 'exam_full_mark_bonus'])
                 ->where('source_id', $this->id)
-                ->value('points') ?? 0);
+                ->sum('points');
         }
 
         $review = [];

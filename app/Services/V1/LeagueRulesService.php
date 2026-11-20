@@ -3,12 +3,13 @@
 namespace App\Services\V1;
 
 use App\Enums\EnrollmentStatus;
+use App\Enums\ExamQuestionType;
 use App\Enums\ExamSubmissionStatus;
 use App\Enums\LeagueDuration;
 use App\Enums\LeagueTier;
 use App\Models\CourseLeague;
-use App\Models\Exam;
 use App\Models\ExamSubmission;
+use App\Models\ExamSubmissionAnswer;
 use App\Models\GroupEnrollment;
 use App\Models\Homework;
 use App\Models\HomeworkSubmission;
@@ -21,36 +22,99 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Single source of truth for Motafawweq League scoring rules, tier thresholds,
- * live activity-to-league XP synchronization, and authoritative participant metrics.
+ * live activity-to-league point synchronization, and authoritative participant metrics.
+ *
+ * Official League Scoring Rules:
+ * - Daily Streak:            +3 pts per consecutive day
+ * - Exam Full Mark (100%):   +3 bonus pts
+ * - Correct True/False Q:    +1 pt
+ * - Correct MCQ Question:    +3 pts
+ * - Correct Essay Question:  +5 pts
  */
 class LeagueRulesService
 {
-    public const XP_EXAM_FULL_MARK = 50;
+    public const XP_STREAK_PER_DAY = 3;
 
-    public const XP_EXAM_PASSED = 30;
+    public const XP_EXAM_FULL_MARK_BONUS = 3;
 
-    public const XP_EXAM_PARTICIPATION = 10;
+    public const XP_QUESTION_TRUE_FALSE = 1;
 
-    public const XP_LESSON_COMPLETED = 25;
+    public const XP_QUESTION_MCQ = 3;
 
-    public const XP_HOMEWORK_SUBMITTED = 15;
-
-    public const XP_STREAK_PER_DAY = 20;
+    public const XP_QUESTION_ESSAY = 5;
 
     /**
-     * Resolve exact XP awarded for an exam submission based on official league rules.
+     * Resolve exact league points for a single correctly answered question by its type.
      */
-    public function resolveExamXp(bool $isFullMark, bool $isPassed): int
+    public function resolveQuestionXp(ExamQuestionType|string|null $type): int
     {
-        if ($isFullMark) {
-            return self::XP_EXAM_FULL_MARK;
+        $val = $type instanceof ExamQuestionType ? $type->value : strtolower((string) $type);
+
+        return match ($val) {
+            ExamQuestionType::TRUE_FALSE->value => self::XP_QUESTION_TRUE_FALSE,
+            ExamQuestionType::MCQ->value => self::XP_QUESTION_MCQ,
+            ExamQuestionType::ESSAY->value => self::XP_QUESTION_ESSAY,
+            default => self::XP_QUESTION_TRUE_FALSE,
+        };
+    }
+
+    /**
+     * Calculate exact league points earned from an ExamSubmission's graded answers + full-mark bonus.
+     *
+     * @return array{questionPoints: int, fullMarkBonus: int, totalPoints: int, correctTrueFalse: int, correctMcq: int, correctEssay: int}
+     */
+    public function calculateExamSubmissionPoints(ExamSubmission $submission, bool $includeEssay = true): array
+    {
+        $answers = $submission->relationLoaded('answers')
+            ? $submission->answers
+            : $submission->answers()->with('question:id,type')->get();
+
+        $correctTrueFalse = 0;
+        $correctMcq = 0;
+        $correctEssay = 0;
+        $questionPoints = 0;
+
+        foreach ($answers as $ans) {
+            /** @var ExamSubmissionAnswer $ans */
+            if ($ans->is_correct !== true) {
+                continue;
+            }
+
+            $qType = $ans->question?->type instanceof ExamQuestionType
+                ? $ans->question->type->value
+                : strtolower((string) ($ans->question?->type ?? 'mcq'));
+
+            if ($qType === ExamQuestionType::ESSAY->value) {
+                if (! $includeEssay) {
+                    continue;
+                }
+                $correctEssay++;
+                $questionPoints += self::XP_QUESTION_ESSAY;
+            } elseif ($qType === ExamQuestionType::TRUE_FALSE->value) {
+                $correctTrueFalse++;
+                $questionPoints += self::XP_QUESTION_TRUE_FALSE;
+            } else {
+                $correctMcq++;
+                $questionPoints += self::XP_QUESTION_MCQ;
+            }
         }
 
-        if ($isPassed) {
-            return self::XP_EXAM_PASSED;
-        }
+        $isGraded = ($submission->status instanceof ExamSubmissionStatus
+            ? $submission->status
+            : ExamSubmissionStatus::tryFrom((string) $submission->status)) === ExamSubmissionStatus::GRADED;
 
-        return self::XP_EXAM_PARTICIPATION;
+        $fullMarkBonus = ($isGraded && (bool) $submission->is_full_mark)
+            ? self::XP_EXAM_FULL_MARK_BONUS
+            : 0;
+
+        return [
+            'questionPoints' => $questionPoints,
+            'fullMarkBonus' => $fullMarkBonus,
+            'totalPoints' => $questionPoints + $fullMarkBonus,
+            'correctTrueFalse' => $correctTrueFalse,
+            'correctMcq' => $correctMcq,
+            'correctEssay' => $correctEssay,
+        ];
     }
 
     /**
@@ -76,64 +140,54 @@ class LeagueRulesService
     {
         return [
             [
+                'id' => 'question-essay',
+                'points' => self::XP_QUESTION_ESSAY,
+                'pointsLabelAr' => '+'.self::XP_QUESTION_ESSAY.' نقاط',
+                'pointsLabelEn' => '+'.self::XP_QUESTION_ESSAY.' pts',
+                'titleAr' => 'السؤال المقالي الصحيح',
+                'titleEn' => 'Correct Essay Question',
+                'descAr' => 'تحصل على '.self::XP_QUESTION_ESSAY.' نقاط عن كل سؤال مقالي تجيب عنه إجابة صحيحة كاملة بعد تصحيح المعلم.',
+                'descEn' => 'Earn '.self::XP_QUESTION_ESSAY.' points for every essay question graded fully correct by the teacher.',
+            ],
+            [
+                'id' => 'question-mcq',
+                'points' => self::XP_QUESTION_MCQ,
+                'pointsLabelAr' => '+'.self::XP_QUESTION_MCQ.' نقاط',
+                'pointsLabelEn' => '+'.self::XP_QUESTION_MCQ.' pts',
+                'titleAr' => 'السؤال الاختياري الصحيح (MCQ)',
+                'titleEn' => 'Correct Multiple-Choice Question',
+                'descAr' => 'تحصل على '.self::XP_QUESTION_MCQ.' نقاط تلقائياً عن كل سؤال اختيار من متعدد تجيب عنه إجابة صحيحة في الامتحان.',
+                'descEn' => 'Earn '.self::XP_QUESTION_MCQ.' points automatically for every correct multiple-choice question.',
+            ],
+            [
+                'id' => 'question-true-false',
+                'points' => self::XP_QUESTION_TRUE_FALSE,
+                'pointsLabelAr' => '+'.self::XP_QUESTION_TRUE_FALSE.' نقطة',
+                'pointsLabelEn' => '+'.self::XP_QUESTION_TRUE_FALSE.' pt',
+                'titleAr' => 'سؤال الصواب والخطأ الصحيح',
+                'titleEn' => 'Correct True / False Question',
+                'descAr' => 'تحصل على نقطة واحدة (+'.self::XP_QUESTION_TRUE_FALSE.') عن كل سؤال صواب وخطأ تجيب عنه إجابة صحيحة في الامتحان.',
+                'descEn' => 'Earn +'.self::XP_QUESTION_TRUE_FALSE.' point for every correct True/False question in any exam.',
+            ],
+            [
                 'id' => 'exam-full-mark',
-                'points' => self::XP_EXAM_FULL_MARK,
-                'pointsLabelAr' => '+'.self::XP_EXAM_FULL_MARK.' نقطة',
-                'pointsLabelEn' => '+'.self::XP_EXAM_FULL_MARK.' XP',
-                'titleAr' => 'تقفيل الامتحان بالدرجة النهائية (100%)',
-                'titleEn' => 'Perfect Exam Score (100%)',
-                'descAr' => 'تحصل تلقائياً على '.self::XP_EXAM_FULL_MARK.' نقطة عند تحقيق الدرجة النهائية الكاملة في أي امتحان معتمد.',
-                'descEn' => 'Earn '.self::XP_EXAM_FULL_MARK.' XP automatically when scoring 100% on any graded exam.',
-            ],
-            [
-                'id' => 'exam-passed',
-                'points' => self::XP_EXAM_PASSED,
-                'pointsLabelAr' => '+'.self::XP_EXAM_PASSED.' نقطة',
-                'pointsLabelEn' => '+'.self::XP_EXAM_PASSED.' XP',
-                'titleAr' => 'اجتياز الامتحان بنجاح',
-                'titleEn' => 'Passing an Exam',
-                'descAr' => 'تحصل على '.self::XP_EXAM_PASSED.' نقطة فور اجتياز درجة النجاح في الامتحان (أو +'.self::XP_EXAM_PARTICIPATION.' نقاط للمشاركة والإتمام).',
-                'descEn' => 'Earn '.self::XP_EXAM_PASSED.' XP when passing an exam (or +'.self::XP_EXAM_PARTICIPATION.' XP for completion).',
-            ],
-            [
-                'id' => 'lesson-completed',
-                'points' => self::XP_LESSON_COMPLETED,
-                'pointsLabelAr' => '+'.self::XP_LESSON_COMPLETED.' نقطة',
-                'pointsLabelEn' => '+'.self::XP_LESSON_COMPLETED.' XP',
-                'titleAr' => 'إتمام حصة دراسية كاملة',
-                'titleEn' => 'Completing a Lesson',
-                'descAr' => 'يُضاف '.self::XP_LESSON_COMPLETED.' نقطة مرة واحدة لكل حصة تنهي مشاهدتها وإتمامها داخل مقرراتك.',
-                'descEn' => 'Earn '.self::XP_LESSON_COMPLETED.' XP once for each published lesson you complete.',
-            ],
-            [
-                'id' => 'homework-submitted',
-                'points' => self::XP_HOMEWORK_SUBMITTED,
-                'pointsLabelAr' => '+'.self::XP_HOMEWORK_SUBMITTED.' نقطة',
-                'pointsLabelEn' => '+'.self::XP_HOMEWORK_SUBMITTED.' XP',
-                'titleAr' => 'تسليم الواجب الدراسي',
-                'titleEn' => 'Submitting Homework',
-                'descAr' => 'تحصل على '.self::XP_HOMEWORK_SUBMITTED.' نقطة تلقائياً عند تسليم كل واجب دراسي مطلوب من معلميك.',
-                'descEn' => 'Earn '.self::XP_HOMEWORK_SUBMITTED.' XP automatically upon submitting an assigned homework.',
+                'points' => self::XP_EXAM_FULL_MARK_BONUS,
+                'pointsLabelAr' => '+'.self::XP_EXAM_FULL_MARK_BONUS.' نقاط بونص',
+                'pointsLabelEn' => '+'.self::XP_EXAM_FULL_MARK_BONUS.' bonus pts',
+                'titleAr' => 'تقفيل الامتحان (Full Mark 100%)',
+                'titleEn' => 'Exam Full Mark Bonus (100%)',
+                'descAr' => 'عند تحقيق الدرجة النهائية الكاملة 100% في الامتحان تحصل على +'.self::XP_EXAM_FULL_MARK_BONUS.' نقاط بونص إضافية فوق نقاط الأسئلة.',
+                'descEn' => 'Scoring 100% full mark on an exam awards +'.self::XP_EXAM_FULL_MARK_BONUS.' bonus points on top of question points.',
             ],
             [
                 'id' => 'daily-streak',
                 'points' => self::XP_STREAK_PER_DAY,
-                'pointsLabelAr' => '+'.self::XP_STREAK_PER_DAY.' نقطة / يوم',
-                'pointsLabelEn' => '+'.self::XP_STREAK_PER_DAY.' XP / day',
-                'titleAr' => 'بونص الاستمرار اليومي (الاستريك)',
+                'pointsLabelAr' => '+'.self::XP_STREAK_PER_DAY.' نقاط / يوم',
+                'pointsLabelEn' => '+'.self::XP_STREAK_PER_DAY.' pts / day',
+                'titleAr' => 'الاستريك اليومي (الاستمرار اليومي)',
                 'titleEn' => 'Daily Streak Bonus',
-                'descAr' => 'كل يوم متواصل تفتح فيه المنصة يرفع رصيدك بـ '.self::XP_STREAK_PER_DAY.' نقطة ويكسر التعادل في المراكز.',
-                'descEn' => 'Each consecutive active day adds '.self::XP_STREAK_PER_DAY.' XP and acts as the primary tie-breaker.',
-            ],
-            [
-                'id' => 'teacher-bonus',
-                'points' => null,
-                'pointsLabelAr' => 'مكافأة المعلم',
-                'pointsLabelEn' => 'Teacher Bonus',
-                'titleAr' => 'نقاط التميز التشجيعية من المعلم',
-                'titleEn' => 'Teacher Excellence Bonus',
-                'descAr' => 'يمكن لمعلم المقرر منح نقاط XP إضافية للطلاب المتميزين في دوري الكورس وتُحتسب في الترتيب فوراً.',
-                'descEn' => 'Teachers can award bonus XP inside course leagues for outstanding participation.',
+                'descAr' => 'كل يوم متواصل تفتح فيه المنصة يضيف '.self::XP_STREAK_PER_DAY.' نقاط إلى رصيدك في الدوري ويكسر التعادل في المراكز.',
+                'descEn' => 'Every consecutive active day adds '.self::XP_STREAK_PER_DAY.' points to your league score and breaks rank ties.',
             ],
         ];
     }
@@ -182,7 +236,7 @@ class LeagueRulesService
     }
 
     /**
-     * Resolve next tier progression info for a given XP score.
+     * Resolve next tier progression info for a given score.
      *
      * @return array<string, mixed>
      */
@@ -291,7 +345,7 @@ class LeagueRulesService
     }
 
     /**
-     * Compute real, batched performance metrics for a list of students (zero N+1 queries).
+     * Compute real, batched performance metrics and rule-based league points for a list of students (zero N+1).
      *
      * @param  array<int, int>  $studentIds
      * @return array<int, array<string, mixed>>
@@ -317,7 +371,7 @@ class LeagueRulesService
         }
         $enrollmentsByStudent = $enrollmentQuery->get()->groupBy('student_id');
 
-        // 3. Exam submissions (real solved, passed, full-mark counts)
+        // 3. Exam submissions (real solved & full-mark counts)
         $examQuery = ExamSubmission::query()
             ->whereIn('exam_submissions.student_id', $ids)
             ->whereIn('exam_submissions.status', [
@@ -341,14 +395,47 @@ class LeagueRulesService
             ->select([
                 'exam_submissions.student_id',
                 DB::raw('COUNT(*) as exams_solved'),
-                DB::raw('SUM(CASE WHEN exam_submissions.is_full_mark = 1 THEN 1 ELSE 0 END) as perfect_exams'),
-                DB::raw('SUM(CASE WHEN exam_submissions.is_passed = 1 AND exam_submissions.is_full_mark = 0 THEN 1 ELSE 0 END) as passed_non_perfect'),
+                DB::raw("SUM(CASE WHEN exam_submissions.status = 'graded' AND exam_submissions.is_full_mark = 1 THEN 1 ELSE 0 END) as perfect_exams"),
             ])
             ->groupBy('exam_submissions.student_id')
             ->get()
             ->keyBy('student_id');
 
-        // 4. Completed lessons
+        // 4. Correct exam answers broken down by question type (True/False = 1, MCQ = 3, Essay = 5)
+        $answersQuery = ExamSubmissionAnswer::query()
+            ->join('exam_submissions', 'exam_submissions.id', '=', 'exam_submission_answers.exam_submission_id')
+            ->join('exam_questions', 'exam_questions.id', '=', 'exam_submission_answers.exam_question_id')
+            ->whereIn('exam_submissions.student_id', $ids)
+            ->whereIn('exam_submissions.status', [
+                ExamSubmissionStatus::SUBMITTED->value,
+                ExamSubmissionStatus::GRADED->value,
+            ])
+            ->where('exam_submission_answers.is_correct', true);
+
+        if ($teacherId !== null || $courseId !== null) {
+            $answersQuery->join('exams', 'exams.id', '=', 'exam_submissions.exam_id');
+            if ($teacherId !== null) {
+                $answersQuery->where('exams.teacher_id', $teacherId);
+            }
+            if ($courseId !== null) {
+                $answersQuery->where(function ($q) use ($courseId) {
+                    $q->where('exams.course_id', $courseId)->orWhereNull('exams.course_id');
+                });
+            }
+        }
+
+        $answersAgg = $answersQuery
+            ->select([
+                'exam_submissions.student_id',
+                DB::raw("SUM(CASE WHEN exam_questions.type = 'true_false' THEN 1 ELSE 0 END) as correct_tf"),
+                DB::raw("SUM(CASE WHEN exam_questions.type = 'mcq' THEN 1 ELSE 0 END) as correct_mcq"),
+                DB::raw("SUM(CASE WHEN exam_questions.type = 'essay' THEN 1 ELSE 0 END) as correct_essay"),
+            ])
+            ->groupBy('exam_submissions.student_id')
+            ->get()
+            ->keyBy('student_id');
+
+        // 5. Completed lessons (for student profile display metrics)
         $lessonQuery = StudentLessonProgress::query()
             ->whereIn('student_lesson_progresses.student_id', $ids)
             ->where('student_lesson_progresses.is_completed', true);
@@ -368,7 +455,7 @@ class LeagueRulesService
             ->groupBy('student_lesson_progresses.student_id')
             ->pluck('lessons_completed', 'student_id');
 
-        // 5. Homeworks (real submitted count & homework rate %)
+        // 6. Homeworks (for student profile display metrics)
         $hwBaseQuery = Homework::query();
         if ($teacherId !== null) {
             $hwBaseQuery->where('teacher_id', $teacherId);
@@ -409,8 +496,11 @@ class LeagueRulesService
             $ex = $examAgg->get($sid);
             $examsSolved = (int) ($ex?->exams_solved ?? 0);
             $perfectExams = (int) ($ex?->perfect_exams ?? 0);
-            $passedNonPerfect = (int) ($ex?->passed_non_perfect ?? 0);
-            $otherExams = max(0, $examsSolved - $perfectExams - $passedNonPerfect);
+
+            $ans = $answersAgg->get($sid);
+            $correctTf = (int) ($ans?->correct_tf ?? 0);
+            $correctMcq = (int) ($ans?->correct_mcq ?? 0);
+            $correctEssay = (int) ($ans?->correct_essay ?? 0);
 
             $lessonsCompleted = (int) ($lessonAgg[$sid] ?? 0);
             $homeworksSubmitted = (int) ($hwSubmittedAgg[$sid] ?? 0);
@@ -418,11 +508,12 @@ class LeagueRulesService
                 ? (int) min(100, round(($homeworksSubmitted / $totalScopedHomeworks) * 100))
                 : 0;
 
-            $ruleXp = ($perfectExams * self::XP_EXAM_FULL_MARK)
-                + ($passedNonPerfect * self::XP_EXAM_PASSED)
-                + ($otherExams * self::XP_EXAM_PARTICIPATION)
-                + ($lessonsCompleted * self::XP_LESSON_COMPLETED)
-                + ($homeworksSubmitted * self::XP_HOMEWORK_SUBMITTED)
+            // Exact Official League Formula:
+            // True/False (+1) + MCQ (+3) + Essay (+5) + Full Mark Bonus (+3) + Daily Streak (+3/day)
+            $ruleXp = ($correctTf * self::XP_QUESTION_TRUE_FALSE)
+                + ($correctMcq * self::XP_QUESTION_MCQ)
+                + ($correctEssay * self::XP_QUESTION_ESSAY)
+                + ($perfectExams * self::XP_EXAM_FULL_MARK_BONUS)
                 + ($streakDays * self::XP_STREAK_PER_DAY);
 
             $schoolAr = trim((string) ($prof?->school_name ?: $prof?->governorate ?: $firstEnrollment?->group?->center_name ?: ''));
@@ -434,6 +525,9 @@ class LeagueRulesService
                 'homeworkRate' => $homeworkRate,
                 'examsSolved' => $examsSolved,
                 'perfectExams' => $perfectExams,
+                'correctTrueFalse' => $correctTf,
+                'correctMcq' => $correctMcq,
+                'correctEssay' => $correctEssay,
                 'lessonsStudied' => $lessonsCompleted,
                 'homeworksSubmitted' => $homeworksSubmitted,
                 'ruleXp' => $ruleXp,
@@ -446,7 +540,7 @@ class LeagueRulesService
     }
 
     /**
-     * Automatically credit all matching active course leagues when a student completes an activity.
+     * Automatically credit all matching active course leagues when a student earns exam points.
      */
     public function creditActiveLeagues(User $student, int $xpDelta, ?int $teacherId = null, ?int $courseId = null): void
     {
@@ -528,6 +622,44 @@ class LeagueRulesService
             }
 
             $league->recalculateRanksAndMetrics();
+        }
+    }
+
+    /**
+     * Credit daily streak delta (+3 pts per newly gained streak day) across a student's active course leagues.
+     */
+    public function syncStudentStreakToActiveLeagues(int $studentId, int $newStreakDays): void
+    {
+        $now = Carbon::now();
+        $participations = LeagueParticipant::where('student_id', $studentId)
+            ->with('league')
+            ->get();
+
+        foreach ($participations as $participant) {
+            /** @var CourseLeague|null $league */
+            $league = $participant->league;
+            $oldStreak = (int) $participant->streak_days;
+
+            if ($oldStreak === $newStreakDays) {
+                continue;
+            }
+
+            $isLeagueActive = $league
+                && $league->is_active
+                && (! $league->ends_at || $league->ends_at->gte($now));
+
+            $deltaDays = $newStreakDays - $oldStreak;
+            $updates = ['streak_days' => $newStreakDays];
+
+            if ($isLeagueActive && $deltaDays > 0) {
+                $updates['xp_points'] = (int) $participant->xp_points + ($deltaDays * self::XP_STREAK_PER_DAY);
+            }
+
+            $participant->update($updates);
+
+            if ($isLeagueActive && $deltaDays > 0) {
+                $league->recalculateRanksAndMetrics();
+            }
         }
     }
 

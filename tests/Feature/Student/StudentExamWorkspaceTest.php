@@ -148,7 +148,7 @@ class StudentExamWorkspaceTest extends TestCase
             ->assertJsonPath('data.correctCount', 1)
             ->assertJsonPath('data.wrongCount', 1)
             ->assertJsonPath('data.unansweredCount', 0)
-            ->assertJsonPath('data.xpAwarded', 30)
+            ->assertJsonPath('data.xpAwarded', 3)
             ->assertJsonCount(2, 'data.review')
             ->assertJsonPath('data.review.0.isCorrect', true)
             ->assertJsonPath('data.review.0.correctIndex', 1)
@@ -159,7 +159,7 @@ class StudentExamWorkspaceTest extends TestCase
         $this->getJson("/api/v1/student/exams/{$exam->uuid}/result")
             ->assertOk()
             ->assertJsonPath('data.score', 10)
-            ->assertJsonPath('data.xpAwarded', 30)
+            ->assertJsonPath('data.xpAwarded', 3)
             ->assertJsonCount(2, 'data.review');
 
         // 5. Unenrolled student cannot access result (403 IDOR blocked)

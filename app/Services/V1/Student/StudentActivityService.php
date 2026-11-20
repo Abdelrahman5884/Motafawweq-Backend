@@ -2,12 +2,12 @@
 
 namespace App\Services\V1\Student;
 
-use App\Models\LeagueParticipant;
 use App\Models\StudentDailyActivity;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentProfile;
 use App\Models\User;
 use App\Services\BaseService;
+use App\Services\V1\LeagueRulesService;
 use Carbon\Carbon;
 use DateTimeZone;
 
@@ -24,6 +24,10 @@ use DateTimeZone;
  */
 class StudentActivityService extends BaseService
 {
+    public function __construct(
+        protected LeagueRulesService $leagueRulesService
+    ) {}
+
     public const DEFAULT_TIMEZONE = 'Africa/Cairo';
 
     public const MAX_SECONDS_PER_DAY = 86400;
@@ -290,10 +294,12 @@ class StudentActivityService extends BaseService
             $profile->save();
         }
 
-        // Keep league participant streak badges synchronized when the streak changes
+        // Keep league participant streak & +3 daily streak league points synchronized when the streak changes
         if ($previousStreak !== $computed['currentStreakDays']) {
-            LeagueParticipant::where('student_id', $student->id)
-                ->update(['streak_days' => $computed['currentStreakDays']]);
+            $this->leagueRulesService->syncStudentStreakToActiveLeagues(
+                (int) $student->id,
+                (int) $computed['currentStreakDays']
+            );
         }
 
         return [

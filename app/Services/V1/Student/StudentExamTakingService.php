@@ -409,26 +409,30 @@ class StudentExamTakingService extends BaseService
             $exam->recalculateMetrics();
             $exam->recalculatePerformanceMetrics();
 
-            // Award immutable XP for completing the exam & sync active leagues
-            $xpPoints = $this->leagueRulesService->resolveExamXp(
-                (bool) $submission->is_full_mark,
-                (bool) $submission->is_passed
-            );
-            $xpEntry = StudentXpLedger::awardOnce(
-                $student->id,
-                'exam_submitted',
-                $submission->id,
-                $xpPoints,
-                "إتمام امتحان: {$exam->title_ar}"
-            );
+            // Award immutable league points strictly by official rules:
+            // True/False correct (+1), MCQ correct (+3), Full Mark 100% bonus (+3 when auto-graded)
+            $submission->load('answers.question:id,type');
+            $pointsBreakdown = $this->leagueRulesService->calculateExamSubmissionPoints($submission, includeEssay: false);
+            $xpPoints = (int) $pointsBreakdown['totalPoints'];
+            $xpEntry = null;
 
-            if ($xpEntry && $xpEntry->wasRecentlyCreated) {
-                $this->leagueRulesService->creditActiveLeagues(
-                    $student,
+            if ($xpPoints > 0) {
+                $xpEntry = StudentXpLedger::awardOnce(
+                    $student->id,
+                    'exam_submitted',
+                    $submission->id,
                     $xpPoints,
-                    $exam->teacher_id ? (int) $exam->teacher_id : null,
-                    $exam->course_id ? (int) $exam->course_id : null
+                    "إتمام امتحان: {$exam->title_ar}"
                 );
+
+                if ($xpEntry && $xpEntry->wasRecentlyCreated) {
+                    $this->leagueRulesService->creditActiveLeagues(
+                        $student,
+                        $xpPoints,
+                        $exam->teacher_id ? (int) $exam->teacher_id : null,
+                        $exam->course_id ? (int) $exam->course_id : null
+                    );
+                }
             }
 
             // Log anti-cheat risk signal if abnormal tab switching occurred

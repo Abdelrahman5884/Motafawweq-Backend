@@ -2,13 +2,16 @@
 
 namespace App\Services\V1\Teacher;
 
+use App\Enums\ExamQuestionType;
 use App\Enums\ExamSubmissionStatus;
 use App\Models\Exam;
 use App\Models\ExamSubmission;
+use App\Models\StudentXpLedger;
 use App\Models\User;
 use App\Repositories\Contracts\ExamRepositoryInterface;
 use App\Repositories\Contracts\ExamSubmissionRepositoryInterface;
 use App\Services\BaseService;
+use App\Services\V1\LeagueRulesService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -16,7 +19,8 @@ class TeacherExamGradingService extends BaseService
 {
     public function __construct(
         protected ExamRepositoryInterface $examRepository,
-        protected ExamSubmissionRepositoryInterface $submissionRepository
+        protected ExamSubmissionRepositoryInterface $submissionRepository,
+        protected LeagueRulesService $leagueRulesService
     ) {}
 
     /**
@@ -92,6 +96,53 @@ class TeacherExamGradingService extends BaseService
 
             // Recalculate student final scores and pass status
             $submission->recalculateScores();
+
+            // Credit official league points for newly graded correct essays (+5 each) & full mark bonus (+3)
+            $submission->load(['answers.question:id,type', 'student']);
+            $correctEssayCount = $submission->answers->filter(function ($ans) {
+                $qType = $ans->question?->type instanceof ExamQuestionType
+                    ? $ans->question->type->value
+                    : strtolower((string) ($ans->question?->type ?? ''));
+
+                return $qType === ExamQuestionType::ESSAY->value && $ans->is_correct === true;
+            })->count();
+
+            $newlyAwardedLeaguePts = 0;
+            if ($correctEssayCount > 0) {
+                $essayPts = $correctEssayCount * LeagueRulesService::XP_QUESTION_ESSAY;
+                $essayEntry = StudentXpLedger::awardOnce(
+                    (int) $submission->student_id,
+                    'exam_essay_graded',
+                    (int) $submission->id,
+                    $essayPts,
+                    "تصحيح أسئلة مقالية صحيحة في امتحان: {$exam->title_ar}"
+                );
+                if ($essayEntry && $essayEntry->wasRecentlyCreated) {
+                    $newlyAwardedLeaguePts += (int) $essayEntry->points;
+                }
+            }
+
+            if ($submission->is_full_mark) {
+                $bonusEntry = StudentXpLedger::awardOnce(
+                    (int) $submission->student_id,
+                    'exam_full_mark_bonus',
+                    (int) $submission->id,
+                    LeagueRulesService::XP_EXAM_FULL_MARK_BONUS,
+                    "بونص الدرجة النهائية 100% في امتحان: {$exam->title_ar}"
+                );
+                if ($bonusEntry && $bonusEntry->wasRecentlyCreated) {
+                    $newlyAwardedLeaguePts += (int) $bonusEntry->points;
+                }
+            }
+
+            if ($newlyAwardedLeaguePts > 0 && $submission->student) {
+                $this->leagueRulesService->creditActiveLeagues(
+                    $submission->student,
+                    $newlyAwardedLeaguePts,
+                    $exam->teacher_id ? (int) $exam->teacher_id : null,
+                    $exam->course_id ? (int) $exam->course_id : null
+                );
+            }
 
             // Recalculate exam performance metrics
             $exam->recalculatePerformanceMetrics();

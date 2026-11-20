@@ -11,7 +11,6 @@ use App\Models\HomeworkSubmission;
 use App\Models\StudentXpLedger;
 use App\Models\User;
 use App\Services\BaseService;
-use App\Services\V1\LeagueRulesService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
@@ -30,8 +29,7 @@ class StudentHomeworkService extends BaseService
     ];
 
     public function __construct(
-        protected StudentAccessService $accessService,
-        protected LeagueRulesService $leagueRulesService
+        protected StudentAccessService $accessService
     ) {}
 
     /**
@@ -285,22 +283,13 @@ class StudentHomeworkService extends BaseService
 
             $homework->recalculateMetrics();
 
-            $hwXpEntry = StudentXpLedger::awardOnce(
+            StudentXpLedger::awardOnce(
                 $student->id,
                 'homework_submitted',
                 $submission->id,
-                LeagueRulesService::XP_HOMEWORK_SUBMITTED,
+                15,
                 "تسليم واجب: {$homework->title_ar}"
             );
-
-            if ($hwXpEntry && $hwXpEntry->wasRecentlyCreated) {
-                $this->leagueRulesService->creditActiveLeagues(
-                    $student,
-                    LeagueRulesService::XP_HOMEWORK_SUBMITTED,
-                    $homework->teacher_id ? (int) $homework->teacher_id : null,
-                    $homework->course_id ? (int) $homework->course_id : null
-                );
-            }
 
             $submission->logSecurityEvent(
                 'student.homework.submitted',
