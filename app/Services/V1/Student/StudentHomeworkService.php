@@ -4,6 +4,7 @@ namespace App\Services\V1\Student;
 
 use App\Enums\EnrollmentStatus;
 use App\Enums\HomeworkSubmissionStatus;
+use App\Enums\HomeworkType;
 use App\Models\GroupEnrollment;
 use App\Models\Homework;
 use App\Models\HomeworkSubmission;
@@ -14,6 +15,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -31,7 +33,7 @@ class StudentHomeworkService extends BaseService
     ) {}
 
     /**
-     * List all accessible homeworks for the authenticated student with their submission status.
+     * List all accessible homeworks for the authenticated student with complete assignment and submission details.
      */
     public function listHomeworks(User $student): array
     {
@@ -54,18 +56,79 @@ class StudentHomeworkService extends BaseService
             ->latest()
             ->get();
 
+        if ($homeworks->isEmpty()) {
+            return [];
+        }
+
         $submissionsByHw = HomeworkSubmission::query()
             ->where('student_id', $student->id)
             ->whereIn('homework_id', $homeworks->pluck('id'))
             ->get()
             ->keyBy('homework_id');
 
-        return $homeworks->map(function (Homework $hw) use ($submissionsByHw) {
+        $now = Carbon::now();
+        $signedExpiry = $now->copy()->addHours(2);
+
+        return $homeworks->map(function (Homework $hw) use ($submissionsByHw, $signedExpiry) {
             /** @var HomeworkSubmission|null $sub */
             $sub = $submissionsByHw->get($hw->id);
             $status = $sub?->status instanceof HomeworkSubmissionStatus
                 ? $sub->status->value
                 : ($sub?->status ?? 'not_submitted');
+
+            $type = $hw->type instanceof HomeworkType
+                ? $hw->type->value
+                : (string) ($hw->type ?? ($hw->attachment_path ? 'file' : 'text'));
+
+            $hasTeacherAttachment = $hw->attachment_path && Storage::disk('local')->exists($hw->attachment_path);
+            $attachmentUrl = null;
+            $attachmentDownloadUrl = null;
+            $attachmentSizeBytes = null;
+            if ($hasTeacherAttachment) {
+                $attachmentSizeBytes = (int) Storage::disk('local')->size($hw->attachment_path);
+                $attachmentUrl = URL::temporarySignedRoute(
+                    'api.v1.student.homeworks.attachment.stream',
+                    $signedExpiry,
+                    ['uuid' => $hw->uuid]
+                );
+                $attachmentDownloadUrl = URL::temporarySignedRoute(
+                    'api.v1.student.homeworks.attachment.stream',
+                    $signedExpiry,
+                    ['uuid' => $hw->uuid, 'download' => 1]
+                );
+            }
+
+            $hasSubmissionAttachment = $sub?->attachment_path && Storage::disk('local')->exists($sub->attachment_path);
+            $submittedAttachmentUrl = null;
+            $submittedAttachmentDownloadUrl = null;
+            if ($hasSubmissionAttachment) {
+                $submittedAttachmentUrl = URL::temporarySignedRoute(
+                    'api.v1.student.homeworks.submission.attachment.stream',
+                    $signedExpiry,
+                    ['submissionUuid' => $sub->uuid]
+                );
+                $submittedAttachmentDownloadUrl = URL::temporarySignedRoute(
+                    'api.v1.student.homeworks.submission.attachment.stream',
+                    $signedExpiry,
+                    ['submissionUuid' => $sub->uuid, 'download' => 1]
+                );
+            }
+
+            $isOverdue = false;
+            if ($hw->due_date && in_array($status, ['not_submitted', HomeworkSubmissionStatus::REJECTED->value], true)) {
+                $dueTime = preg_match('/^\d{2}:\d{2}/', (string) $hw->due_time) ? substr((string) $hw->due_time, 0, 5).':59' : '23:59:59';
+                try {
+                    $deadline = Carbon::parse($hw->due_date->format('Y-m-d').' '.$dueTime);
+                    $isOverdue = $deadline->isPast();
+                } catch (\Throwable) {
+                    $isOverdue = $hw->due_date->copy()->endOfDay()->isPast();
+                }
+            }
+
+            $showFeedback = in_array($status, [
+                HomeworkSubmissionStatus::GRADED->value,
+                HomeworkSubmissionStatus::REJECTED->value,
+            ], true);
 
             return [
                 'id' => $hw->uuid,
@@ -74,22 +137,38 @@ class StudentHomeworkService extends BaseService
                 'courseTitleAr' => $hw->course_title_ar,
                 'lessonTitleAr' => $hw->lesson_title_ar,
                 'teacherName' => $hw->teacher?->name,
+                'type' => $type,
+                'fileType' => $hw->file_type,
+                'textContent' => $hw->text_content,
+                'attachmentName' => $hasTeacherAttachment ? $hw->attachment_name : null,
+                'attachmentSizeBytes' => $attachmentSizeBytes,
+                'attachmentUrl' => $attachmentUrl,
+                'attachmentDownloadUrl' => $attachmentDownloadUrl,
                 'maxGrade' => (int) $hw->max_grade,
                 'dueDate' => $hw->due_date?->format('Y-m-d'),
                 'dueTime' => $hw->due_time,
+                'isOverdue' => $isOverdue,
                 'submissionStatus' => $status,
                 'submissionId' => $sub?->uuid,
-                'score' => $status === HomeworkSubmissionStatus::GRADED->value ? (float) $sub->score : null,
-                'feedbackAr' => $sub?->feedback_ar,
+                'submissionType' => $sub?->submission_type,
+                'solutionText' => $sub?->solution_text,
+                'submittedAttachmentName' => $hasSubmissionAttachment ? $sub->attachment_name : null,
+                'submittedAttachmentUrl' => $submittedAttachmentUrl,
+                'submittedAttachmentDownloadUrl' => $submittedAttachmentDownloadUrl,
+                'score' => $status === HomeworkSubmissionStatus::GRADED->value && $sub?->score !== null
+                    ? (float) $sub->score
+                    : null,
+                'feedbackAr' => $showFeedback ? $sub?->feedback_ar : null,
                 'submittedAt' => $sub?->submitted_at?->toIso8601String(),
+                'gradedAt' => $sub?->graded_at?->toIso8601String(),
             ];
         })->values()->all();
     }
 
     /**
-     * Student submits or updates a homework solution (before it is graded).
+     * Retrieve an accessible homework by UUID and enforce student entitlement.
      */
-    public function submitHomework(User $student, string $homeworkUuid, array $data, ?UploadedFile $file = null): HomeworkSubmission
+    public function getAccessibleHomework(User $student, string $homeworkUuid): Homework
     {
         /** @var Homework|null $homework */
         $homework = Homework::where('uuid', $homeworkUuid)->first();
@@ -97,14 +176,25 @@ class StudentHomeworkService extends BaseService
             throw (new ModelNotFoundException)->setModel(Homework::class, [$homeworkUuid]);
         }
 
-        $this->accessService->assertCanAccess($student, $homework, (int) $homework->teacher_id, $homework->course_id ? (int) $homework->course_id : null);
+        $this->accessService->assertCanAccess(
+            $student,
+            $homework,
+            (int) $homework->teacher_id,
+            $homework->course_id ? (int) $homework->course_id : null
+        );
+
+        return $homework;
+    }
+
+    /**
+     * Student submits or updates a homework solution (before it is graded).
+     */
+    public function submitHomework(User $student, string $homeworkUuid, array $data, ?UploadedFile $file = null): HomeworkSubmission
+    {
+        $homework = $this->getAccessibleHomework($student, $homeworkUuid);
 
         $solutionText = ! empty($data['solution_text']) ? trim(strip_tags((string) $data['solution_text'])) : null;
-        if (! $file && empty($solutionText)) {
-            throw ValidationException::withMessages([
-                'solution' => [__('messages.homework_solution_required')],
-            ]);
-        }
+        $removeAttachment = ! empty($data['remove_attachment']);
 
         // Derive student's center/location strictly from their verified enrollment on the server
         $enrollment = GroupEnrollment::where('student_id', $student->id)
@@ -115,7 +205,7 @@ class StudentHomeworkService extends BaseService
 
         $locationAr = $enrollment?->group?->center_name ?: 'أكاديمية المتفوق الإلكترونية (أونلاين)';
 
-        return $this->transaction(function () use ($student, $homework, $data, $file, $solutionText, $locationAr) {
+        return $this->transaction(function () use ($student, $homework, $data, $file, $solutionText, $removeAttachment, $locationAr) {
             /** @var HomeworkSubmission|null $existing */
             $existing = HomeworkSubmission::where('homework_id', $homework->id)
                 ->where('student_id', $student->id)
@@ -130,7 +220,25 @@ class StudentHomeworkService extends BaseService
 
             $attachmentName = $existing?->attachment_name;
             $attachmentPath = $existing?->attachment_path;
-            $submissionType = $data['submission_type'] ?? ($solutionText ? 'text' : 'pdf');
+            $hasExistingFile = ! empty($attachmentPath) && ! $removeAttachment;
+
+            if (! $file && ! $hasExistingFile && empty($solutionText)) {
+                throw ValidationException::withMessages([
+                    'solution' => [__('messages.homework_solution_required')],
+                ]);
+            }
+
+            if ($removeAttachment && ! $file) {
+                if ($attachmentPath && Storage::disk('local')->exists($attachmentPath)) {
+                    Storage::disk('local')->delete($attachmentPath);
+                }
+                $attachmentName = null;
+                $attachmentPath = null;
+            }
+
+            $submissionType = $attachmentPath
+                ? ($existing?->submission_type ?: ($data['submission_type'] ?? 'pdf'))
+                : ($data['submission_type'] ?? 'text');
 
             if ($file) {
                 $uploaded = $this->validateAndStoreFile($student, $file, "homeworks/{$homework->uuid}/submissions");
@@ -154,6 +262,13 @@ class StudentHomeworkService extends BaseService
                 'max_score' => (int) $homework->max_grade,
                 'submitted_at' => Carbon::now(),
             ];
+
+            if ($existing && $existing->status === HomeworkSubmissionStatus::REJECTED) {
+                $attributes['score'] = null;
+                $attributes['feedback_ar'] = null;
+                $attributes['graded_at'] = null;
+                $attributes['graded_by'] = null;
+            }
 
             if ($existing) {
                 $existing->update($attributes);
@@ -221,7 +336,12 @@ class StudentHomeworkService extends BaseService
         $safeOriginalName = preg_replace('/[^a-zA-Z0-9._\-\x{0600}-\x{06FF} ]/u', '', $file->getClientOriginalName());
         $safeOriginalName = Str::limit(trim($safeOriginalName ?: 'solution'), 150, '');
 
-        $extension = $detectedMime === 'application/pdf' ? 'pdf' : ($file->guessExtension() ?: 'jpg');
+        $extension = match ($detectedMime) {
+            'application/pdf' => 'pdf',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            default => $file->guessExtension() ?: 'jpg',
+        };
         $storedFileName = Str::uuid()->toString().'.'.$extension;
         $storagePath = $file->storeAs($subPath, $storedFileName, 'local');
 

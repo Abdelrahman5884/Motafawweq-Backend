@@ -235,6 +235,9 @@ Route::prefix('v1')->group(function () {
                 // Phase 6: Homeworks & Secure Attachment Streaming
                 Route::get('/homeworks', [StudentHomeworkController::class, 'index'])
                     ->middleware('throttle:student-read');
+                Route::get('/homeworks/{uuid}/attachment', [StudentHomeworkController::class, 'downloadHomeworkAttachment'])
+                    ->whereUuid('uuid')
+                    ->middleware('throttle:student-read');
                 Route::post('/homeworks/{uuid}/submit', [StudentHomeworkController::class, 'submit'])
                     ->whereUuid('uuid')
                     ->middleware(['throttle:student-uploads', 'idempotent']);
@@ -566,5 +569,14 @@ Route::prefix('v1')->group(function () {
         Route::get('/{uuid}/attachments/{attachmentUuid}/stream', [StudentCourseLessonController::class, 'streamAttachment'])
             ->whereUuid(['uuid', 'attachmentUuid'])
             ->name('api.v1.student.lessons.attachments.stream');
+    });
+
+    Route::prefix('media/student-homeworks')->group(function () {
+        Route::get('/{uuid}/attachment/stream', [StudentHomeworkController::class, 'streamHomeworkAttachment'])
+            ->whereUuid('uuid')
+            ->name('api.v1.student.homeworks.attachment.stream');
+        Route::get('/submissions/{submissionUuid}/attachment/stream', [StudentHomeworkController::class, 'streamSubmissionAttachment'])
+            ->whereUuid('submissionUuid')
+            ->name('api.v1.student.homeworks.submission.attachment.stream');
     });
 });

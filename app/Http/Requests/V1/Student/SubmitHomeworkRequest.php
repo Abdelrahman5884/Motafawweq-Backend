@@ -17,6 +17,7 @@ class SubmitHomeworkRequest extends BaseApiRequest
 
         $submissionType = $this->input('submission_type') ?? $this->input('submissionType');
         $solutionText = $this->input('solution_text') ?? $this->input('solutionText');
+        $removeAttachment = $this->input('remove_attachment') ?? $this->input('removeAttachment');
 
         $merged = [];
         if ($submissionType !== null) {
@@ -24,6 +25,9 @@ class SubmitHomeworkRequest extends BaseApiRequest
         }
         if ($solutionText !== null) {
             $merged['solution_text'] = trim(strip_tags((string) $solutionText));
+        }
+        if ($removeAttachment !== null) {
+            $merged['remove_attachment'] = filter_var($removeAttachment, FILTER_VALIDATE_BOOLEAN);
         }
 
         if (! empty($merged)) {
@@ -36,8 +40,9 @@ class SubmitHomeworkRequest extends BaseApiRequest
         return [
             'submission_type' => ['nullable', 'string', 'in:pdf,image,text'],
             'solution_text' => ['nullable', 'string', 'max:20000'],
-            'file' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
-            'attachment' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
+            'remove_attachment' => ['nullable', 'boolean'],
+            'file' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg,webp', 'max:25600'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg,webp', 'max:25600'],
         ];
     }
 }
