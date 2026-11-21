@@ -37,6 +37,8 @@ class TeacherExamGradingController extends BaseApiController
                 'passRate' => (float) $result['exam']->pass_rate,
                 'topScoreCount' => (int) $result['exam']->top_score_count,
                 'submissionsCount' => (int) $result['exam']->submissions_count,
+                'pendingCount' => (int) ($result['pendingCount'] ?? 0),
+                'gradedCount' => (int) ($result['gradedCount'] ?? 0),
             ]
         );
     }

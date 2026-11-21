@@ -454,4 +454,131 @@ class TeacherExamGradingTest extends TestCase
             'event' => 'teacher.idor_attempt_blocked',
         ]);
     }
+
+    public function test_exam_list_tracks_pending_essay_grading_and_question_edit_preserves_student_answers(): void
+    {
+        $teacher = $this->createTeacher('pending.count@motafawweq.com');
+        $student = $this->createStudent('pending.student@motafawweq.com');
+
+        $exam = Exam::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان مقالي للمراجعة والاعتماد',
+            'duration_minutes' => 45,
+            'full_mark' => 20,
+            'pass_score' => 10,
+            'questions_count' => 2,
+            'status' => ExamStatus::ACTIVE,
+            'show_results' => true,
+        ]);
+
+        $q1 = ExamQuestion::create([
+            'exam_id' => $exam->id,
+            'question_number' => 1,
+            'type' => ExamQuestionType::MCQ,
+            'points' => 10,
+            'question_ar' => 'سؤال موضوعي',
+            'options_ar' => ['أ', 'ب'],
+            'correct_index' => 0,
+        ]);
+
+        $q2 = ExamQuestion::create([
+            'exam_id' => $exam->id,
+            'question_number' => 2,
+            'type' => ExamQuestionType::ESSAY,
+            'points' => 10,
+            'question_ar' => 'سؤال مقالي يحتاج مراجعة المعلم',
+            'model_answer_ar' => 'نموذج إجابة دقيق',
+        ]);
+
+        $submission = ExamSubmission::create([
+            'exam_id' => $exam->id,
+            'student_id' => $student->id,
+            'score' => 10,
+            'full_mark' => 20,
+            'percentage' => 50,
+            'status' => ExamSubmissionStatus::SUBMITTED,
+            'submitted_at' => now(),
+        ]);
+
+        $submission->answers()->create([
+            'exam_question_id' => $q1->id,
+            'selected_index' => 0,
+            'points_awarded' => 10,
+            'is_correct' => true,
+        ]);
+
+        $submission->answers()->create([
+            'exam_question_id' => $q2->id,
+            'essay_answer_text' => 'إجابة الطالب المقالية المفصلة.',
+            'points_awarded' => 0,
+            'is_correct' => null,
+        ]);
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        // 1. Exam list reports pendingGradingCount = 1 and submissionsCount = 1 even before grading
+        $this->getJson('/api/v1/teacher/exams')
+            ->assertOk()
+            ->assertJsonPath('data.0.submissionsCount', 1)
+            ->assertJsonPath('data.0.pendingGradingCount', 1)
+            ->assertJsonPath('data.0.hasEssayQuestions', true);
+
+        // 2. Editing existing question in-place preserves student answers (zero cascade data loss!)
+        $this->putJson("/api/v1/teacher/exams/{$exam->uuid}", [
+            'questions' => [
+                [
+                    'id' => $q1->uuid,
+                    'type' => 'mcq',
+                    'points' => 10,
+                    'questionAr' => 'سؤال موضوعي بعد تصحيح إملائي',
+                    'optionsAr' => ['أ', 'ب'],
+                    'correctIndex' => 0,
+                ],
+                [
+                    'id' => $q2->uuid,
+                    'type' => 'essay',
+                    'points' => 10,
+                    'questionAr' => 'سؤال مقالي بعد التوضيح',
+                    'modelAnswerAr' => 'نموذج إجابة دقيق',
+                ],
+            ],
+        ])->assertOk();
+
+        $this->assertEquals(2, $submission->answers()->count());
+
+        // 3. Attempting to delete a question that has student answers is cleanly blocked (422)
+        $this->putJson("/api/v1/teacher/exams/{$exam->uuid}", [
+            'questions' => [
+                [
+                    'id' => $q1->uuid,
+                    'type' => 'mcq',
+                    'points' => 10,
+                    'questionAr' => 'سؤال موضوعي فقط',
+                    'optionsAr' => ['أ', 'ب'],
+                    'correctIndex' => 0,
+                ],
+            ],
+        ])->assertStatus(422);
+
+        // 4. Grading & approving the essay resolves pendingGradingCount back to 0
+        $this->patchJson("/api/v1/teacher/exams/{$exam->uuid}/submissions/{$submission->uuid}/grade-essay", [
+            'answers' => [
+                [
+                    'question_uuid' => $q2->uuid,
+                    'points_awarded' => 9,
+                    'teacher_feedback' => 'شرح ممتاز ينقصه مثال واحد فقط.',
+                ],
+            ],
+            'teacher_feedback' => 'ممتاز يا بطل، تم اعتماد درجتك.',
+        ])->assertOk()
+            ->assertJsonPath('data.status', ExamSubmissionStatus::GRADED->value)
+            ->assertJsonPath('data.score', 19)
+            ->assertJsonPath('data.percentage', 95)
+            ->assertJsonPath('data.isPassed', true);
+
+        $this->getJson('/api/v1/teacher/exams')
+            ->assertOk()
+            ->assertJsonPath('data.0.pendingGradingCount', 0)
+            ->assertJsonPath('data.0.gradedSubmissionsCount', 1);
+    }
 }

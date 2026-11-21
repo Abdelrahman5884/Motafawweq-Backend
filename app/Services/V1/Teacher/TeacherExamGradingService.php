@@ -36,21 +36,33 @@ class TeacherExamGradingService extends BaseService
         return [
             'exam' => $exam,
             'submissions' => $submissions,
+            'pendingCount' => (int) ($exam->getAttribute('pending_grading_count') ?? 0),
+            'gradedCount' => (int) ($exam->getAttribute('graded_submissions_count') ?? 0),
         ];
     }
 
     /**
-     * Retrieve single submission details with all student answers, model answers, and rubric.
+     * Retrieve single submission details with all student answers sorted by question order, model answers, and rubric.
      */
     public function getSubmission(User $teacher, string $examUuid, string $submissionUuid): ExamSubmission
     {
         $exam = $this->examRepository->findByUuidForTeacher($examUuid, $teacher);
+        $submission = $this->submissionRepository->findByUuidForExam($submissionUuid, $exam->id);
+        $submission->loadMissing('exam');
 
-        return $this->submissionRepository->findByUuidForExam($submissionUuid, $exam->id);
+        if ($submission->relationLoaded('answers')) {
+            $sorted = $submission->answers
+                ->sortBy(fn ($ans) => (int) ($ans->question?->question_number ?? 9999))
+                ->values();
+            $submission->setRelation('answers', $sorted);
+        }
+
+        return $submission;
     }
 
     /**
-     * Grade essay questions, record teacher feedback, and update total score & exam metrics atomically.
+     * Grade essay questions, record teacher feedback, approve/finalize the submission,
+     * and update total score, league XP & exam metrics atomically.
      */
     public function gradeEssaySubmission(User $teacher, string $examUuid, string $submissionUuid, array $data): ExamSubmission
     {
@@ -69,24 +81,31 @@ class TeacherExamGradingService extends BaseService
 
                 $answer = $submission->answers->first(function ($ans) use ($qUuid) {
                     return $ans->question?->uuid === $qUuid
+                        || $ans->uuid === $qUuid
                         || (string) $ans->exam_question_id === $qUuid;
                 });
 
                 if ($answer) {
                     $maxPoints = (float) ($answer->question?->points ?? 5);
                     $awarded = max(0.0, min($maxPoints, (float) ($gradedItem['points_awarded'] ?? 0)));
-                    $feedback = isset($gradedItem['teacher_feedback']) ? trim(strip_tags((string) $gradedItem['teacher_feedback'])) : null;
 
-                    $answer->update([
+                    $updatePayload = [
                         'points_awarded' => $awarded,
                         'is_correct' => $awarded >= $maxPoints ? true : ($awarded > 0 ? null : false),
-                        'teacher_feedback' => $feedback ?: $answer->teacher_feedback,
-                    ]);
+                    ];
+
+                    if (array_key_exists('teacher_feedback', $gradedItem)) {
+                        $cleanFeedback = trim(strip_tags((string) ($gradedItem['teacher_feedback'] ?? '')));
+                        $updatePayload['teacher_feedback'] = $cleanFeedback !== '' ? $cleanFeedback : null;
+                    }
+
+                    $answer->update($updatePayload);
                 }
             }
 
-            if (! empty($data['teacher_feedback'])) {
-                $submission->teacher_feedback = trim(strip_tags((string) $data['teacher_feedback']));
+            if (array_key_exists('teacher_feedback', $data)) {
+                $cleanGeneral = trim(strip_tags((string) ($data['teacher_feedback'] ?? '')));
+                $submission->teacher_feedback = $cleanGeneral !== '' ? $cleanGeneral : null;
             }
 
             $submission->status = ExamSubmissionStatus::GRADED;
@@ -161,7 +180,15 @@ class TeacherExamGradingService extends BaseService
                 $submission
             );
 
-            return $submission->fresh(['student', 'grader', 'answers.question', 'exam']);
+            $fresh = $submission->fresh(['student', 'grader', 'answers.question', 'exam']);
+            if ($fresh && $fresh->relationLoaded('answers')) {
+                $fresh->setRelation(
+                    'answers',
+                    $fresh->answers->sortBy(fn ($ans) => (int) ($ans->question?->question_number ?? 9999))->values()
+                );
+            }
+
+            return $fresh;
         });
     }
 }

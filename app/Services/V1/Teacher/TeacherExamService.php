@@ -4,16 +4,19 @@ namespace App\Services\V1\Teacher;
 
 use App\Enums\ExamQuestionType;
 use App\Enums\ExamStatus;
+use App\Enums\ExamSubmissionStatus;
 use App\Enums\TeacherPlanTier;
 use App\Models\Course;
 use App\Models\Exam;
 use App\Models\ExamQuestion;
+use App\Models\ExamSubmissionAnswer;
 use App\Models\TeacherProfile;
 use App\Models\User;
 use App\Repositories\Contracts\ExamRepositoryInterface;
 use App\Services\BaseService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class TeacherExamService extends BaseService
@@ -136,6 +139,21 @@ class TeacherExamService extends BaseService
             if (isset($data['course_title_ar']) || isset($data['courseTitleAr'])) {
                 $fillable['course_title_ar'] = trim(strip_tags((string) ($data['course_title_ar'] ?? $data['courseTitleAr'])));
             }
+            if (array_key_exists('course_id', $data) || array_key_exists('courseId', $data)) {
+                $courseIdentifier = $data['course_id'] ?? $data['courseId'];
+                if ($courseIdentifier) {
+                    $course = Course::where('uuid', $courseIdentifier)
+                        ->orWhere('id', is_numeric($courseIdentifier) ? (int) $courseIdentifier : 0)
+                        ->first();
+                    if ($course) {
+                        $course->assertOwnedBy($teacher);
+                        $fillable['course_id'] = $course->id;
+                        if (! isset($fillable['course_title_ar'])) {
+                            $fillable['course_title_ar'] = $course->title_ar;
+                        }
+                    }
+                }
+            }
             if (isset($data['duration_minutes']) || isset($data['durationMinutes'])) {
                 $fillable['duration_minutes'] = max(5, (int) ($data['duration_minutes'] ?? $data['durationMinutes']));
             }
@@ -145,7 +163,7 @@ class TeacherExamService extends BaseService
             if (isset($data['full_mark']) || isset($data['fullMark'])) {
                 $fillable['full_mark'] = max(1, (int) ($data['full_mark'] ?? $data['fullMark']));
             }
-            if (isset($data['due_date']) || isset($data['dueDate'])) {
+            if (array_key_exists('due_date', $data) || array_key_exists('dueDate', $data)) {
                 $rawDue = $data['due_date'] ?? $data['dueDate'];
                 $fillable['due_date'] = $rawDue ? Carbon::parse($rawDue)->toDateString() : null;
             }
@@ -164,7 +182,7 @@ class TeacherExamService extends BaseService
                 $exam->update($fillable);
             }
 
-            // If questions array is passed, re-sync questions
+            // If questions array is passed, re-sync questions safely in-place (preserving student answers)
             if (isset($data['questions']) && is_array($data['questions']) && count($data['questions']) > 0) {
                 $this->assertQuestionBankQuota($teacher, count($data['questions']));
                 $this->syncExamQuestions($exam, $data['questions']);
@@ -176,7 +194,7 @@ class TeacherExamService extends BaseService
                 'changes' => array_keys($fillable),
             ], 'info', $exam);
 
-            return $exam->fresh(['questions', 'course']);
+            return $this->loadExamWithMetrics($exam);
         });
     }
 
@@ -196,7 +214,7 @@ class TeacherExamService extends BaseService
                 'new_status' => $newStatus->value,
             ], 'info', $exam);
 
-            return $exam->fresh(['questions', 'course']);
+            return $this->loadExamWithMetrics($exam);
         });
     }
 
@@ -216,7 +234,7 @@ class TeacherExamService extends BaseService
                 'show_results' => $newShowResults,
             ], 'info', $exam);
 
-            return $exam->fresh(['questions', 'course']);
+            return $this->loadExamWithMetrics($exam);
         });
     }
 
@@ -296,11 +314,16 @@ class TeacherExamService extends BaseService
     }
 
     /**
-     * Helper to synchronize child questions for an exam.
+     * Safely synchronize child questions in-place (preserving UUIDs and linked student answers).
+     * Blocks deleting any question that already has student submission answers.
      */
     protected function syncExamQuestions(Exam $exam, array $questions): void
     {
-        ExamQuestion::where('exam_id', $exam->id)->delete();
+        $existingByUuid = ExamQuestion::where('exam_id', $exam->id)
+            ->get()
+            ->keyBy('uuid');
+
+        $keptIds = [];
 
         foreach ($questions as $idx => $item) {
             if (! is_array($item)) {
@@ -316,7 +339,6 @@ class TeacherExamService extends BaseService
                 ? trim(strip_tags((string) ($item['question_en'] ?? $item['questionEn'])))
                 : null;
 
-            // Options (MCQ)
             $options = null;
             if ($typeEnum === ExamQuestionType::MCQ) {
                 $rawOptions = $item['options_ar'] ?? $item['optionsAr'] ?? [];
@@ -325,19 +347,16 @@ class TeacherExamService extends BaseService
                 }
             }
 
-            // Correct choice index (MCQ)
             $correctIndex = null;
             if ($typeEnum === ExamQuestionType::MCQ && (isset($item['correct_index']) || isset($item['correctIndex']))) {
                 $correctIndex = (int) ($item['correct_index'] ?? $item['correctIndex']);
             }
 
-            // Correct boolean (True/False)
             $correctBool = null;
             if ($typeEnum === ExamQuestionType::TRUE_FALSE && (isset($item['correct_bool']) || isset($item['correctBool']))) {
                 $correctBool = (bool) ($item['correct_bool'] ?? $item['correctBool']);
             }
 
-            // Essay fields
             $modelAnswer = null;
             $rubricPoints = null;
             if ($typeEnum === ExamQuestionType::ESSAY) {
@@ -354,8 +373,7 @@ class TeacherExamService extends BaseService
                 ? trim(strip_tags((string) ($item['explanation_ar'] ?? $item['explanationAr'])))
                 : null;
 
-            ExamQuestion::create([
-                'exam_id' => $exam->id,
+            $attributes = [
                 'question_number' => $idx + 1,
                 'type' => $typeEnum,
                 'points' => $points,
@@ -368,8 +386,57 @@ class TeacherExamService extends BaseService
                 'model_answer_ar' => $modelAnswer,
                 'rubric_points_ar' => $rubricPoints,
                 'explanation_ar' => $explanation,
-            ]);
+            ];
+
+            $incomingUuid = trim((string) ($item['uuid'] ?? $item['id'] ?? ''));
+            /** @var ExamQuestion|null $existing */
+            $existing = ($incomingUuid !== '' && Str::isUuid($incomingUuid))
+                ? $existingByUuid->get($incomingUuid)
+                : null;
+
+            if ($existing) {
+                $existing->update($attributes);
+                $keptIds[] = $existing->id;
+            } else {
+                $created = ExamQuestion::create(array_merge(['exam_id' => $exam->id], $attributes));
+                $keptIds[] = $created->id;
+            }
         }
+
+        // Handle removed questions safely without cascading loss of student answers
+        $removedIds = $existingByUuid
+            ->pluck('id')
+            ->diff($keptIds)
+            ->values()
+            ->all();
+
+        if (! empty($removedIds)) {
+            $hasLinkedAnswers = ExamSubmissionAnswer::whereIn('exam_question_id', $removedIds)->exists();
+            if ($hasLinkedAnswers) {
+                throw ValidationException::withMessages([
+                    'questions' => ['لا يمكن حذف سؤال توجد عليه إجابات مسجلة من الطلاب. يمكنك تعديل نصه أو درجته فقط.'],
+                ]);
+            }
+
+            ExamQuestion::whereIn('id', $removedIds)->delete();
+        }
+    }
+
+    /**
+     * Reload exam relations & submission counts consistently for TeacherExamResource.
+     */
+    protected function loadExamWithMetrics(Exam $exam): Exam
+    {
+        return $exam->fresh(['questions', 'course'])
+            ->loadCount([
+                'questions',
+                'submissions as total_submissions_count' => fn ($q) => $q->whereIn('status', [
+                    ExamSubmissionStatus::SUBMITTED->value,
+                    ExamSubmissionStatus::GRADED->value,
+                ]),
+                'submissions as pending_grading_count' => fn ($q) => $q->where('status', ExamSubmissionStatus::SUBMITTED->value),
+                'submissions as graded_submissions_count' => fn ($q) => $q->where('status', ExamSubmissionStatus::GRADED->value),
+            ]);
     }
 
     /**

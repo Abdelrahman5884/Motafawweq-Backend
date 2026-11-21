@@ -15,6 +15,7 @@ class GradeEssayRequest extends BaseApiRequest
     {
         parent::prepareForValidation();
 
+        $hasFeedback = $this->has('teacher_feedback') || $this->has('teacherFeedback');
         $feedback = $this->input('teacher_feedback') ?? $this->input('teacherFeedback');
         $rawAnswers = $this->input('answers') ?? [];
 
@@ -24,24 +25,31 @@ class GradeEssayRequest extends BaseApiRequest
                 if (! is_array($ans)) {
                     continue;
                 }
-                $normalizedAnswers[] = [
-                    'question_uuid' => $ans['question_uuid'] ?? $ans['questionUuid'] ?? $ans['exam_question_uuid'] ?? $ans['examQuestionUuid'] ?? null,
+                $entry = [
+                    'question_uuid' => $ans['question_uuid'] ?? $ans['questionUuid'] ?? $ans['exam_question_uuid'] ?? $ans['examQuestionUuid'] ?? $ans['answer_uuid'] ?? $ans['answerUuid'] ?? null,
                     'points_awarded' => isset($ans['points_awarded']) ? $ans['points_awarded'] : ($ans['pointsAwarded'] ?? 0),
-                    'teacher_feedback' => trim(strip_tags((string) ($ans['teacher_feedback'] ?? $ans['teacherFeedback'] ?? ''))),
                 ];
+                if (array_key_exists('teacher_feedback', $ans) || array_key_exists('teacherFeedback', $ans)) {
+                    $entry['teacher_feedback'] = trim(strip_tags((string) ($ans['teacher_feedback'] ?? $ans['teacherFeedback'] ?? '')));
+                }
+                $normalizedAnswers[] = $entry;
             }
         }
 
-        $this->merge([
+        $merged = [
             'answers' => $normalizedAnswers,
-            'teacher_feedback' => $feedback !== null ? trim(strip_tags((string) $feedback)) : null,
-        ]);
+        ];
+        if ($hasFeedback) {
+            $merged['teacher_feedback'] = $feedback !== null ? trim(strip_tags((string) $feedback)) : '';
+        }
+
+        $this->merge($merged);
     }
 
     public function rules(): array
     {
         return [
-            'answers' => ['required', 'array', 'min:1'],
+            'answers' => ['nullable', 'array'],
             'answers.*.question_uuid' => ['required', 'string'],
             'answers.*.points_awarded' => ['required', 'numeric', 'min:0'],
             'answers.*.teacher_feedback' => ['nullable', 'string', 'max:1000'],

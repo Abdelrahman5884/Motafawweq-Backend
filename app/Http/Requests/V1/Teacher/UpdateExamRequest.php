@@ -49,7 +49,8 @@ class UpdateExamRequest extends BaseApiRequest
             $merged['pass_score'] = (int) $passScore;
         }
         if ($dueDate !== null) {
-            $merged['due_date'] = trim((string) $dueDate);
+            $trimmedDue = trim((string) $dueDate);
+            $merged['due_date'] = $trimmedDue !== '' ? $trimmedDue : null;
         }
         if ($isBubbleSheet !== null) {
             $merged['is_bubble_sheet'] = filter_var($isBubbleSheet, FILTER_VALIDATE_BOOLEAN);
@@ -74,7 +75,11 @@ class UpdateExamRequest extends BaseApiRequest
                     $type = 'mcq';
                 }
 
+                $existingUuid = trim((string) ($q['uuid'] ?? $q['id'] ?? ''));
+
                 $normalized = [
+                    'id' => $existingUuid !== '' ? $existingUuid : null,
+                    'uuid' => $existingUuid !== '' ? $existingUuid : null,
                     'type' => $type,
                     'points' => $points,
                     'question_ar' => $qText,
@@ -158,6 +163,8 @@ class UpdateExamRequest extends BaseApiRequest
             'status' => ['nullable', 'string', Rule::in(['active', 'closed', 'scheduled'])],
 
             'questions' => ['nullable', 'array', 'min:1', 'max:200'],
+            'questions.*.id' => ['nullable', 'string', 'max:64'],
+            'questions.*.uuid' => ['nullable', 'string', 'max:64'],
             'questions.*.type' => ['required_with:questions', 'string', Rule::in(ExamQuestionType::values())],
             'questions.*.points' => ['required_with:questions', 'integer', 'min:1', 'max:100'],
             'questions.*.questionAr' => ['nullable', 'string', 'min:2'],

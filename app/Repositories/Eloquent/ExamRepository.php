@@ -2,6 +2,7 @@
 
 namespace App\Repositories\Eloquent;
 
+use App\Enums\ExamSubmissionStatus;
 use App\Models\Exam;
 use App\Models\User;
 use App\Repositories\Contracts\ExamRepositoryInterface;
@@ -19,7 +20,15 @@ class ExamRepository extends BaseRepository implements ExamRepositoryInterface
     {
         $query = $this->model->forTeacher($teacherId)
             ->with(['course', 'questions'])
-            ->withCount('questions');
+            ->withCount([
+                'questions',
+                'submissions as total_submissions_count' => fn ($q) => $q->whereIn('status', [
+                    ExamSubmissionStatus::SUBMITTED->value,
+                    ExamSubmissionStatus::GRADED->value,
+                ]),
+                'submissions as pending_grading_count' => fn ($q) => $q->where('status', ExamSubmissionStatus::SUBMITTED->value),
+                'submissions as graded_submissions_count' => fn ($q) => $q->where('status', ExamSubmissionStatus::GRADED->value),
+            ]);
 
         $search = trim((string) ($filters['search'] ?? $filters['q'] ?? ''));
         if ($search !== '') {
@@ -44,6 +53,15 @@ class ExamRepository extends BaseRepository implements ExamRepositoryInterface
         /** @var Exam|null $exam */
         $exam = $this->model->where('uuid', $uuid)
             ->with(['course', 'questions'])
+            ->withCount([
+                'questions',
+                'submissions as total_submissions_count' => fn ($q) => $q->whereIn('status', [
+                    ExamSubmissionStatus::SUBMITTED->value,
+                    ExamSubmissionStatus::GRADED->value,
+                ]),
+                'submissions as pending_grading_count' => fn ($q) => $q->where('status', ExamSubmissionStatus::SUBMITTED->value),
+                'submissions as graded_submissions_count' => fn ($q) => $q->where('status', ExamSubmissionStatus::GRADED->value),
+            ])
             ->first();
 
         if (! $exam) {

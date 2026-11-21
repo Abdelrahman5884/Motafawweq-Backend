@@ -20,16 +20,26 @@ class TeacherExamResource extends BaseJsonResource
             ? $this->status->value
             : (string) ($this->status ?? 'active');
 
-        $questions = $this->relationLoaded('questions') ? $this->questions : collect();
+        $allQuestions = $this->relationLoaded('questions') ? $this->questions : collect();
+        $hasEssayQuestions = $allQuestions->contains(function ($q) {
+            $type = $q->type instanceof ExamQuestionType ? $q->type->value : (string) $q->type;
 
-        // Optional question type filtering if requested by query param
+            return $type === ExamQuestionType::ESSAY->value;
+        });
+
+        $questions = $allQuestions;
         $filterType = $request->query('question_type');
         if ($filterType && in_array($filterType, ['mcq', 'true_false', 'essay'], true)) {
-            $questions = $questions->filter(fn ($q) => ($q->type instanceof ExamQuestionType ? $q->type->value : (string) $q->type) === $filterType)->values();
+            $questions = $allQuestions->filter(fn ($q) => ($q->type instanceof ExamQuestionType ? $q->type->value : (string) $q->type) === $filterType)->values();
         }
+
+        $totalSubmissionsCount = $this->getAttribute('total_submissions_count');
+        $pendingGradingCount = $this->getAttribute('pending_grading_count');
+        $gradedSubmissionsCount = $this->getAttribute('graded_submissions_count');
 
         return [
             'id' => $this->uuid,
+            'uuid' => $this->uuid,
             'titleAr' => $this->title_ar,
             'titleEn' => $this->title_en ?? $this->title_ar,
             'courseId' => $this->whenLoaded('course', fn () => $this->course?->uuid),
@@ -40,6 +50,7 @@ class TeacherExamResource extends BaseJsonResource
             'fullMark' => (int) $this->full_mark,
             'passScore' => (int) $this->pass_score,
             'questionsCount' => (int) $this->questions_count,
+            'hasEssayQuestions' => $hasEssayQuestions,
             'status' => $status,
             'showResults' => (bool) $this->show_results,
             'isBubbleSheet' => (bool) $this->is_bubble_sheet,
@@ -48,7 +59,9 @@ class TeacherExamResource extends BaseJsonResource
             'avgScore' => (float) $this->avg_score,
             'passRate' => (float) $this->pass_rate,
             'topScoreCount' => (int) $this->top_score_count,
-            'submissionsCount' => (int) $this->submissions_count,
+            'submissionsCount' => $totalSubmissionsCount !== null ? (int) $totalSubmissionsCount : (int) $this->submissions_count,
+            'gradedSubmissionsCount' => $gradedSubmissionsCount !== null ? (int) $gradedSubmissionsCount : (int) $this->submissions_count,
+            'pendingGradingCount' => $pendingGradingCount !== null ? (int) $pendingGradingCount : 0,
             'questions' => TeacherExamQuestionResource::collection($questions)->resolve($request),
             'createdAt' => $this->formatDate($this->created_at),
             'updatedAt' => $this->formatDate($this->updated_at),
