@@ -35,6 +35,27 @@ class StudentBillingController extends BaseApiController
         return $this->successResponse($result, 'كود الخصم صالح.');
     }
 
+    public function subscribe(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'plan_tier' => ['required', 'string', 'in:free,plus,pro'],
+            'billing_period' => ['nullable', 'string', 'in:monthly,term,annual'],
+            'payment_method' => ['nullable', 'string', 'max:30'],
+            'coupon_code' => ['nullable', 'string', 'max:50'],
+            'sender_phone' => ['nullable', 'string', 'max:30'],
+            'sender_ipa' => ['nullable', 'string', 'max:120'],
+            'transaction_ref' => ['nullable', 'string', 'max:120'],
+            'notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $result = $this->billingService->subscribeOrUpgrade(
+            $this->authenticatedUser(),
+            $validated
+        );
+
+        return $this->createdResponse($result, $result['messageAr']);
+    }
+
     public function storePayment(Request $request): JsonResponse
     {
         $validated = $request->validate([
