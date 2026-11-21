@@ -32,6 +32,8 @@ class CourseCertificate extends Model
         'honors_title_en',
         'issue_date',
         'status',
+        'issuer_type',
+        'metadata',
         'revoked_at',
         'revocation_reason',
     ];
@@ -40,6 +42,7 @@ class CourseCertificate extends Model
     {
         return [
             'status' => CertificateStatus::class,
+            'metadata' => 'array',
             'issue_date' => 'date',
             'revoked_at' => 'datetime',
             'grade_percent' => 'float',

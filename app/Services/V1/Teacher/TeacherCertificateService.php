@@ -175,6 +175,14 @@ class TeacherCertificateService
         $teacherProfile = $cert->teacher?->teacherProfile;
         $teacherName = $teacherProfile?->name_ar ?? $cert->teacher?->name ?? 'معلم معتمد';
         $teacherTitle = $teacherProfile?->title_ar ?? 'كبير معلمي المادة ومؤلف سلسلة التفوق';
+        $issuerType = in_array($cert->issuer_type, ['teacher', 'ministry', 'league'], true)
+            ? $cert->issuer_type
+            : 'teacher';
+        $meta = is_array($cert->metadata) ? $cert->metadata : [];
+        $gradePercent = (float) $cert->grade_percent;
+        $scoreLabel = fmod($gradePercent, 1.0) === 0.0
+            ? sprintf('%d%%', (int) $gradePercent)
+            : sprintf('%.1f%%', $gradePercent);
 
         return [
             'isValid' => $signatureValid && ! $isRevoked,
@@ -182,9 +190,10 @@ class TeacherCertificateService
             'certNumber' => $cert->certificate_number,
             'serialId' => $cert->certificate_number,
             'signatureHash' => $cert->signature_hash,
-            'issuerType' => 'teacher',
-            'issuerNameAr' => $teacherName,
-            'issuerNameEn' => $teacherProfile?->name_en ?? $teacherName,
+            'issuerType' => $issuerType,
+            'category' => $issuerType,
+            'issuerNameAr' => $issuerType === 'teacher' ? $teacherName : 'إدارة منصة متفوّق التعليمية',
+            'issuerNameEn' => $issuerType === 'teacher' ? ($teacherProfile?->name_en ?? $teacherName) : 'Motafawweq Platform Administration',
             'instructorAr' => $teacherName,
             'instructorEn' => $teacherProfile?->name_en ?? $teacherName,
             'instructorTitleAr' => $teacherTitle,
@@ -194,9 +203,17 @@ class TeacherCertificateService
             'courseNameAr' => $cert->course_name_ar,
             'courseNameEn' => $cert->course_name_en ?: $cert->course_name_ar,
             'gradeAr' => $cert->grade_ar ?: 'الصف الثالث الثانوي',
-            'score' => "{$cert->grade_percent}%",
+            'score' => $scoreLabel,
+            'scoreEn' => $scoreLabel,
+            'completionRate' => '100%',
             'completionDate' => $cert->issue_date ? $cert->issue_date->format('Y-m-d') : null,
+            'completionDateEn' => $cert->issue_date?->format('F j, Y'),
             'honorsTitleAr' => $cert->honors_title_ar,
+            'honorsTitleEn' => $cert->honors_title_en ?: 'Certificate of Academic Excellence',
+            'rankAr' => $meta['rankAr'] ?? null,
+            'rankEn' => $meta['rankEn'] ?? null,
+            'pointsAr' => $meta['pointsAr'] ?? null,
+            'pointsEn' => $meta['pointsEn'] ?? null,
             'revokedAt' => $cert->revoked_at?->toIso8601String(),
             'revocationReason' => $cert->revocation_reason,
             'tampered' => ! $signatureValid,

@@ -76,15 +76,25 @@ class StudentGamificationController extends BaseApiController
     public function claimCourseCertificate(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'course_id' => ['required', 'uuid'],
+            'track' => ['nullable', 'string', 'in:teacher,ministry,league'],
+            'target_id' => ['nullable', 'string', 'max:64'],
+            'course_id' => ['nullable', 'uuid'],
         ]);
 
-        $cert = $this->gamificationService->claimCourseCertificate(
+        $track = (string) ($validated['track'] ?? 'teacher');
+        $targetId = (string) ($validated['target_id'] ?? $validated['course_id'] ?? '');
+
+        if ($targetId === '') {
+            return $this->errorResponse('معرّف المقرر أو الاختبار أو الدوري مطلوب لإصدار الشهادة.', 422);
+        }
+
+        $cert = $this->gamificationService->claimCertificate(
             $this->authenticatedUser(),
-            (string) $validated['course_id']
+            $track,
+            $targetId
         );
 
-        return $this->createdResponse($cert, 'تم إصدار وتوثيق شهادة إتمام المقرر بنجاح.');
+        return $this->createdResponse($cert, 'تم إصدار وتوثيق الشهادة المعتمدة بنجاح.');
     }
 
     public function activityHeatmap(Request $request): JsonResponse

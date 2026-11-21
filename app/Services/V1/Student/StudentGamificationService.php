@@ -12,6 +12,7 @@ use App\Enums\UserStatus;
 use App\Models\Course;
 use App\Models\CourseCertificate;
 use App\Models\CourseLeague;
+use App\Models\Exam;
 use App\Models\ExamSubmission;
 use App\Models\HomeworkSubmission;
 use App\Models\LeagueParticipant;
@@ -839,10 +840,8 @@ class StudentGamificationService extends BaseService
     public function getCertificatesWorkspace(User $student): array
     {
         $certModels = $this->fetchStudentCertificateModels($student);
-        $issuedCourseIds = $certModels->pluck('course_id')->filter()->map(fn ($id) => (int) $id)->unique()->all();
-
         $certificates = $this->mapStudentCertificateModels($student, $certModels);
-        $eligibility = $this->getCertificateEligibility($student, $issuedCourseIds);
+        $eligibility = $this->getCertificateEligibility($student, $certModels);
 
         return [
             'certificates' => $certificates,
@@ -852,27 +851,37 @@ class StudentGamificationService extends BaseService
     }
 
     /**
-     * Real eligibility status per certificate track for the student, plus claimable 100%-completed courses.
-     *
-     * @param  array<int, int>|null  $issuedCourseIds
+     * Real eligibility status across all 3 certificate tracks, including live progress and claimable items.
      */
-    public function getCertificateEligibility(User $student, ?array $issuedCourseIds = null): array
+    public function getCertificateEligibility(User $student, mixed $existingCertModels = null): array
     {
         $entitlements = $this->accessService->getEntitlements($student);
         $courseIds = array_values(array_unique(array_map('intval', $entitlements['course_ids'] ?? [])));
 
-        if ($issuedCourseIds === null) {
-            $issuedCourseIds = $this->fetchStudentCertificateModels($student)
-                ->pluck('course_id')
-                ->filter()
-                ->map(fn ($id) => (int) $id)
-                ->unique()
-                ->all();
-        }
-        $issuedCourseLookup = array_flip($issuedCourseIds);
+        $certModels = $existingCertModels ?? $this->fetchStudentCertificateModels($student);
 
+        $issuedCourseLookup = [];
+        $issuedExamLookup = [];
+        $issuedLeagueLookup = [];
+
+        foreach ($certModels as $cm) {
+            $type = $cm->issuer_type ?: 'teacher';
+            $meta = is_array($cm->metadata) ? $cm->metadata : [];
+            if ($type === 'teacher' && $cm->course_id) {
+                $issuedCourseLookup[(int) $cm->course_id] = true;
+            }
+            if ($type === 'ministry' && ! empty($meta['exam_uuid'])) {
+                $issuedExamLookup[(string) $meta['exam_uuid']] = true;
+            }
+            if ($type === 'league' && ! empty($meta['league_key'])) {
+                $issuedLeagueLookup[(string) $meta['league_key']] = true;
+            }
+        }
+
+        // ── Track 01: Enrolled Teacher Courses ──
         $completedCourses = 0;
         $totalCoursesWithLessons = 0;
+        $coursesProgress = [];
         $claimableCourses = [];
 
         if (! empty($courseIds)) {
@@ -899,20 +908,38 @@ class StudentGamificationService extends BaseService
 
             foreach ($courseIds as $courseId) {
                 $total = (int) ($publishedLessonsByCourse[$courseId] ?? 0);
-                if ($total === 0) {
+                if ($total === 0 || ! $coursesById->has($courseId)) {
                     continue;
                 }
+                /** @var Course $c */
+                $c = $coursesById->get($courseId);
                 $totalCoursesWithLessons++;
-                $done = (int) ($completedLessonsByCourse[$courseId] ?? 0);
+                $done = min($total, (int) ($completedLessonsByCourse[$courseId] ?? 0));
+                $percent = (int) round(($done / $total) * 100);
+                $isIssued = isset($issuedCourseLookup[$courseId]);
+
+                $coursesProgress[] = [
+                    'courseId' => $c->uuid,
+                    'titleAr' => $c->title_ar,
+                    'titleEn' => $c->title_en ?: $c->title_ar,
+                    'teacherName' => $c->teacher?->name ?: 'معلم معتمد',
+                    'completedLessons' => $done,
+                    'totalLessons' => $total,
+                    'progressPercent' => $percent,
+                    'isIssued' => $isIssued,
+                ];
+
                 if ($done >= $total) {
                     $completedCourses++;
-                    if (! isset($issuedCourseLookup[$courseId]) && $coursesById->has($courseId)) {
-                        /** @var Course $c */
-                        $c = $coursesById->get($courseId);
+                    if (! $isIssued) {
                         $claimableCourses[] = [
+                            'track' => 'teacher',
+                            'targetId' => $c->uuid,
                             'courseId' => $c->uuid,
                             'titleAr' => $c->title_ar,
                             'titleEn' => $c->title_en ?: $c->title_ar,
+                            'subtitleAr' => ($c->teacher?->name ?: 'معلم معتمد')." • أتممت {$done} من {$total} حصة (100%)",
+                            'subtitleEn' => ($c->teacher?->name ?: 'Instructor')." • {$done}/{$total} lessons completed (100%)",
                             'teacherName' => $c->teacher?->name ?: 'معلم معتمد',
                             'completedLessons' => $done,
                             'totalLessons' => $total,
@@ -922,20 +949,74 @@ class StudentGamificationService extends BaseService
             }
         }
 
-        // Strictly count GRADED exams with >= 80% score (never ungraded drafts/pending submissions)
-        $highExams = ExamSubmission::forStudent($student->id)
+        // ── Track 02: Graded Exams with 80%+ Score ──
+        $highExamSubs = ExamSubmission::forStudent($student->id)
             ->whereNotNull('submitted_at')
             ->where('status', ExamSubmissionStatus::GRADED)
             ->where('percentage', '>=', 80)
-            ->count();
+            ->with(['exam:id,uuid,teacher_id,course_id,title_ar,title_en', 'exam.teacher:id,name'])
+            ->orderByDesc('percentage')
+            ->orderByDesc('submitted_at')
+            ->get();
 
-        // Strictly require earned league points (> 0) before counting a Top-10 rank as eligible
-        $bestCourseRank = LeagueParticipant::where('student_id', $student->id)
+        $highExams = $highExamSubs->pluck('exam_id')->unique()->count();
+        $claimableExams = [];
+        $seenExamIds = [];
+
+        foreach ($highExamSubs as $sub) {
+            if (! $sub->exam || isset($seenExamIds[$sub->exam_id])) {
+                continue;
+            }
+            $seenExamIds[$sub->exam_id] = true;
+            $examUuid = (string) $sub->exam->uuid;
+            if (isset($issuedExamLookup[$examUuid])) {
+                continue;
+            }
+            $pct = round((float) $sub->percentage, 1);
+            $pctLabel = fmod($pct, 1.0) === 0.0 ? sprintf('%d%%', (int) $pct) : sprintf('%.1f%%', $pct);
+            $claimableExams[] = [
+                'track' => 'ministry',
+                'targetId' => $examUuid,
+                'titleAr' => $sub->exam->title_ar,
+                'titleEn' => $sub->exam->title_en ?: $sub->exam->title_ar,
+                'subtitleAr' => "درجة مُصحّحة {$pctLabel} • بإشراف ".($sub->exam->teacher?->name ?: 'معلم معتمد'),
+                'subtitleEn' => "Graded score {$pctLabel} • ".($sub->exam->teacher?->name ?: 'Instructor'),
+                'scorePercent' => $pct,
+            ];
+        }
+
+        // ── Track 03: Top 10 League Standings (strictly requiring xp_points > 0) ──
+        $podiumParts = LeagueParticipant::where('student_id', $student->id)
             ->where('rank', '>', 0)
             ->where('xp_points', '>', 0)
-            ->min('rank');
+            ->with('league:id,uuid,teacher_id,title_ar,course_name_ar,is_active')
+            ->orderBy('rank')
+            ->get();
 
-        $bestRank = $bestCourseRank !== null ? (int) $bestCourseRank : null;
+        $bestRank = $podiumParts->isNotEmpty() ? (int) $podiumParts->min('rank') : null;
+        $claimableLeagues = [];
+
+        foreach ($podiumParts as $part) {
+            if (! $part->league || (int) $part->rank > 10) {
+                continue;
+            }
+            $leagueKey = 'course:'.$part->league->uuid;
+            if (isset($issuedLeagueLookup[$leagueKey])) {
+                continue;
+            }
+            $rankNum = (int) $part->rank;
+            $xpNum = (int) $part->xp_points;
+            $claimableLeagues[] = [
+                'track' => 'league',
+                'targetId' => (string) $part->league->uuid,
+                'titleAr' => $part->league->title_ar,
+                'titleEn' => $part->league->title_ar,
+                'subtitleAr' => "المركز #{$rankNum} • {$xpNum} نقطة في {$part->league->course_name_ar}",
+                'subtitleEn' => "Rank #{$rankNum} • {$xpNum} pts in {$part->league->course_name_ar}",
+                'rank' => $rankNum,
+                'points' => $xpNum,
+            ];
+        }
 
         $activeRepublic = RepublicLeague::currentActive();
         if ($activeRepublic) {
@@ -943,7 +1024,21 @@ class StudentGamificationService extends BaseService
             $myRow = collect($ranked)->firstWhere('studentId', (int) $student->id);
             if ($myRow && (int) ($myRow['xpPoints'] ?? 0) > 0 && (int) ($myRow['rank'] ?? 0) > 0) {
                 $repRank = (int) $myRow['rank'];
+                $repXp = (int) $myRow['xpPoints'];
                 $bestRank = $bestRank === null ? $repRank : min($bestRank, $repRank);
+                $repKey = 'republic:'.$activeRepublic->uuid;
+                if ($repRank <= 10 && ! isset($issuedLeagueLookup[$repKey])) {
+                    $claimableLeagues[] = [
+                        'track' => 'league',
+                        'targetId' => 'general',
+                        'titleAr' => $activeRepublic->title_ar ?: 'دوري الجمهورية العام',
+                        'titleEn' => 'General Republic League',
+                        'subtitleAr' => "المركز #{$repRank} على الجمهورية • {$repXp} نقطة",
+                        'subtitleEn' => "National Rank #{$repRank} • {$repXp} pts",
+                        'rank' => $repRank,
+                        'points' => $repXp,
+                    ];
+                }
             }
         }
 
@@ -952,17 +1047,32 @@ class StudentGamificationService extends BaseService
                 'eligible' => $completedCourses > 0,
                 'progressValue' => $completedCourses,
                 'totalCourses' => $totalCoursesWithLessons,
+                'coursesProgress' => $coursesProgress,
                 'claimableCourses' => $claimableCourses,
             ],
             'ministry' => [
                 'eligible' => $highExams > 0,
                 'progressValue' => $highExams,
+                'claimableExams' => $claimableExams,
             ],
             'league' => [
                 'eligible' => $bestRank !== null && $bestRank <= 10,
                 'progressValue' => $bestRank,
+                'claimableLeagues' => $claimableLeagues,
             ],
         ];
+    }
+
+    /**
+     * Dispatch server-verified 1-click certificate issuance for any of the 3 official tracks.
+     */
+    public function claimCertificate(User $student, string $track, string $targetId): array
+    {
+        return match ($track) {
+            'ministry' => $this->claimExamCertificate($student, $targetId),
+            'league' => $this->claimLeagueCertificate($student, $targetId),
+            default => $this->claimCourseCertificate($student, $targetId),
+        };
     }
 
     /**
@@ -1004,6 +1114,9 @@ class StudentGamificationService extends BaseService
             ->where('student_id', $student->id)
             ->where('course_id', $course->id)
             ->where('status', CertificateStatus::VERIFIED)
+            ->where(function ($q) {
+                $q->where('issuer_type', 'teacher')->orWhereNull('issuer_type');
+            })
             ->with(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en'])
             ->first();
 
@@ -1058,6 +1171,261 @@ class StudentGamificationService extends BaseService
             'honors_title_en' => $honorsEn,
             'issue_date' => $issueDate,
             'status' => CertificateStatus::VERIFIED,
+        ]);
+
+        $certificate->load(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en']);
+
+        return $this->formatStudentCertificate($certificate, 100);
+    }
+
+    /**
+     * Server-verified issuance for Track 02: Graded Exam passed with >= 80%.
+     */
+    public function claimExamCertificate(User $student, string $examUuid): array
+    {
+        /** @var Exam|null $exam */
+        $exam = Exam::where('uuid', $examUuid)
+            ->with(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en,grade_ar'])
+            ->first();
+
+        if (! $exam) {
+            throw (new ModelNotFoundException)->setModel(Exam::class, [$examUuid]);
+        }
+
+        $this->accessService->assertCanAccess(
+            $student,
+            $exam,
+            (int) $exam->teacher_id,
+            $exam->course_id ? (int) $exam->course_id : null
+        );
+
+        /** @var ExamSubmission|null $bestSub */
+        $bestSub = ExamSubmission::forStudent($student->id)
+            ->where('exam_id', $exam->id)
+            ->where('status', ExamSubmissionStatus::GRADED)
+            ->where('percentage', '>=', 80)
+            ->orderByDesc('percentage')
+            ->first();
+
+        if (! $bestSub) {
+            throw ValidationException::withMessages([
+                'target_id' => ['يجب اجتياز هذا الاختبار بعد تصحيحه بنسبة 80% فأكثر لاستحقاق الشهادة.'],
+            ]);
+        }
+
+        $existing = CourseCertificate::query()
+            ->where('student_id', $student->id)
+            ->where('status', CertificateStatus::VERIFIED)
+            ->where('issuer_type', 'ministry')
+            ->with(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en'])
+            ->get()
+            ->first(fn (CourseCertificate $c) => ($c->metadata['exam_uuid'] ?? null) === $exam->uuid);
+
+        if ($existing) {
+            return $this->formatStudentCertificate($existing, 100);
+        }
+
+        $gradePercent = round((float) $bestSub->percentage, 1);
+        $honorsAr = $gradePercent >= 100
+            ? 'شهادة تفوق وتميز بالدرجة النهائية (Full Mark 100%)'
+            : ($gradePercent >= 90 ? 'شهادة تفوق أكاديمي بامتياز' : 'شهادة اجتياز وتفوق في الاختبار التقييمي');
+        $honorsEn = $gradePercent >= 100
+            ? 'Certificate of Excellence (Full Mark 100%)'
+            : 'Certificate of Academic Exam Distinction';
+
+        $profile = StudentProfile::where('student_id', $student->id)->first();
+        $certNumber = CourseCertificate::generateUniqueCertNumber('EXM');
+        $issueDate = now()->toDateString();
+
+        $signatureHash = CourseCertificate::computeSignatureHash(
+            $certNumber,
+            (int) $exam->teacher_id,
+            $student->name,
+            $gradePercent,
+            $issueDate
+        );
+
+        /** @var CourseCertificate $certificate */
+        $certificate = CourseCertificate::create([
+            'certificate_number' => $certNumber,
+            'signature_hash' => $signatureHash,
+            'teacher_id' => $exam->teacher_id,
+            'student_id' => $student->id,
+            'course_id' => $exam->course_id,
+            'student_name_ar' => $student->name,
+            'student_name_en' => $student->name,
+            'student_email' => $student->email,
+            'student_phone' => $student->phone,
+            'course_name_ar' => $exam->title_ar,
+            'course_name_en' => $exam->title_en ?: $exam->title_ar,
+            'grade_ar' => $exam->course?->grade_ar ?: ($profile?->grade_ar ?: 'الصف الثالث الثانوي'),
+            'grade_percent' => $gradePercent,
+            'honors_title_ar' => $honorsAr,
+            'honors_title_en' => $honorsEn,
+            'issue_date' => $issueDate,
+            'status' => CertificateStatus::VERIFIED,
+            'issuer_type' => 'ministry',
+            'metadata' => [
+                'exam_id' => $exam->id,
+                'exam_uuid' => $exam->uuid,
+                'submission_id' => $bestSub->id,
+            ],
+        ]);
+
+        $certificate->load(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en']);
+
+        return $this->formatStudentCertificate($certificate, 100);
+    }
+
+    /**
+     * Server-verified issuance for Track 03: Top 10 League Standing with earned points (> 0).
+     */
+    public function claimLeagueCertificate(User $student, string $leagueTarget): array
+    {
+        $isRepublic = $leagueTarget === 'general';
+        $profile = StudentProfile::where('student_id', $student->id)->first();
+
+        if ($isRepublic) {
+            $republic = RepublicLeague::currentActive();
+            if (! $republic) {
+                throw ValidationException::withMessages([
+                    'target_id' => ['دوري الجمهورية العام غير نشط حالياً.'],
+                ]);
+            }
+            $ranked = $this->computeGeneralRankedStudents($student, $republic);
+            $myRow = collect($ranked)->firstWhere('studentId', (int) $student->id);
+            $rank = (int) ($myRow['rank'] ?? 0);
+            $points = (int) ($myRow['xpPoints'] ?? 0);
+
+            if ($rank <= 0 || $rank > 10 || $points <= 0) {
+                throw ValidationException::withMessages([
+                    'target_id' => ['يجب تحقيق نقاط فعلية والتواجد ضمن العشرة الأوائل (Top 10) لاستحقاق شهادة الدوري.'],
+                ]);
+            }
+
+            $leagueKey = 'republic:'.$republic->uuid;
+            $existing = CourseCertificate::query()
+                ->where('student_id', $student->id)
+                ->where('status', CertificateStatus::VERIFIED)
+                ->where('issuer_type', 'league')
+                ->with(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en'])
+                ->get()
+                ->first(fn (CourseCertificate $c) => ($c->metadata['league_key'] ?? null) === $leagueKey);
+
+            if ($existing) {
+                return $this->formatStudentCertificate($existing, 100);
+            }
+
+            $issuerUserId = (int) ($republic->started_by ?: $student->id);
+            $leagueTitleAr = $republic->title_ar ?: 'دوري الجمهورية العام';
+            $leagueTitleEn = 'General Republic League';
+            $courseId = null;
+        } else {
+            /** @var CourseLeague|null $league */
+            $league = CourseLeague::where('uuid', $leagueTarget)->first();
+            if (! $league) {
+                throw (new ModelNotFoundException)->setModel(CourseLeague::class, [$leagueTarget]);
+            }
+
+            $this->accessService->assertCanAccess(
+                $student,
+                $league,
+                (int) $league->teacher_id,
+                $league->course_id ? (int) $league->course_id : null
+            );
+
+            $this->leagueRulesService->syncCourseLeague($league);
+
+            /** @var LeagueParticipant|null $part */
+            $part = LeagueParticipant::where('course_league_id', $league->id)
+                ->where('student_id', $student->id)
+                ->first();
+
+            $rank = (int) ($part?->rank ?? 0);
+            $points = (int) ($part?->xp_points ?? 0);
+
+            if ($rank <= 0 || $rank > 10 || $points <= 0) {
+                throw ValidationException::withMessages([
+                    'target_id' => ['يجب تحقيق نقاط فعلية والتواجد ضمن العشرة الأوائل (Top 10) في الدوري لاستحقاق الشهادة.'],
+                ]);
+            }
+
+            $leagueKey = 'course:'.$league->uuid;
+            $existing = CourseCertificate::query()
+                ->where('student_id', $student->id)
+                ->where('status', CertificateStatus::VERIFIED)
+                ->where('issuer_type', 'league')
+                ->with(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en'])
+                ->get()
+                ->first(fn (CourseCertificate $c) => ($c->metadata['league_key'] ?? null) === $leagueKey);
+
+            if ($existing) {
+                return $this->formatStudentCertificate($existing, 100);
+            }
+
+            $issuerUserId = (int) $league->teacher_id;
+            $leagueTitleAr = $league->title_ar;
+            $leagueTitleEn = $league->course_name_ar ?: $league->title_ar;
+            $courseId = $league->course_id;
+        }
+
+        $rankAr = match ($rank) {
+            1 => 'المركز الأول 🥇',
+            2 => 'المركز الثاني 🥈',
+            3 => 'المركز الثالث 🥉',
+            default => "المركز #{$rank}",
+        };
+        $rankEn = match ($rank) {
+            1 => '1st Place 🥇',
+            2 => '2nd Place 🥈',
+            3 => '3rd Place 🥉',
+            default => "Rank #{$rank}",
+        };
+        $pointsAr = number_format($points).' نقطة';
+        $pointsEn = number_format($points).' pts';
+
+        $certNumber = CourseCertificate::generateUniqueCertNumber('LGE');
+        $issueDate = now()->toDateString();
+        $gradePercent = 100.0;
+
+        $signatureHash = CourseCertificate::computeSignatureHash(
+            $certNumber,
+            $issuerUserId,
+            $student->name,
+            $gradePercent,
+            $issueDate
+        );
+
+        /** @var CourseCertificate $certificate */
+        $certificate = CourseCertificate::create([
+            'certificate_number' => $certNumber,
+            'signature_hash' => $signatureHash,
+            'teacher_id' => $issuerUserId,
+            'student_id' => $student->id,
+            'course_id' => $courseId,
+            'student_name_ar' => $student->name,
+            'student_name_en' => $student->name,
+            'student_email' => $student->email,
+            'student_phone' => $student->phone,
+            'course_name_ar' => $leagueTitleAr,
+            'course_name_en' => $leagueTitleEn,
+            'grade_ar' => $profile?->grade_ar ?: 'الصف الثالث الثانوي',
+            'grade_percent' => $gradePercent,
+            'honors_title_ar' => "شهادة صدارة وتفوق في الدوري ({$rankAr})",
+            'honors_title_en' => "Champions League Distinction ({$rankEn})",
+            'issue_date' => $issueDate,
+            'status' => CertificateStatus::VERIFIED,
+            'issuer_type' => 'league',
+            'metadata' => [
+                'league_key' => $leagueKey,
+                'is_republic' => $isRepublic,
+                'rank' => $rank,
+                'points' => $points,
+                'rankAr' => $rankAr,
+                'rankEn' => $rankEn,
+                'pointsAr' => $pointsAr,
+                'pointsEn' => $pointsEn,
+            ],
         ]);
 
         $certificate->load(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en']);
@@ -1588,15 +1956,20 @@ class StudentGamificationService extends BaseService
             ? sprintf('%d%%', (int) $gradePercent)
             : sprintf('%.1f%%', $gradePercent);
 
+        $issuerType = in_array($c->issuer_type, ['teacher', 'ministry', 'league'], true)
+            ? $c->issuer_type
+            : 'teacher';
+        $meta = is_array($c->metadata) ? $c->metadata : [];
+
         return [
             'id' => $c->uuid,
             'serialId' => $c->certificate_number,
             'certificateNumber' => $c->certificate_number,
             'signatureHash' => $c->signature_hash,
-            'issuerType' => 'teacher',
-            'category' => 'teacher',
-            'issuerNameAr' => $teacherNameAr,
-            'issuerNameEn' => $teacherNameEn,
+            'issuerType' => $issuerType,
+            'category' => $issuerType,
+            'issuerNameAr' => $issuerType === 'teacher' ? $teacherNameAr : 'إدارة منصة متفوّق التعليمية',
+            'issuerNameEn' => $issuerType === 'teacher' ? $teacherNameEn : 'Motafawweq Platform Administration',
             'instructorAr' => $teacherNameAr,
             'instructorEn' => $teacherNameEn,
             'instructorTitleAr' => $teacherTitleAr,
@@ -1613,6 +1986,10 @@ class StudentGamificationService extends BaseService
             'completionRate' => "{$completionPercent}%",
             'honorsTitleAr' => $c->honors_title_ar,
             'honorsTitleEn' => $c->honors_title_en ?: 'Certificate of Academic Excellence',
+            'rankAr' => $meta['rankAr'] ?? null,
+            'rankEn' => $meta['rankEn'] ?? null,
+            'pointsAr' => $meta['pointsAr'] ?? null,
+            'pointsEn' => $meta['pointsEn'] ?? null,
             'issueDate' => $issueDate,
             'completionDate' => $issueDate,
             'completionDateEn' => $c->issue_date?->format('F j, Y'),

@@ -335,6 +335,66 @@ class StudentCertificatesWorkspaceTest extends TestCase
         $wsAfter->assertOk();
         $this->assertCount(0, $wsAfter->json('data.eligibility.teacher.claimableCourses'));
         $this->assertCount(1, $wsAfter->json('data.certificates'));
+
+        // 7. Track 02 (ministry): Claim verified exam excellence certificate for the 94% graded exam!
+        $this->assertCount(1, $wsAfter->json('data.eligibility.ministry.claimableExams'));
+        $examClaim = $this->postJson('/api/v1/student/certificates/claim', [
+            'track' => 'ministry',
+            'target_id' => $exam->uuid,
+        ]);
+        $examClaim->assertCreated()
+            ->assertJsonPath('data.issuerType', 'ministry')
+            ->assertJsonPath('data.courseNameAr', 'امتحان شامل')
+            ->assertJsonPath('data.score', '94%');
+
+        $examSerial = $examClaim->json('data.serialId');
+        $this->getJson("/api/v1/verify-certificate/{$examSerial}")
+            ->assertOk()
+            ->assertJsonPath('data.isValid', true)
+            ->assertJsonPath('data.issuerType', 'ministry')
+            ->assertJsonPath('data.score', '94%');
+
+        // 8. Track 03 (league): Active course league where student has rank #1 and 45 points -> claimable!
+        $league = CourseLeague::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'study_group_id' => $group->id,
+            'title_ar' => 'دوري الكيمياء الشهري',
+            'course_name_ar' => $course->title_ar,
+            'duration_type' => LeagueDuration::MONTHLY,
+            'duration_days' => 30,
+            'is_active' => true,
+            'starts_at' => now()->subDays(2),
+            'ends_at' => now()->addDays(28),
+        ]);
+        LeagueParticipant::create([
+            'course_league_id' => $league->id,
+            'student_id' => $student->id,
+            'rank' => 1,
+            'xp_points' => 45,
+            'streak_days' => 3,
+        ]);
+
+        $wsLeague = $this->getJson('/api/v1/student/certificates/workspace');
+        $wsLeague->assertOk();
+        $this->assertTrue($wsLeague->json('data.eligibility.league.eligible'));
+        $this->assertCount(1, $wsLeague->json('data.eligibility.league.claimableLeagues'));
+
+        $leagueClaim = $this->postJson('/api/v1/student/certificates/claim', [
+            'track' => 'league',
+            'target_id' => $league->uuid,
+        ]);
+        $leagueClaim->assertCreated()
+            ->assertJsonPath('data.issuerType', 'league')
+            ->assertJsonPath('data.rankAr', 'المركز الأول 🥇')
+            ->assertJsonPath('data.pointsAr', '45 نقطة');
+
+        $leagueSerial = $leagueClaim->json('data.serialId');
+        $this->getJson("/api/v1/verify-certificate/{$leagueSerial}")
+            ->assertOk()
+            ->assertJsonPath('data.isValid', true)
+            ->assertJsonPath('data.issuerType', 'league')
+            ->assertJsonPath('data.rankAr', 'المركز الأول 🥇');
     }
 
     public function test_certificates_workspace_blocks_guests_and_non_students(): void
