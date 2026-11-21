@@ -37,6 +37,25 @@ class SessionController extends BaseApiController
         return $this->successResponse(null, __('messages.session_revoked'));
     }
 
+    public function destroyOthers(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $currentSession = $user->currentAccessToken()?->session_id;
+        $deletedTokens = $this->tokenService->revokeAllExcept($user, $currentSession);
+
+        if ($deletedTokens > 0) {
+            $this->logSecurityEvent('OTHER_SESSIONS_REVOKED', [
+                'user_id' => $user->id,
+                'revoked_tokens' => $deletedTokens,
+            ]);
+        }
+
+        return $this->successResponse(
+            ['revoked_tokens' => $deletedTokens],
+            $deletedTokens > 0 ? __('messages.other_sessions_revoked') : __('messages.no_other_sessions')
+        );
+    }
+
     public function history(Request $request): JsonResponse
     {
         $history = $this->loginHistory->forUser($request->user(), (int) $request->query('per_page', 20));

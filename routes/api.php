@@ -121,6 +121,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('/change-password', [AuthController::class, 'changePassword'])->middleware('throttle:strict');
 
                 Route::get('/sessions', [SessionController::class, 'index']);
+                Route::delete('/sessions', [SessionController::class, 'destroyOthers']);
                 Route::delete('/sessions/{sessionId}', [SessionController::class, 'destroy'])->whereUuid('sessionId');
                 Route::get('/login-history', [SessionController::class, 'history']);
             });
@@ -163,6 +164,8 @@ Route::prefix('v1')->group(function () {
                     ->middleware('throttle:student-write');
                 Route::post('/profile/avatar', [StudentProfileController::class, 'uploadAvatar'])
                     ->middleware('throttle:student-uploads');
+                Route::delete('/profile/avatar', [StudentProfileController::class, 'deleteAvatar'])
+                    ->middleware('throttle:student-write');
 
                 // Phase 3: Study Groups, Weekly Schedule, Personal Study Sessions & Attendance
                 Route::get('/groups', [StudentGroupScheduleController::class, 'index'])

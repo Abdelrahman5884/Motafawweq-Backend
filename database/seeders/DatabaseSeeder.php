@@ -21,7 +21,7 @@ class DatabaseSeeder extends Seeder
                 'phone' => '01123456789',
                 'role' => UserRole::STUDENT->value,
                 'student_code' => 'OMAR-2026',
-                'avatar' => 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80',
+                'avatar' => null,
             ],
             [
                 'name' => 'د. سلمى السيد',

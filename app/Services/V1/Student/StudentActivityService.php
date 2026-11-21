@@ -2,6 +2,7 @@
 
 namespace App\Services\V1\Student;
 
+use App\Enums\StageType;
 use App\Models\StudentDailyActivity;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentProfile;
@@ -65,7 +66,7 @@ class StudentActivityService extends BaseService
         StudentProfile::firstOrCreate(
             ['student_id' => $student->id],
             [
-                'stage' => 'high',
+                'stage' => StageType::THANAWYA->value,
                 'grade_ar' => 'الصف الثالث الثانوي',
                 'track_ar' => 'علمي علوم',
                 'daily_study_goal_minutes' => 120,

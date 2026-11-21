@@ -21,7 +21,7 @@ class StudentProfileController extends BaseApiController
     {
         $profile = $this->profileService->getProfile($this->authenticatedUser());
 
-        return $this->successResponse($profile);
+        return $this->successResponse($profile, __('messages.profile_fetched'));
     }
 
     /**
@@ -34,7 +34,7 @@ class StudentProfileController extends BaseApiController
             $request->validated()
         );
 
-        return $this->successResponse($profile, 'تم تحديث بيانات الملف الشخصي بنجاح.');
+        return $this->successResponse($profile, __('messages.profile_updated'));
     }
 
     /**
@@ -51,6 +51,16 @@ class StudentProfileController extends BaseApiController
             $request->file('avatar')
         );
 
-        return $this->successResponse($profile, 'تم تحديث الصورة الشخصية بنجاح.');
+        return $this->successResponse($profile, __('messages.student_avatar_updated'));
+    }
+
+    /**
+     * DELETE /api/v1/student/profile/avatar
+     */
+    public function deleteAvatar(): JsonResponse
+    {
+        $profile = $this->profileService->deleteAvatar($this->authenticatedUser());
+
+        return $this->successResponse($profile, __('messages.student_avatar_deleted'));
     }
 }
