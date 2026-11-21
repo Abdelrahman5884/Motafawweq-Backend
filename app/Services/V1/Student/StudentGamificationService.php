@@ -3,6 +3,7 @@
 namespace App\Services\V1\Student;
 
 use App\Enums\CertificateStatus;
+use App\Enums\ExamSubmissionStatus;
 use App\Enums\LeagueDuration;
 use App\Enums\LeagueTier;
 use App\Enums\LessonStatus;
@@ -35,18 +36,58 @@ class StudentGamificationService extends BaseService
     ) {}
 
     /**
-     * Retrieve student's total server-verified XP, level, streak, and recent immutable XP ledger entries.
+     * Single optimized payload for the /student/gamification workspace.
+     * Avoids redundant profile/activity/league queries and ensures completed weekly
+     * challenge XP is reflected immediately in totalXp, level, badges, and recentLedger.
      */
-    public function getGamificationSummary(User $student): array
+    public function getGamificationWorkspace(User $student, ?string $requestedTimezone = null): array
     {
+        $profile = StudentProfile::where('student_id', $student->id)->first();
+        $timezone = $this->activityService->resolveTimezone($profile, $requestedTimezone);
+        $activity = $this->activityService->getActivitySnapshot($student, $timezone);
+
+        // Evaluate weekly challenges first so newly completed challenge XP is immediately awarded & reflected in summary
+        $challenges = $this->getWeeklyChallenges($student, $timezone, $profile);
+        $leagues = $this->listLeagues($student);
+        $pastLeagues = $this->getPastLeagues($student, true);
+        $heatmap = $this->getActivityHeatmap($student, $timezone, $profile, $activity);
+        $summary = $this->getGamificationSummary($student, $timezone, $activity);
+
+        return [
+            'summary' => $summary,
+            'leagues' => $leagues,
+            'pastLeagues' => $pastLeagues,
+            'heatmap' => $heatmap,
+            'challenges' => $challenges,
+        ];
+    }
+
+    /**
+     * Retrieve student's total server-verified XP, level, progression, streak, real badges,
+     * and recent immutable XP ledger entries.
+     */
+    public function getGamificationSummary(
+        User $student,
+        ?string $requestedTimezone = null,
+        ?array $activitySnapshot = null
+    ): array {
+        $activity = $activitySnapshot ?? $this->activityService->getActivitySnapshot($student, $requestedTimezone);
         $totalXp = (int) StudentXpLedger::forStudent($student->id)->sum('points');
         $level = max(1, (int) floor($totalXp / 100) + 1);
+        $levelMinXp = ($level - 1) * 100;
         $nextLevelXp = $level * 100;
-        $activity = $this->activityService->getActivitySnapshot($student);
+        $xpInCurrentLevel = max(0, $totalXp - $levelMinXp);
+        $xpRemainingForNextLevel = max(0, $nextLevelXp - $totalXp);
+        $levelProgressPercent = (int) min(100, max(0, round(($xpInCurrentLevel / 100) * 100)));
+        [$levelTitleAr, $levelTitleEn] = $this->resolveLevelTitles($level);
+
+        $badges = $this->computeAchievementBadges($student, $activity);
+        $unlockedBadgesCount = count(array_filter($badges, fn (array $b) => $b['unlocked']));
 
         $recentLedger = StudentXpLedger::forStudent($student->id)
             ->latest('created_at')
-            ->limit(25)
+            ->latest('id')
+            ->limit(20)
             ->get()
             ->map(fn (StudentXpLedger $entry) => [
                 'id' => $entry->uuid,
@@ -59,13 +100,191 @@ class StudentGamificationService extends BaseService
         return [
             'totalXp' => $totalXp,
             'level' => $level,
+            'levelTitleAr' => $levelTitleAr,
+            'levelTitleEn' => $levelTitleEn,
+            'levelMinXp' => $levelMinXp,
             'nextLevelXp' => $nextLevelXp,
+            'xpInCurrentLevel' => $xpInCurrentLevel,
+            'xpRemainingForNextLevel' => $xpRemainingForNextLevel,
+            'levelProgressPercent' => $levelProgressPercent,
             'streakDays' => $activity['streakDays'],
             'longestStreakDays' => $activity['longestStreakDays'],
             'todayActiveSeconds' => $activity['activeSecondsToday'],
             'todayActiveMinutes' => $activity['activeMinutesToday'],
+            'timezone' => $activity['timezone'],
+            'badges' => $badges,
+            'unlockedBadgesCount' => $unlockedBadgesCount,
+            'totalBadgesCount' => count($badges),
             'recentLedger' => $recentLedger,
         ];
+    }
+
+    /**
+     * Resolve progressive bilingual academic rank title for a given XP level.
+     *
+     * @return array{0: string, 1: string}
+     */
+    protected function resolveLevelTitles(int $level): array
+    {
+        return match (true) {
+            $level >= 12 => ['أسطورة التفوق', 'Master Scholar'],
+            $level >= 8 => ['نجم الأكاديمية', 'Academy Star'],
+            $level >= 5 => ['منافس متفوق', 'Top Achiever'],
+            $level >= 3 => ['طالب مجتهد', 'Dedicated Scholar'],
+            default => ['مبتدئ طموح', 'Rising Learner'],
+        };
+    }
+
+    /**
+     * Compute real server-verified achievement badges strictly from database activity.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function computeAchievementBadges(User $student, array $activity): array
+    {
+        $lessonsCompleted = StudentLessonProgress::forStudent($student->id)
+            ->where('is_completed', true)
+            ->count();
+
+        $firstLessonDate = $lessonsCompleted > 0
+            ? StudentLessonProgress::forStudent($student->id)
+                ->where('is_completed', true)
+                ->orderByRaw('COALESCE(completed_at, updated_at) ASC')
+                ->value(DB::raw('COALESCE(completed_at, updated_at)'))
+            : null;
+
+        $tenthLessonDate = $lessonsCompleted >= 10
+            ? StudentLessonProgress::forStudent($student->id)
+                ->where('is_completed', true)
+                ->orderByRaw('COALESCE(completed_at, updated_at) ASC')
+                ->skip(9)
+                ->take(1)
+                ->value(DB::raw('COALESCE(completed_at, updated_at)'))
+            : null;
+
+        $examsSubmitted = ExamSubmission::forStudent($student->id)
+            ->whereNotNull('submitted_at')
+            ->count();
+
+        $firstExamDate = $examsSubmitted > 0
+            ? ExamSubmission::forStudent($student->id)
+                ->whereNotNull('submitted_at')
+                ->orderBy('submitted_at')
+                ->value('submitted_at')
+            : null;
+
+        $perfectExamsQuery = ExamSubmission::forStudent($student->id)
+            ->whereNotNull('submitted_at')
+            ->where('status', ExamSubmissionStatus::GRADED)
+            ->where(function ($q) {
+                $q->where('is_full_mark', true)->orWhere('percentage', '>=', 100);
+            });
+
+        $perfectExamsCount = (clone $perfectExamsQuery)->count();
+        $firstPerfectDate = $perfectExamsCount > 0
+            ? (clone $perfectExamsQuery)->orderBy('submitted_at')->value('submitted_at')
+            : null;
+
+        $longestStreak = (int) ($activity['longestStreakDays'] ?? 0);
+
+        $podiumParticipant = LeagueParticipant::where('student_id', $student->id)
+            ->where('rank', '>', 0)
+            ->where('rank', '<=', 3)
+            ->where('xp_points', '>', 0)
+            ->orderBy('rank')
+            ->first(['rank', 'updated_at']);
+
+        $formatDate = static function (mixed $raw): ?string {
+            if (! $raw) {
+                return null;
+            }
+
+            try {
+                return Carbon::parse((string) $raw)->format('Y-m-d');
+            } catch (\Throwable) {
+                return null;
+            }
+        };
+
+        $defs = [
+            [
+                'id' => 'first-lesson',
+                'icon' => 'BookOpen',
+                'titleAr' => 'أول خطوة نحو التفوق',
+                'titleEn' => 'First Step',
+                'descAr' => 'إتمام أول حصة دراسية بالكامل على المنصة',
+                'descEn' => 'Complete your first lesson on the platform',
+                'current' => min(1, $lessonsCompleted),
+                'target' => 1,
+                'unlockedAt' => $formatDate($firstLessonDate),
+            ],
+            [
+                'id' => 'lesson-explorer',
+                'icon' => 'Award',
+                'titleAr' => 'مثابر الحصص',
+                'titleEn' => 'Lesson Explorer',
+                'descAr' => 'إتمام 10 حصص دراسية بنجاح',
+                'descEn' => 'Complete 10 lessons successfully',
+                'current' => min(10, $lessonsCompleted),
+                'target' => 10,
+                'unlockedAt' => $formatDate($tenthLessonDate),
+            ],
+            [
+                'id' => 'first-exam',
+                'icon' => 'Target',
+                'titleAr' => 'بطل الاختبارات',
+                'titleEn' => 'Exam Challenger',
+                'descAr' => 'تسليم أول اختبار إلكتروني على المنصة',
+                'descEn' => 'Submit your first online exam',
+                'current' => min(1, $examsSubmitted),
+                'target' => 1,
+                'unlockedAt' => $formatDate($firstExamDate),
+            ],
+            [
+                'id' => 'perfect-score',
+                'icon' => 'Shield',
+                'titleAr' => 'التقفيل الكامل 100%',
+                'titleEn' => 'Perfect 100%',
+                'descAr' => 'الحصول على الدرجة النهائية في اختبار مُصحّح',
+                'descEn' => 'Achieve a 100% full mark on a graded exam',
+                'current' => min(1, $perfectExamsCount),
+                'target' => 1,
+                'unlockedAt' => $formatDate($firstPerfectDate),
+            ],
+            [
+                'id' => 'streak-7',
+                'icon' => 'Flame',
+                'titleAr' => 'شعلة الالتزام (7 أيام)',
+                'titleEn' => '7-Day Streak',
+                'descAr' => 'المذاكرة لمدة 7 أيام متتالية دون انقطاع',
+                'descEn' => 'Maintain a 7-day consecutive study streak',
+                'current' => min(7, $longestStreak),
+                'target' => 7,
+                'unlockedAt' => $longestStreak >= 7 ? ($activity['lastActiveDate'] ?? null) : null,
+            ],
+            [
+                'id' => 'league-podium',
+                'icon' => 'Trophy',
+                'titleAr' => 'منصة التتويج',
+                'titleEn' => 'League Podium',
+                'descAr' => 'التواجد ضمن المراكز الثلاثة الأولى في دوري كورس بنقاط محققة',
+                'descEn' => 'Reach Top 3 in a course league with earned points',
+                'current' => $podiumParticipant ? 1 : 0,
+                'target' => 1,
+                'unlockedAt' => $podiumParticipant ? $formatDate($podiumParticipant->updated_at) : null,
+            ],
+        ];
+
+        return array_map(function (array $b): array {
+            $unlocked = $b['current'] >= $b['target'];
+
+            return [
+                ...$b,
+                'unlocked' => $unlocked,
+                'progressPercent' => (int) round(($b['current'] / max(1, $b['target'])) * 100),
+                'date' => $unlocked ? $b['unlockedAt'] : null,
+            ];
+        }, $defs);
     }
 
     /**
@@ -153,151 +372,463 @@ class StudentGamificationService extends BaseService
     }
 
     /**
-     * 52-week daily activity heatmap computed from daily platform presence, lesson progress, exam submissions and XP ledger.
+     * 52-week Sunday-aligned daily activity heatmap computed from daily platform presence,
+     * lesson completions, exam submissions, homework submissions, and XP ledger.
      */
-    public function getActivityHeatmap(User $student): array
-    {
-        $profile = StudentProfile::where('student_id', $student->id)->first();
-        $timezone = $this->activityService->resolveTimezone($profile);
-        $start = Carbon::now($timezone)->startOfDay()->subDays(363);
+    public function getActivityHeatmap(
+        User $student,
+        ?string $requestedTimezone = null,
+        ?StudentProfile $profile = null,
+        ?array $activitySnapshot = null
+    ): array {
+        $profile ??= StudentProfile::where('student_id', $student->id)->first();
+        $timezone = $this->activityService->resolveTimezone($profile, $requestedTimezone);
+        $activity = $activitySnapshot ?? $this->activityService->getActivitySnapshot($student, $timezone);
+
+        $todayLocal = Carbon::now($timezone);
+        $todayKey = $todayLocal->toDateString();
+        // Use UTC calendar math for 52-week day iteration so DST transitions (e.g. Africa/Cairo midnight DST) never drift hours
+        $todayUtcDate = Carbon::createFromFormat('Y-m-d', $todayKey, 'UTC')->startOfDay();
+        $currentWeekStart = $todayUtcDate->copy()->startOfWeek(Carbon::SUNDAY)->startOfDay();
+        $gridStart = $currentWeekStart->copy()->subWeeks(51); // Exact 52 columns (Sunday -> Saturday)
+        $utcRangeStart = Carbon::createFromFormat('Y-m-d', $gridStart->toDateString(), $timezone)
+            ->startOfDay()
+            ->setTimezone('UTC')
+            ->subDay();
 
         $dailyActivities = StudentDailyActivity::forStudent($student->id)
-            ->whereDate('activity_date', '>=', $start->toDateString())
+            ->whereDate('activity_date', '>=', $gridStart->toDateString())
+            ->whereDate('activity_date', '<=', $todayKey)
             ->get(['activity_date', 'active_seconds'])
             ->keyBy(fn (StudentDailyActivity $row) => $row->activity_date->toDateString());
 
         $xpByDay = StudentXpLedger::forStudent($student->id)
-            ->where('created_at', '>=', $start->copy()->setTimezone('UTC')->subDay())
+            ->where('created_at', '>=', $utcRangeStart)
             ->get(['points', 'created_at'])
-            ->groupBy(fn ($e) => $e->created_at->copy()->setTimezone($timezone)->format('Y-m-d'));
+            ->groupBy(fn (StudentXpLedger $e) => $e->created_at->copy()->setTimezone($timezone)->format('Y-m-d'))
+            ->map(fn ($g) => (int) $g->sum('points'));
 
-        $lessonMinutesByDay = StudentLessonProgress::forStudent($student->id)
-            ->where('updated_at', '>=', $start->copy()->setTimezone('UTC')->subDay())
-            ->get(['watched_seconds', 'updated_at'])
-            ->groupBy(fn ($p) => $p->updated_at->copy()->setTimezone($timezone)->format('Y-m-d'))
-            ->map(fn ($g) => (int) round($g->sum('watched_seconds') / 60));
+        $lessonRows = StudentLessonProgress::forStudent($student->id)
+            ->where(function ($q) use ($utcRangeStart) {
+                $q->where('updated_at', '>=', $utcRangeStart)
+                    ->orWhere('completed_at', '>=', $utcRangeStart);
+            })
+            ->get(['watched_seconds', 'is_completed', 'completed_at', 'updated_at']);
+
+        $lessonMinutesByDay = [];
+        $lessonsCompletedByDay = [];
+        foreach ($lessonRows as $p) {
+            if ($p->updated_at) {
+                $uKey = $p->updated_at->copy()->setTimezone($timezone)->format('Y-m-d');
+                $lessonMinutesByDay[$uKey] = ($lessonMinutesByDay[$uKey] ?? 0) + (int) round(((int) $p->watched_seconds) / 60);
+            }
+            if ($p->is_completed) {
+                $ts = $p->completed_at ?: $p->updated_at;
+                if ($ts) {
+                    $cKey = $ts->copy()->setTimezone($timezone)->format('Y-m-d');
+                    $lessonsCompletedByDay[$cKey] = ($lessonsCompletedByDay[$cKey] ?? 0) + 1;
+                }
+            }
+        }
 
         $examsByDay = ExamSubmission::forStudent($student->id)
-            ->where('submitted_at', '>=', $start->copy()->setTimezone('UTC')->subDay())
             ->whereNotNull('submitted_at')
+            ->where('submitted_at', '>=', $utcRangeStart)
             ->get(['submitted_at'])
-            ->groupBy(fn ($s) => $s->submitted_at->copy()->setTimezone($timezone)->format('Y-m-d'))
+            ->groupBy(fn (ExamSubmission $s) => $s->submitted_at->copy()->setTimezone($timezone)->format('Y-m-d'))
+            ->map->count();
+
+        $homeworksByDay = HomeworkSubmission::forStudent($student->id)
+            ->whereNotNull('submitted_at')
+            ->where('submitted_at', '>=', $utcRangeStart)
+            ->get(['submitted_at'])
+            ->groupBy(fn (HomeworkSubmission $h) => $h->submitted_at->copy()->setTimezone($timezone)->format('Y-m-d'))
             ->map->count();
 
         $dayNamesAr = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+        $dayNamesEn = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        $monthNamesAr = [1 => 'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+        $monthNamesEn = [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
         $weeks = [];
-        $week = [];
-        $cursor = $start->copy();
+        $monthMarkers = [];
+        $lastMarkerMonth = null;
+        $cursor = $gridStart->copy();
+
         $activeDays = 0;
-        for ($i = 0; $i < 364; $i++) {
-            $key = $cursor->format('Y-m-d');
-            /** @var StudentDailyActivity|null $dailyRow */
-            $dailyRow = $dailyActivities->get($key);
-            $platformMinutes = $dailyRow ? intdiv((int) $dailyRow->active_seconds, 60) : 0;
-            $minutes = max($platformMinutes, (int) ($lessonMinutesByDay[$key] ?? 0));
-            $quizzes = (int) ($examsByDay[$key] ?? 0);
-            $xp = (int) (isset($xpByDay[$key]) ? $xpByDay[$key]->sum('points') : 0);
-            $hasVisit = $dailyRow !== null;
-            $score = $minutes + ($quizzes * 15) + (int) round($xp / 5) + ($hasVisit ? 1 : 0);
-            $level = $score <= 0 ? 0 : ($score < 15 ? 1 : ($score < 40 ? 2 : ($score < 80 ? 3 : 4)));
-            if ($level > 0) {
-                $activeDays++;
+        $totalMinutes = 0;
+        $totalQuizzes = 0;
+        $totalHomeworks = 0;
+        $totalLessons = 0;
+        $totalXp = 0;
+
+        for ($w = 0; $w < 52; $w++) {
+            $week = [];
+            $weekMonth = (int) $cursor->month;
+            $weekYear = (int) $cursor->year;
+
+            if ($weekMonth !== $lastMarkerMonth) {
+                // Avoid crowding a tiny 1-column stub at week 0 when week 1 already transitions months
+                if (! empty($monthMarkers) && ($w - $monthMarkers[count($monthMarkers) - 1]['weekIndex']) < 3) {
+                    array_pop($monthMarkers);
+                }
+                $monthMarkers[] = [
+                    'weekIndex' => $w,
+                    'monthAr' => $monthNamesAr[$weekMonth],
+                    'monthEn' => $monthNamesEn[$weekMonth],
+                    'year' => $weekYear,
+                ];
+                $lastMarkerMonth = $weekMonth;
             }
 
-            $week[] = [
-                'date' => $key,
-                'dayName' => $dayNamesAr[$cursor->dayOfWeek],
-                'minutes' => $minutes,
-                'quizzes' => $quizzes,
-                'xp' => $xp,
-                'level' => $level,
-            ];
+            for ($d = 0; $d < 7; $d++) {
+                $key = $cursor->format('Y-m-d');
+                $isFuture = $key > $todayKey;
+                $isToday = $key === $todayKey;
 
-            if (count($week) === 7) {
-                $weeks[] = $week;
-                $week = [];
+                if ($isFuture) {
+                    $week[] = [
+                        'date' => $key,
+                        'dayName' => $dayNamesAr[$d],
+                        'dayNameAr' => $dayNamesAr[$d],
+                        'dayNameEn' => $dayNamesEn[$d],
+                        'minutes' => 0,
+                        'quizzes' => 0,
+                        'homeworks' => 0,
+                        'lessons' => 0,
+                        'xp' => 0,
+                        'hasVisit' => false,
+                        'level' => 0,
+                        'isToday' => false,
+                        'isFuture' => true,
+                    ];
+                } else {
+                    /** @var StudentDailyActivity|null $dailyRow */
+                    $dailyRow = $dailyActivities->get($key);
+                    $platformMinutes = $dailyRow ? intdiv((int) $dailyRow->active_seconds, 60) : 0;
+                    $lessonMinutes = min(300, (int) ($lessonMinutesByDay[$key] ?? 0));
+                    $minutes = max($platformMinutes, $lessonMinutes);
+                    $quizzes = (int) ($examsByDay[$key] ?? 0);
+                    $homeworks = (int) ($homeworksByDay[$key] ?? 0);
+                    $lessons = (int) ($lessonsCompletedByDay[$key] ?? 0);
+                    $xp = (int) ($xpByDay[$key] ?? 0);
+                    $hasVisit = $dailyRow !== null;
+
+                    $score = $minutes
+                        + ($quizzes * 15)
+                        + ($homeworks * 10)
+                        + ($lessons * 10)
+                        + (int) round($xp / 3)
+                        + ($hasVisit ? 1 : 0);
+
+                    $level = $score <= 0
+                        ? 0
+                        : ($score < 15 ? 1 : ($score < 40 ? 2 : ($score < 80 ? 3 : 4)));
+
+                    if ($level > 0) {
+                        $activeDays++;
+                    }
+                    $totalMinutes += $minutes;
+                    $totalQuizzes += $quizzes;
+                    $totalHomeworks += $homeworks;
+                    $totalLessons += $lessons;
+                    $totalXp += $xp;
+
+                    $week[] = [
+                        'date' => $key,
+                        'dayName' => $dayNamesAr[$d],
+                        'dayNameAr' => $dayNamesAr[$d],
+                        'dayNameEn' => $dayNamesEn[$d],
+                        'minutes' => $minutes,
+                        'quizzes' => $quizzes,
+                        'homeworks' => $homeworks,
+                        'lessons' => $lessons,
+                        'xp' => $xp,
+                        'hasVisit' => $hasVisit,
+                        'level' => $level,
+                        'isToday' => $isToday,
+                        'isFuture' => false,
+                    ];
+                }
+
+                $cursor->addDay();
             }
-            $cursor->addDay();
+
+            $weeks[] = $week;
         }
 
         return [
+            'timezone' => $timezone,
             'weeks' => $weeks,
+            'monthMarkers' => $monthMarkers,
             'activeDays' => $activeDays,
+            'totalMinutes' => $totalMinutes,
+            'totalQuizzes' => $totalQuizzes,
+            'totalHomeworks' => $totalHomeworks,
+            'totalLessons' => $totalLessons,
+            'totalXp' => $totalXp,
+            'currentStreakDays' => $activity['streakDays'],
+            'longestStreakDays' => $activity['longestStreakDays'],
         ];
     }
 
     /**
-     * Weekly challenges with real progress computed from this week's activity.
+     * Weekly challenges with real progress computed from this week's activity (Saturday -> Friday).
+     * Automatically awards immutable XP once per completed challenge per week (never pollutes league points).
      */
-    public function getWeeklyChallenges(User $student): array
-    {
-        $weekStart = Carbon::now()->startOfWeek(Carbon::SATURDAY);
+    public function getWeeklyChallenges(
+        User $student,
+        ?string $requestedTimezone = null,
+        ?StudentProfile $profile = null
+    ): array {
+        $profile ??= StudentProfile::where('student_id', $student->id)->first();
+        $timezone = $this->activityService->resolveTimezone($profile, $requestedTimezone);
+        $nowLocal = Carbon::now($timezone);
+        $weekStartLocal = $nowLocal->copy()->startOfWeek(Carbon::SATURDAY)->startOfDay();
+        $weekEndLocal = $weekStartLocal->copy()->addDays(7);
+        $weekStartUtc = $weekStartLocal->copy()->setTimezone('UTC');
 
         $lessonsDone = StudentLessonProgress::forStudent($student->id)
             ->where('is_completed', true)
-            ->where('completed_at', '>=', $weekStart)
+            ->where(function ($q) use ($weekStartUtc) {
+                $q->where('completed_at', '>=', $weekStartUtc)
+                    ->orWhere(function ($q2) use ($weekStartUtc) {
+                        $q2->whereNull('completed_at')
+                            ->where('updated_at', '>=', $weekStartUtc);
+                    });
+            })
             ->count();
 
         $examsDone = ExamSubmission::forStudent($student->id)
-            ->where('submitted_at', '>=', $weekStart)
+            ->whereNotNull('submitted_at')
+            ->where('submitted_at', '>=', $weekStartUtc)
             ->count();
 
         $perfectExams = ExamSubmission::forStudent($student->id)
-            ->where('submitted_at', '>=', $weekStart)
-            ->where('percentage', '>=', 100)
+            ->whereNotNull('submitted_at')
+            ->where('submitted_at', '>=', $weekStartUtc)
+            ->where('status', ExamSubmissionStatus::GRADED)
+            ->where(function ($q) {
+                $q->where('is_full_mark', true)->orWhere('percentage', '>=', 100);
+            })
             ->count();
 
         $homeworksDone = HomeworkSubmission::forStudent($student->id)
-            ->where('submitted_at', '>=', $weekStart)
+            ->whereNotNull('submitted_at')
+            ->where('submitted_at', '>=', $weekStartUtc)
             ->count();
 
-        $profile = StudentProfile::where('student_id', $student->id)->first();
         $weeklyExamsGoal = max(1, (int) ($profile?->weekly_exams_goal ?? 3));
 
         $defs = [
-            ['id' => 'wc-lessons', 'titleAr' => 'أكمل 5 حصص هذا الأسبوع', 'titleEn' => 'Complete 5 lessons this week', 'target' => 5, 'current' => $lessonsDone, 'xp' => 100, 'type' => 'lessons'],
-            ['id' => 'wc-exams', 'titleAr' => "حل {$weeklyExamsGoal} اختبارات هذا الأسبوع", 'titleEn' => "Solve {$weeklyExamsGoal} exams this week", 'target' => $weeklyExamsGoal, 'current' => $examsDone, 'xp' => 80, 'type' => 'exams'],
-            ['id' => 'wc-perfect', 'titleAr' => 'احصل على الدرجة النهائية في اختبار واحد', 'titleEn' => 'Score 100% in one exam', 'target' => 1, 'current' => $perfectExams, 'xp' => 60, 'type' => 'perfect'],
-            ['id' => 'wc-homework', 'titleAr' => 'سلّم واجبين هذا الأسبوع', 'titleEn' => 'Submit 2 homeworks this week', 'target' => 2, 'current' => $homeworksDone, 'xp' => 50, 'type' => 'homework'],
+            [
+                'slot' => 1,
+                'id' => 'wc-lessons',
+                'titleAr' => 'أكمل 5 حصص هذا الأسبوع',
+                'titleEn' => 'Complete 5 lessons this week',
+                'descAr' => 'شاهد وأتمم 5 حصص دراسية من مقرراتك خلال الأسبوع الحالي',
+                'descEn' => 'Watch and complete 5 lessons across your courses this week',
+                'target' => 5,
+                'current' => $lessonsDone,
+                'xp' => 50,
+                'type' => 'lessons',
+                'link' => '/student/courses',
+            ],
+            [
+                'slot' => 2,
+                'id' => 'wc-exams',
+                'titleAr' => "حل {$weeklyExamsGoal} اختبارات هذا الأسبوع",
+                'titleEn' => "Solve {$weeklyExamsGoal} exams this week",
+                'descAr' => 'التزم بحل اختباراتك الدورية لرفع مستواك وتثبيت المعلومات',
+                'descEn' => 'Stay sharp by completing your scheduled exams this week',
+                'target' => $weeklyExamsGoal,
+                'current' => $examsDone,
+                'xp' => 40,
+                'type' => 'exams',
+                'link' => '/student/exam',
+            ],
+            [
+                'slot' => 3,
+                'id' => 'wc-perfect',
+                'titleAr' => 'احصل على الدرجة النهائية 100% في اختبار',
+                'titleEn' => 'Score 100% in a graded exam',
+                'descAr' => 'أجب بدقة وحقق التقفيل الكامل في أي اختبار مُصحّح هذا الأسبوع',
+                'descEn' => 'Achieve a perfect 100% score on any graded exam this week',
+                'target' => 1,
+                'current' => $perfectExams,
+                'xp' => 35,
+                'type' => 'perfect',
+                'link' => '/student/exam',
+            ],
+            [
+                'slot' => 4,
+                'id' => 'wc-homework',
+                'titleAr' => 'سلّم واجبين هذا الأسبوع',
+                'titleEn' => 'Submit 2 homeworks this week',
+                'descAr' => 'ارفع حلول واجباتك الدراسية في موعدها لتقوية مستواك العملي',
+                'descEn' => 'Submit 2 course assignments on time this week',
+                'target' => 2,
+                'current' => $homeworksDone,
+                'xp' => 30,
+                'type' => 'homework',
+                'link' => '/student/homework',
+            ],
         ];
 
-        $daysLeft = max(0, (int) Carbon::now()->diffInDays($weekStart->copy()->addDays(7), false));
+        $hoursLeft = $nowLocal->diffInHours($weekEndLocal, false);
+        $daysLeft = $hoursLeft > 0 ? (int) ceil($hoursLeft / 24) : 0;
+        $weekKeyPrefix = $weekStartLocal->format('Ymd');
 
-        return array_map(function ($c) use ($daysLeft) {
+        return array_map(function (array $c) use ($student, $daysLeft, $weekKeyPrefix, $weekStartLocal, $weekEndLocal): array {
             $current = min($c['target'], (int) $c['current']);
+            $isCompleted = $current >= $c['target'];
+            $xpReward = (int) $c['xp'];
 
-            return array_merge($c, [
+            if ($isCompleted) {
+                $sourceId = (int) ($weekKeyPrefix.$c['slot']);
+                StudentXpLedger::awardOnce(
+                    (int) $student->id,
+                    'weekly_challenge',
+                    $sourceId,
+                    $xpReward,
+                    "مكافأة تحدي الأسبوع: {$c['titleAr']}"
+                );
+            }
+
+            return [
+                'id' => $c['id'],
+                'titleAr' => $c['titleAr'],
+                'titleEn' => $c['titleEn'],
+                'descAr' => $c['descAr'],
+                'descEn' => $c['descEn'],
+                'target' => $c['target'],
                 'current' => $current,
                 'progressPercent' => (int) round(($current / max(1, $c['target'])) * 100),
-                'isCompleted' => $current >= $c['target'],
+                'isCompleted' => $isCompleted,
+                'completed' => $isCompleted,
+                'xp' => $xpReward,
+                'xpReward' => $xpReward,
+                'type' => $c['type'],
+                'link' => $c['link'],
                 'daysLeft' => $daysLeft,
-            ]);
+                'resetDayAr' => 'السبت',
+                'resetDayEn' => 'Saturday',
+                'weekStart' => $weekStartLocal->toDateString(),
+                'weekEndsAt' => $weekEndLocal->copy()->subSecond()->toDateString(),
+            ];
         }, $defs);
     }
 
     /**
-     * Archive of finished leagues the student participated in.
+     * Archive of finished teacher course leagues & finished Republic League rounds the student competed in.
      */
-    public function getPastLeagues(User $student): array
+    public function getPastLeagues(User $student, bool $skipExpireSync = false): array
     {
-        return LeagueParticipant::where('student_id', $student->id)
+        if (! $skipExpireSync) {
+            // Auto-close expired Republic League round if past ends_at
+            RepublicLeague::currentActive();
+
+            // Auto-close any expired active CourseLeague this student is participating in
+            $expiredLeagues = CourseLeague::query()
+                ->where('is_active', true)
+                ->whereNotNull('ends_at')
+                ->where('ends_at', '<=', Carbon::now())
+                ->whereHas('participants', fn ($q) => $q->where('student_id', $student->id))
+                ->get();
+
+            foreach ($expiredLeagues as $expiredLeague) {
+                $this->leagueRulesService->syncCourseLeague($expiredLeague);
+            }
+        }
+
+        $entries = [];
+
+        // 1. Finished Teacher Course Leagues
+        $pastCourseParticipations = LeagueParticipant::where('student_id', $student->id)
             ->whereHas('league', fn ($q) => $q->where('is_active', false))
-            ->with('league:id,uuid,title_ar,course_name_ar,ends_at,total_competitors')
-            ->latest()
+            ->with(['league' => fn ($q) => $q->select('id', 'uuid', 'teacher_id', 'title_ar', 'course_name_ar', 'ends_at', 'total_competitors')->withCount('participants')])
+            ->latest('updated_at')
             ->limit(30)
-            ->get()
-            ->map(fn (LeagueParticipant $p) => [
+            ->get();
+
+        $teacherIds = $pastCourseParticipations
+            ->pluck('league.teacher_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        $teacherNames = $teacherIds->isNotEmpty()
+            ? User::whereIn('id', $teacherIds)->pluck('name', 'id')
+            : collect();
+
+        foreach ($pastCourseParticipations as $p) {
+            $league = $p->league;
+            if (! $league) {
+                continue;
+            }
+            $xp = (int) $p->xp_points;
+            $rank = (int) ($p->rank ?: 0);
+            $tierEnum = LeagueTier::resolveFromXp($xp);
+            $totalCompetitors = max((int) ($league->total_competitors ?? 0), (int) ($league->participants_count ?? 0));
+
+            $entries[] = [
                 'id' => $p->uuid,
-                'leagueId' => $p->league?->uuid,
-                'titleAr' => $p->league?->title_ar,
-                'seasonAr' => $p->league?->course_name_ar,
-                'dateAr' => $p->league?->ends_at?->format('Y-m-d'),
-                'rank' => (int) ($p->rank ?: 0),
-                'points' => (int) $p->xp_points,
-                'tierAr' => $p->badge_title_ar ?: ($p->tier ?: 'مشارك'),
-                'totalCompetitors' => (int) ($p->league?->total_competitors ?? 0),
-            ])->values()->all();
+                'leagueId' => $league->uuid,
+                'isRepublicLeague' => false,
+                'titleAr' => $league->title_ar,
+                'courseTitleAr' => $league->course_name_ar,
+                'seasonAr' => $league->course_name_ar,
+                'teacherName' => $teacherNames[$league->teacher_id] ?? null,
+                'dateAr' => $league->ends_at?->format('Y-m-d') ?? $p->updated_at?->format('Y-m-d'),
+                'endedAt' => ($league->ends_at ?? $p->updated_at)?->toIso8601String(),
+                'rank' => $rank,
+                'points' => $xp,
+                'tier' => $tierEnum->value,
+                'tierAr' => $tierEnum->labelAr(),
+                'badgeAr' => $p->badge_title_ar ?: ($rank > 0 ? $this->leagueRulesService->resolveRankBadgeAr($rank, false) : 'منافس نشط'),
+                'totalCompetitors' => $totalCompetitors,
+            ];
+        }
+
+        // 2. Finished General Republic League rounds where this student earned points
+        $pastRepublicLeagues = RepublicLeague::query()
+            ->where('is_active', false)
+            ->latest('ends_at')
+            ->limit(10)
+            ->get();
+
+        foreach ($pastRepublicLeagues as $rep) {
+            $ranked = $this->computeGeneralRankedStudents($student, $rep);
+            $myRow = collect($ranked)->firstWhere('studentId', (int) $student->id);
+            $myXp = (int) ($myRow['xpPoints'] ?? 0);
+            if (! $myRow || $myXp <= 0) {
+                continue;
+            }
+            $rank = (int) ($myRow['rank'] ?? 0);
+            $tierEnum = LeagueTier::resolveFromXp($myXp);
+
+            $entries[] = [
+                'id' => 'rep-'.$rep->uuid,
+                'leagueId' => 'general',
+                'isRepublicLeague' => true,
+                'titleAr' => $rep->title_ar ?: 'دوري الجمهورية العام',
+                'courseTitleAr' => 'المجموع التراكمي لجميع المواد',
+                'seasonAr' => 'دوري الجمهورية العام',
+                'teacherName' => null,
+                'dateAr' => $rep->ends_at?->format('Y-m-d') ?? $rep->updated_at?->format('Y-m-d'),
+                'endedAt' => ($rep->ends_at ?? $rep->updated_at)?->toIso8601String(),
+                'rank' => $rank,
+                'points' => $myXp,
+                'tier' => $tierEnum->value,
+                'tierAr' => $tierEnum->labelAr(),
+                'badgeAr' => $rank > 0 ? $this->leagueRulesService->resolveRankBadgeAr($rank, true) : 'منافس نشط',
+                'totalCompetitors' => count($ranked),
+            ];
+        }
+
+        usort($entries, fn (array $a, array $b) => strcmp((string) ($b['endedAt'] ?? ''), (string) ($a['endedAt'] ?? '')));
+
+        return array_slice($entries, 0, 30);
     }
 
     /**

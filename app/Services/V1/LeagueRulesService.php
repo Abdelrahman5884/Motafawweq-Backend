@@ -534,8 +534,9 @@ class LeagueRulesService
                 (int) ($prof?->current_streak_days ?? 0),
                 (int) ($stdEnrollments->max('streak_days') ?? 0)
             );
+            $windowActiveDays = (int) ($windowActiveDaysByStudent[$sid] ?? 0);
             $windowStreakDays = $since !== null
-                ? min($streakDays, (int) ($windowActiveDaysByStudent[$sid] ?? 0))
+                ? (($until !== null && $until->isPast()) ? $windowActiveDays : min($streakDays, $windowActiveDays))
                 : $streakDays;
 
             $attendanceRate = $stdEnrollments->isNotEmpty()

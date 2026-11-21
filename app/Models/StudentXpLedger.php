@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Traits\BelongsToStudent;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
 use LogicException;
 
@@ -66,16 +67,23 @@ class StudentXpLedger extends Model
             return null;
         }
 
-        return static::firstOrCreate(
-            [
-                'student_id' => $studentId,
-                'source_type' => $sourceType,
-                'source_id' => $sourceId,
-            ],
-            [
-                'points' => $points,
-                'reason_ar' => $reasonAr,
-            ]
-        );
+        try {
+            return static::firstOrCreate(
+                [
+                    'student_id' => $studentId,
+                    'source_type' => $sourceType,
+                    'source_id' => $sourceId,
+                ],
+                [
+                    'points' => $points,
+                    'reason_ar' => $reasonAr,
+                ]
+            );
+        } catch (QueryException) {
+            return static::where('student_id', $studentId)
+                ->where('source_type', $sourceType)
+                ->where('source_id', $sourceId)
+                ->first();
+        }
     }
 }

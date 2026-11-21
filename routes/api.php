@@ -249,6 +249,8 @@ Route::prefix('v1')->group(function () {
                 // Phase 7 & 8: Gamification (Immutable XP Ledger), Leagues, Leaderboard & Certificates
                 Route::get('/gamification', [StudentGamificationController::class, 'summary'])
                     ->middleware('throttle:student-read');
+                Route::get('/gamification/workspace', [StudentGamificationController::class, 'workspace'])
+                    ->middleware('throttle:student-read');
                 Route::get('/leagues', [StudentGamificationController::class, 'leagues'])
                     ->middleware('throttle:student-read');
                 Route::get('/leagues/general/leaderboard', [StudentGamificationController::class, 'generalLeaderboard'])

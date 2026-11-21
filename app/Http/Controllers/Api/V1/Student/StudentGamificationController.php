@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Student;
 use App\Http\Controllers\Api\BaseApiController;
 use App\Services\V1\Student\StudentGamificationService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class StudentGamificationController extends BaseApiController
 {
@@ -12,9 +13,24 @@ class StudentGamificationController extends BaseApiController
         protected StudentGamificationService $gamificationService
     ) {}
 
-    public function summary(): JsonResponse
+    public function workspace(Request $request): JsonResponse
     {
-        $summary = $this->gamificationService->getGamificationSummary($this->authenticatedUser());
+        $timezone = $request->query('timezone');
+        $data = $this->gamificationService->getGamificationWorkspace(
+            $this->authenticatedUser(),
+            is_string($timezone) ? $timezone : null
+        );
+
+        return $this->successResponse($data);
+    }
+
+    public function summary(Request $request): JsonResponse
+    {
+        $timezone = $request->query('timezone');
+        $summary = $this->gamificationService->getGamificationSummary(
+            $this->authenticatedUser(),
+            is_string($timezone) ? $timezone : null
+        );
 
         return $this->successResponse($summary);
     }
@@ -52,14 +68,28 @@ class StudentGamificationController extends BaseApiController
         return $this->successResponse($this->gamificationService->getCertificateEligibility($this->authenticatedUser()));
     }
 
-    public function activityHeatmap(): JsonResponse
+    public function activityHeatmap(Request $request): JsonResponse
     {
-        return $this->successResponse($this->gamificationService->getActivityHeatmap($this->authenticatedUser()));
+        $timezone = $request->query('timezone');
+
+        return $this->successResponse(
+            $this->gamificationService->getActivityHeatmap(
+                $this->authenticatedUser(),
+                is_string($timezone) ? $timezone : null
+            )
+        );
     }
 
-    public function weeklyChallenges(): JsonResponse
+    public function weeklyChallenges(Request $request): JsonResponse
     {
-        return $this->successResponse($this->gamificationService->getWeeklyChallenges($this->authenticatedUser()));
+        $timezone = $request->query('timezone');
+
+        return $this->successResponse(
+            $this->gamificationService->getWeeklyChallenges(
+                $this->authenticatedUser(),
+                is_string($timezone) ? $timezone : null
+            )
+        );
     }
 
     public function pastLeagues(): JsonResponse
