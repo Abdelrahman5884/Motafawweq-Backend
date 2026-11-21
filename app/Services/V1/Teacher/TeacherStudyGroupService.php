@@ -4,6 +4,7 @@ namespace App\Services\V1\Teacher;
 
 use App\Enums\DayOfWeek;
 use App\Models\Course;
+use App\Models\GroupAnnouncement;
 use App\Models\GroupScheduleSlot;
 use App\Models\StudyGroup;
 use App\Models\TeacherScheduleNote;
@@ -600,5 +601,58 @@ class TeacherStudyGroupService extends BaseService
         $note->delete();
 
         return true;
+    }
+
+    /**
+     * List recent announcements sent by the teacher to a specific study group.
+     */
+    public function listAnnouncements(User $teacher, string $groupUuid, int $limit = 15): Collection
+    {
+        $group = $this->groupRepository->findByUuidForTeacher($groupUuid, $teacher);
+
+        return GroupAnnouncement::where('study_group_id', $group->id)
+            ->where('teacher_id', $teacher->id)
+            ->orderByDesc('created_at')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Persist and audit a cohort broadcast announcement to an owned study group.
+     */
+    public function sendAnnouncement(User $teacher, string $groupUuid, array $data): GroupAnnouncement
+    {
+        $group = $this->groupRepository->findByUuidForTeacher($groupUuid, $teacher);
+
+        $type = strtolower(trim((string) ($data['type'] ?? 'announcement')));
+        if (! in_array($type, GroupAnnouncement::TYPES, true)) {
+            $type = 'announcement';
+        }
+
+        $message = trim(strip_tags((string) ($data['message'] ?? '')));
+        $recipientsCount = (int) $group->enrolledEnrollments()->count();
+
+        /** @var GroupAnnouncement $announcement */
+        $announcement = GroupAnnouncement::create([
+            'teacher_id' => $teacher->id,
+            'study_group_id' => $group->id,
+            'type' => $type,
+            'message' => $message,
+            'recipients_count' => $recipientsCount,
+        ]);
+
+        $this->logSecurityEvent(
+            'teacher.group.announcement_sent',
+            [
+                'group_uuid' => $group->uuid,
+                'announcement_uuid' => $announcement->uuid,
+                'type' => $announcement->type,
+                'recipients_count' => $recipientsCount,
+            ],
+            'info',
+            $announcement
+        );
+
+        return $announcement;
     }
 }

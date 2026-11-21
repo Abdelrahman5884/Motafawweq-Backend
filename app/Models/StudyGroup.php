@@ -86,6 +86,12 @@ class StudyGroup extends Model
             ->where('status', 'pending');
     }
 
+    public function announcements(): HasMany
+    {
+        return $this->hasMany(GroupAnnouncement::class, 'study_group_id')
+            ->orderByDesc('created_at');
+    }
+
     /**
      * Generate an alphanumeric high-entropy, teacher-friendly join code.
      * Example: BIO-7492 or GRP-8391

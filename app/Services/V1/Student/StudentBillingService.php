@@ -224,6 +224,34 @@ class StudentBillingService extends BaseService
     }
 
     /**
+     * Resolve only the student's active plan tier (auto-expiring past-due paid plans to Free).
+     */
+    public function resolveActivePlanTier(User $student): StudentPlanTier
+    {
+        /** @var StudentSubscription|null $active */
+        $active = StudentSubscription::forStudent($student->id)
+            ->where('status', 'active')
+            ->latest('id')
+            ->first();
+
+        if (! $active) {
+            return StudentPlanTier::FREE;
+        }
+
+        $tier = $active->plan_tier instanceof StudentPlanTier
+            ? $active->plan_tier
+            : (StudentPlanTier::tryFrom((string) $active->plan_tier) ?? StudentPlanTier::FREE);
+
+        if ($tier !== StudentPlanTier::FREE && $active->renews_at && $active->renews_at->isPast()) {
+            $active->update(['status' => 'expired']);
+
+            return StudentPlanTier::FREE;
+        }
+
+        return $tier;
+    }
+
+    /**
      * Resolve student's active subscription (auto-expiring past-due paid plans back to Free).
      */
     public function getActiveSubscription(User $student): array
@@ -262,6 +290,7 @@ class StudentBillingService extends BaseService
                     'Homeworks & periodic exams',
                     'Weekly schedule & daily streak',
                 ],
+                'unlockedFeatures' => StudentPlanTier::FREE->unlockedFeatures(),
             ];
         }
 
@@ -332,6 +361,7 @@ class StudentBillingService extends BaseService
             'amountEgp' => (float) $active->amount_egp,
             'highlightsAr' => $highlightsAr,
             'highlightsEn' => $highlightsEn,
+            'unlockedFeatures' => $tier->unlockedFeatures(),
         ];
     }
 

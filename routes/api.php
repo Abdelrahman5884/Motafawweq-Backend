@@ -234,7 +234,7 @@ Route::prefix('v1')->group(function () {
                     ->whereUuid('uuid')
                     ->middleware(['throttle:exam-submit', 'idempotent']);
                 Route::get('/mistake-bank', [StudentExamTakingController::class, 'mistakeBank'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:weak_areas']);
 
                 // Phase 6: Homeworks & Secure Attachment Streaming
                 Route::get('/homeworks', [StudentHomeworkController::class, 'index'])
@@ -249,24 +249,24 @@ Route::prefix('v1')->group(function () {
                     ->whereUuid('submissionUuid')
                     ->middleware('throttle:student-read');
 
-                // Phase 7 & 8: Gamification (Immutable XP Ledger), Leagues, Leaderboard & Certificates
+                // Phase 7 & 8: Gamification (Immutable XP Ledger), Leagues, Leaderboard & Certificates (Plus / Pro)
                 Route::get('/gamification', [StudentGamificationController::class, 'summary'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:gamification']);
                 Route::get('/gamification/workspace', [StudentGamificationController::class, 'workspace'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:gamification']);
                 Route::get('/leagues', [StudentGamificationController::class, 'leagues'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:leagues']);
                 Route::get('/leagues/general/leaderboard', [StudentGamificationController::class, 'generalLeaderboard'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:leagues']);
                 Route::get('/leagues/{uuid}/leaderboard', [StudentGamificationController::class, 'leaderboard'])
                     ->whereUuid('uuid')
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:leagues']);
                 Route::get('/certificates', [StudentGamificationController::class, 'certificates'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:certificates']);
                 Route::get('/certificates/workspace', [StudentGamificationController::class, 'certificatesWorkspace'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:certificates']);
                 Route::post('/certificates/claim', [StudentGamificationController::class, 'claimCourseCertificate'])
-                    ->middleware(['throttle:student-write', 'idempotent']);
+                    ->middleware(['throttle:student-write', 'idempotent', 'student.plan:certificates']);
 
                 // Phase 9: Billing, Student Subscriptions, Coupon Validation & Direct Teacher Payments
                 Route::get('/billing', [StudentBillingController::class, 'overview'])
@@ -278,17 +278,17 @@ Route::prefix('v1')->group(function () {
                 Route::post('/billing/payments', [StudentBillingController::class, 'storePayment'])
                     ->middleware(['throttle:student-checkout', 'idempotent']);
 
-                // Phase 10: Dashboard, Daily Activity Heartbeat, Analytics & Revision Hub
+                // Phase 10: Dashboard, Daily Activity Heartbeat, Analytics (Plus) & Revision Hub (Pro)
                 Route::get('/dashboard', [StudentDashboardController::class, 'dashboard'])
                     ->middleware('throttle:student-read');
                 Route::post('/activity/heartbeat', [StudentDashboardController::class, 'heartbeat'])
                     ->middleware('throttle:activity-heartbeat');
                 Route::get('/analytics', [StudentDashboardController::class, 'analytics'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:analytics']);
                 Route::get('/revision', [StudentDashboardController::class, 'revision'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:revision']);
 
-                // Phase 12: Schedule Notes, Converted Lectures Archive & Extended Gamification
+                // Phase 12: Schedule Notes, Converted Lectures Archive (Pro AI) & Extended Gamification (Plus)
                 Route::post('/schedule/notes', [StudentGroupScheduleController::class, 'storeScheduleNote'])
                     ->middleware('throttle:student-write');
                 Route::put('/schedule/notes/{uuid}', [StudentGroupScheduleController::class, 'updateScheduleNote'])
@@ -302,24 +302,24 @@ Route::prefix('v1')->group(function () {
                     ->middleware('throttle:student-write');
 
                 Route::get('/converted-lectures', [StudentConvertedLectureController::class, 'index'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:converted_lectures']);
                 Route::post('/converted-lectures', [StudentConvertedLectureController::class, 'store'])
-                    ->middleware(['throttle:student-uploads', 'idempotent']);
+                    ->middleware(['throttle:student-uploads', 'idempotent', 'student.plan:converted_lectures']);
                 Route::get('/converted-lectures/{uuid}', [StudentConvertedLectureController::class, 'show'])
                     ->whereUuid('uuid')
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:converted_lectures']);
                 Route::delete('/converted-lectures/{uuid}', [StudentConvertedLectureController::class, 'destroy'])
                     ->whereUuid('uuid')
-                    ->middleware('throttle:student-write');
+                    ->middleware(['throttle:student-write', 'student.plan:converted_lectures']);
 
                 Route::get('/gamification/heatmap', [StudentGamificationController::class, 'activityHeatmap'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:gamification']);
                 Route::get('/gamification/challenges', [StudentGamificationController::class, 'weeklyChallenges'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:gamification']);
                 Route::get('/leagues/history', [StudentGamificationController::class, 'pastLeagues'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:leagues']);
                 Route::get('/certificates/eligibility', [StudentGamificationController::class, 'certificateEligibility'])
-                    ->middleware('throttle:student-read');
+                    ->middleware(['throttle:student-read', 'student.plan:certificates']);
             });
 
             // Admin area
@@ -427,6 +427,12 @@ Route::prefix('v1')->group(function () {
                     Route::post('/{uuid}/regenerate-code', [TeacherStudyGroupController::class, 'regenerateCode'])
                         ->whereUuid('uuid')
                         ->middleware('throttle:join-code');
+
+                    // Cohort Announcements / Quick Broadcast Alerts
+                    Route::get('/{uuid}/announcements', [TeacherStudyGroupController::class, 'announcements'])
+                        ->whereUuid('uuid');
+                    Route::post('/{uuid}/announcements', [TeacherStudyGroupController::class, 'storeAnnouncement'])
+                        ->whereUuid('uuid');
 
                     // Stage 8: Student Roster, Invitations & Join Requests
                     Route::get('/{uuid}/roster', [TeacherRosterController::class, 'show'])

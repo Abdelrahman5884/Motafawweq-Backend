@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Student;
 
+use App\Enums\BillingPeriod;
 use App\Enums\CourseStatus;
 use App\Enums\EnrollmentStatus;
 use App\Enums\ExamStatus;
@@ -11,6 +12,7 @@ use App\Enums\HomeworkType;
 use App\Enums\LeagueDuration;
 use App\Enums\LeagueTier;
 use App\Enums\LessonStatus;
+use App\Enums\StudentPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
@@ -27,6 +29,7 @@ use App\Models\RepublicLeague;
 use App\Models\StudentDailyActivity;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentProfile;
+use App\Models\StudentSubscription;
 use App\Models\StudentXpLedger;
 use App\Models\StudyGroup;
 use App\Models\User;
@@ -47,13 +50,27 @@ class StudentGamificationWorkspaceTest extends TestCase
 
     private function createStudent(string $name = 'أحمد محمود', string $email = 'student.gam@motafawweq.com'): User
     {
-        return User::factory()->create([
+        $student = User::factory()->create([
             'name' => $name,
             'email' => $email,
             'role' => UserRole::STUDENT,
             'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
+
+        StudentSubscription::create([
+            'student_id' => $student->id,
+            'plan_tier' => StudentPlanTier::PLUS,
+            'plan_name_ar' => StudentPlanTier::PLUS->labelAr(),
+            'plan_name_en' => StudentPlanTier::PLUS->labelEn(),
+            'billing_period' => BillingPeriod::MONTHLY,
+            'amount_egp' => 50,
+            'starts_at' => now(),
+            'renews_at' => now()->addDays(30),
+            'status' => 'active',
+        ]);
+
+        return $student;
     }
 
     private function createTeacher(string $name = 'أ. خالد السعدني', string $email = 'teacher.gam@motafawweq.com'): User

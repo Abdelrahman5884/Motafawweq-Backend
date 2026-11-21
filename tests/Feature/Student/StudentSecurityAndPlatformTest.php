@@ -2,12 +2,14 @@
 
 namespace Tests\Feature\Student;
 
+use App\Enums\BillingPeriod;
 use App\Enums\CourseStatus;
 use App\Enums\DayOfWeek;
 use App\Enums\EnrollmentStatus;
 use App\Enums\ExamQuestionType;
 use App\Enums\ExamStatus;
 use App\Enums\LessonStatus;
+use App\Enums\StudentPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
@@ -22,6 +24,7 @@ use App\Models\Homework;
 use App\Models\LeagueParticipant;
 use App\Models\Lesson;
 use App\Models\StudentProfile;
+use App\Models\StudentSubscription;
 use App\Models\StudentXpLedger;
 use App\Models\StudyGroup;
 use App\Models\User;
@@ -49,7 +52,7 @@ class StudentSecurityAndPlatformTest extends TestCase
 
     protected function createStudent(string $email = 'student.sec@motafawweq.com', string $name = 'أحمد الطالب'): User
     {
-        return User::factory()->create([
+        $student = User::factory()->create([
             'name' => $name,
             'email' => $email,
             'role' => UserRole::STUDENT,
@@ -57,6 +60,20 @@ class StudentSecurityAndPlatformTest extends TestCase
             'email_verified_at' => now(),
             'student_code' => 'STD-'.random_int(10000, 99999),
         ]);
+
+        StudentSubscription::create([
+            'student_id' => $student->id,
+            'plan_tier' => StudentPlanTier::PRO,
+            'plan_name_ar' => StudentPlanTier::PRO->labelAr(),
+            'plan_name_en' => StudentPlanTier::PRO->labelEn(),
+            'billing_period' => BillingPeriod::MONTHLY,
+            'amount_egp' => 80,
+            'starts_at' => now(),
+            'renews_at' => now()->addDays(30),
+            'status' => 'active',
+        ]);
+
+        return $student;
     }
 
     protected function enrollStudentWithTeacher(User $student, User $teacher, ?Course $course = null): StudyGroup

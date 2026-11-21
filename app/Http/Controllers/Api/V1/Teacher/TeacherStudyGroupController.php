@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\V1\Teacher;
 
 use App\Http\Controllers\Api\BaseApiController;
+use App\Http\Requests\V1\Teacher\StoreGroupAnnouncementRequest;
 use App\Http\Requests\V1\Teacher\StoreStudyGroupRequest;
 use App\Http\Requests\V1\Teacher\UpdateStudyGroupRequest;
 use App\Http\Resources\V1\Teacher\StudyGroupResource;
+use App\Models\GroupAnnouncement;
 use App\Services\V1\Teacher\TeacherStudyGroupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -117,6 +119,56 @@ class TeacherStudyGroupController extends BaseApiController
         return $this->successResponse(
             new StudyGroupResource($group),
             __('messages.group_code_regenerated')
+        );
+    }
+
+    /**
+     * GET /api/v1/teacher/groups/{uuid}/announcements
+     * List recent announcements sent to a study group.
+     */
+    public function announcements(string $uuid): JsonResponse
+    {
+        $announcements = $this->groupService->listAnnouncements(
+            $this->authenticatedUser(),
+            $uuid
+        );
+
+        $data = $announcements->map(fn (GroupAnnouncement $item) => [
+            'id' => $item->uuid,
+            'type' => $item->type,
+            'message' => $item->message,
+            'recipientsCount' => (int) $item->recipients_count,
+            'createdAt' => $item->created_at?->toIso8601String(),
+        ])->values();
+
+        return $this->successResponse(
+            $data,
+            __('messages.group_announcements_fetched'),
+            meta: ['total' => $data->count()]
+        );
+    }
+
+    /**
+     * POST /api/v1/teacher/groups/{uuid}/announcements
+     * Dispatch and persist an announcement/alert for a study group.
+     */
+    public function storeAnnouncement(StoreGroupAnnouncementRequest $request, string $uuid): JsonResponse
+    {
+        $announcement = $this->groupService->sendAnnouncement(
+            $this->authenticatedUser(),
+            $uuid,
+            $request->validated()
+        );
+
+        return $this->createdResponse(
+            [
+                'id' => $announcement->uuid,
+                'type' => $announcement->type,
+                'message' => $announcement->message,
+                'recipientsCount' => (int) $announcement->recipients_count,
+                'createdAt' => $announcement->created_at?->toIso8601String(),
+            ],
+            __('messages.group_announcement_sent')
         );
     }
 }

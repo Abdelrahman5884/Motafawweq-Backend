@@ -2,12 +2,14 @@
 
 namespace Tests\Feature\Student;
 
+use App\Enums\BillingPeriod;
 use App\Enums\CourseStatus;
 use App\Enums\EnrollmentStatus;
 use App\Enums\ExamQuestionType;
 use App\Enums\ExamStatus;
 use App\Enums\LeagueDuration;
 use App\Enums\LessonStatus;
+use App\Enums\StudentPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
@@ -20,6 +22,7 @@ use App\Models\Homework;
 use App\Models\LeagueParticipant;
 use App\Models\Lesson;
 use App\Models\StudentProfile;
+use App\Models\StudentSubscription;
 use App\Models\StudyGroup;
 use App\Models\User;
 use App\Services\V1\LeagueRulesService;
@@ -51,13 +54,27 @@ class StudentLeagueWorkspaceTest extends TestCase
 
     private function createStudent(string $name, string $email): User
     {
-        return User::factory()->create([
+        $student = User::factory()->create([
             'name' => $name,
             'email' => $email,
             'role' => UserRole::STUDENT,
             'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
+
+        StudentSubscription::create([
+            'student_id' => $student->id,
+            'plan_tier' => StudentPlanTier::PLUS,
+            'plan_name_ar' => StudentPlanTier::PLUS->labelAr(),
+            'plan_name_en' => StudentPlanTier::PLUS->labelEn(),
+            'billing_period' => BillingPeriod::MONTHLY,
+            'amount_egp' => 50,
+            'starts_at' => now(),
+            'renews_at' => now()->addDays(30),
+            'status' => 'active',
+        ]);
+
+        return $student;
     }
 
     public function test_league_rules_enforce_exact_question_full_mark_essay_and_daily_streak_points(): void
