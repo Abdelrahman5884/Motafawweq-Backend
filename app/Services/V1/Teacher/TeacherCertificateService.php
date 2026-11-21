@@ -40,8 +40,15 @@ class TeacherCertificateService
 
         $studentId = null;
         if (! empty($data['student_id'])) {
-            $student = User::find($data['student_id']);
+            $rawStudentId = trim((string) $data['student_id']);
+            $student = is_numeric($rawStudentId)
+                ? User::find((int) $rawStudentId)
+                : User::where('uuid', $rawStudentId)->first();
             $studentId = $student?->id;
+        }
+        $rawEmail = trim((string) ($data['student_email'] ?? $data['studentEmail'] ?? ''));
+        if ($studentId === null && $rawEmail !== '') {
+            $studentId = User::whereRaw('LOWER(email) = ?', [strtolower($rawEmail)])->value('id');
         }
 
         $certNumber = CourseCertificate::generateUniqueCertNumber();

@@ -9,6 +9,7 @@ use App\Enums\LeagueTier;
 use App\Enums\LessonStatus;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
+use App\Models\Course;
 use App\Models\CourseCertificate;
 use App\Models\CourseLeague;
 use App\Models\ExamSubmission;
@@ -26,6 +27,7 @@ use App\Services\V1\LeagueRulesService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class StudentGamificationService extends BaseService
 {
@@ -832,42 +834,235 @@ class StudentGamificationService extends BaseService
     }
 
     /**
-     * Real eligibility status per certificate track for the student.
+     * Single optimized payload for /student/certificates workspace.
      */
-    public function getCertificateEligibility(User $student): array
+    public function getCertificatesWorkspace(User $student): array
+    {
+        $certModels = $this->fetchStudentCertificateModels($student);
+        $issuedCourseIds = $certModels->pluck('course_id')->filter()->map(fn ($id) => (int) $id)->unique()->all();
+
+        $certificates = $this->mapStudentCertificateModels($student, $certModels);
+        $eligibility = $this->getCertificateEligibility($student, $issuedCourseIds);
+
+        return [
+            'certificates' => $certificates,
+            'eligibility' => $eligibility,
+            'issuedCount' => count($certificates),
+        ];
+    }
+
+    /**
+     * Real eligibility status per certificate track for the student, plus claimable 100%-completed courses.
+     *
+     * @param  array<int, int>|null  $issuedCourseIds
+     */
+    public function getCertificateEligibility(User $student, ?array $issuedCourseIds = null): array
     {
         $entitlements = $this->accessService->getEntitlements($student);
+        $courseIds = array_values(array_unique(array_map('intval', $entitlements['course_ids'] ?? [])));
+
+        if ($issuedCourseIds === null) {
+            $issuedCourseIds = $this->fetchStudentCertificateModels($student)
+                ->pluck('course_id')
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->all();
+        }
+        $issuedCourseLookup = array_flip($issuedCourseIds);
 
         $completedCourses = 0;
-        foreach ($entitlements['course_ids'] as $courseId) {
-            $total = Lesson::where('course_id', $courseId)
+        $totalCoursesWithLessons = 0;
+        $claimableCourses = [];
+
+        if (! empty($courseIds)) {
+            $publishedLessonsByCourse = Lesson::query()
+                ->whereIn('course_id', $courseIds)
                 ->where('status', LessonStatus::PUBLISHED)
-                ->count();
-            if ($total === 0) {
-                continue;
-            }
-            $done = StudentLessonProgress::forStudent($student->id)
-                ->where('course_id', $courseId)
+                ->select(['course_id', DB::raw('COUNT(*) as total_lessons')])
+                ->groupBy('course_id')
+                ->pluck('total_lessons', 'course_id');
+
+            $completedLessonsByCourse = StudentLessonProgress::forStudent($student->id)
+                ->whereIn('course_id', $courseIds)
                 ->where('is_completed', true)
-                ->count();
-            if ($done >= $total) {
-                $completedCourses++;
+                ->whereHas('lesson', fn ($q) => $q->where('status', LessonStatus::PUBLISHED))
+                ->select(['course_id', DB::raw('COUNT(DISTINCT lesson_id) as done_lessons')])
+                ->groupBy('course_id')
+                ->pluck('done_lessons', 'course_id');
+
+            $coursesById = Course::query()
+                ->whereIn('id', $courseIds)
+                ->with('teacher:id,name')
+                ->get(['id', 'uuid', 'teacher_id', 'title_ar', 'title_en', 'grade_ar'])
+                ->keyBy('id');
+
+            foreach ($courseIds as $courseId) {
+                $total = (int) ($publishedLessonsByCourse[$courseId] ?? 0);
+                if ($total === 0) {
+                    continue;
+                }
+                $totalCoursesWithLessons++;
+                $done = (int) ($completedLessonsByCourse[$courseId] ?? 0);
+                if ($done >= $total) {
+                    $completedCourses++;
+                    if (! isset($issuedCourseLookup[$courseId]) && $coursesById->has($courseId)) {
+                        /** @var Course $c */
+                        $c = $coursesById->get($courseId);
+                        $claimableCourses[] = [
+                            'courseId' => $c->uuid,
+                            'titleAr' => $c->title_ar,
+                            'titleEn' => $c->title_en ?: $c->title_ar,
+                            'teacherName' => $c->teacher?->name ?: 'معلم معتمد',
+                            'completedLessons' => $done,
+                            'totalLessons' => $total,
+                        ];
+                    }
+                }
             }
         }
 
+        // Strictly count GRADED exams with >= 80% score (never ungraded drafts/pending submissions)
         $highExams = ExamSubmission::forStudent($student->id)
+            ->whereNotNull('submitted_at')
+            ->where('status', ExamSubmissionStatus::GRADED)
             ->where('percentage', '>=', 80)
             ->count();
 
-        $bestRank = LeagueParticipant::where('student_id', $student->id)
+        // Strictly require earned league points (> 0) before counting a Top-10 rank as eligible
+        $bestCourseRank = LeagueParticipant::where('student_id', $student->id)
             ->where('rank', '>', 0)
+            ->where('xp_points', '>', 0)
             ->min('rank');
 
+        $bestRank = $bestCourseRank !== null ? (int) $bestCourseRank : null;
+
+        $activeRepublic = RepublicLeague::currentActive();
+        if ($activeRepublic) {
+            $ranked = $this->computeGeneralRankedStudents($student, $activeRepublic);
+            $myRow = collect($ranked)->firstWhere('studentId', (int) $student->id);
+            if ($myRow && (int) ($myRow['xpPoints'] ?? 0) > 0 && (int) ($myRow['rank'] ?? 0) > 0) {
+                $repRank = (int) $myRow['rank'];
+                $bestRank = $bestRank === null ? $repRank : min($bestRank, $repRank);
+            }
+        }
+
         return [
-            'teacher' => ['eligible' => $completedCourses > 0, 'progressValue' => $completedCourses],
-            'ministry' => ['eligible' => $highExams > 0, 'progressValue' => $highExams],
-            'league' => ['eligible' => $bestRank !== null && (int) $bestRank <= 10, 'progressValue' => $bestRank !== null ? (int) $bestRank : null],
+            'teacher' => [
+                'eligible' => $completedCourses > 0,
+                'progressValue' => $completedCourses,
+                'totalCourses' => $totalCoursesWithLessons,
+                'claimableCourses' => $claimableCourses,
+            ],
+            'ministry' => [
+                'eligible' => $highExams > 0,
+                'progressValue' => $highExams,
+            ],
+            'league' => [
+                'eligible' => $bestRank !== null && $bestRank <= 10,
+                'progressValue' => $bestRank,
+            ],
         ];
+    }
+
+    /**
+     * Server-verified 1-click claim of an official Course Completion Certificate for a 100%-completed enrolled course.
+     */
+    public function claimCourseCertificate(User $student, string $courseUuid): array
+    {
+        /** @var Course|null $course */
+        $course = Course::where('uuid', $courseUuid)
+            ->with('teacher.teacherProfile')
+            ->first();
+
+        if (! $course) {
+            throw (new ModelNotFoundException)->setModel(Course::class, [$courseUuid]);
+        }
+
+        $this->accessService->assertCanAccess($student, $course, (int) $course->teacher_id, (int) $course->id);
+
+        $totalPublished = Lesson::query()
+            ->where('course_id', $course->id)
+            ->where('status', LessonStatus::PUBLISHED)
+            ->count();
+
+        $completedLessons = StudentLessonProgress::forStudent($student->id)
+            ->where('course_id', $course->id)
+            ->where('is_completed', true)
+            ->whereHas('lesson', fn ($q) => $q->where('status', LessonStatus::PUBLISHED))
+            ->distinct('lesson_id')
+            ->count('lesson_id');
+
+        if ($totalPublished === 0 || $completedLessons < $totalPublished) {
+            throw ValidationException::withMessages([
+                'course_id' => ['يجب إتمام 100% من حصص المقرر أولاً لاستحقاق شهادة الإتمام المعتمدة.'],
+            ]);
+        }
+
+        /** @var CourseCertificate|null $existing */
+        $existing = CourseCertificate::query()
+            ->where('student_id', $student->id)
+            ->where('course_id', $course->id)
+            ->where('status', CertificateStatus::VERIFIED)
+            ->with(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en'])
+            ->first();
+
+        if ($existing) {
+            return $this->formatStudentCertificate($existing, 100);
+        }
+
+        // Compute real average graded exam score in this course (defaults to 100.0 if course has no graded exams yet)
+        $avgExamPercent = ExamSubmission::query()
+            ->join('exams', 'exams.id', '=', 'exam_submissions.exam_id')
+            ->where('exam_submissions.student_id', $student->id)
+            ->where('exam_submissions.status', ExamSubmissionStatus::GRADED->value)
+            ->where('exams.course_id', $course->id)
+            ->avg('exam_submissions.percentage');
+
+        $gradePercent = $avgExamPercent !== null ? round((float) $avgExamPercent, 1) : 100.0;
+        $honorsAr = $gradePercent >= 95
+            ? 'شهادة إتمام وتفوق بامتياز مع مرتبة الشرف'
+            : ($gradePercent >= 85 ? 'شهادة إتمام وتفوق بتقدير ممتاز' : 'شهادة إتمام مقرر دراسي معتمد');
+        $honorsEn = $gradePercent >= 95
+            ? 'Certificate of Course Completion with High Honors'
+            : ($gradePercent >= 85 ? 'Certificate of Excellence & Course Completion' : 'Certificate of Course Completion');
+
+        $profile = StudentProfile::where('student_id', $student->id)->first();
+        $certNumber = CourseCertificate::generateUniqueCertNumber('CRS');
+        $issueDate = now()->toDateString();
+
+        $signatureHash = CourseCertificate::computeSignatureHash(
+            $certNumber,
+            (int) $course->teacher_id,
+            $student->name,
+            $gradePercent,
+            $issueDate
+        );
+
+        /** @var CourseCertificate $certificate */
+        $certificate = CourseCertificate::create([
+            'certificate_number' => $certNumber,
+            'signature_hash' => $signatureHash,
+            'teacher_id' => $course->teacher_id,
+            'student_id' => $student->id,
+            'course_id' => $course->id,
+            'student_name_ar' => $student->name,
+            'student_name_en' => $student->name,
+            'student_email' => $student->email,
+            'student_phone' => $student->phone,
+            'course_name_ar' => $course->title_ar,
+            'course_name_en' => $course->title_en ?: $course->title_ar,
+            'grade_ar' => $course->grade_ar ?: ($profile?->grade_ar ?: 'الصف الثالث الثانوي'),
+            'grade_percent' => $gradePercent,
+            'honors_title_ar' => $honorsAr,
+            'honors_title_en' => $honorsEn,
+            'issue_date' => $issueDate,
+            'status' => CertificateStatus::VERIFIED,
+        ]);
+
+        $certificate->load(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en']);
+
+        return $this->formatStudentCertificate($certificate, 100);
     }
 
     /**
@@ -1306,27 +1501,124 @@ class StudentGamificationService extends BaseService
     }
 
     /**
-     * List verified certificates issued to the authenticated student.
+     * List verified certificates issued to the authenticated student (matched by student_id or fallback email).
      */
     public function listCertificates(User $student): array
     {
-        $certificates = CourseCertificate::query()
-            ->where('student_id', $student->id)
-            ->where('status', CertificateStatus::VERIFIED)
-            ->latest('issue_date')
-            ->get();
+        return $this->mapStudentCertificateModels($student, $this->fetchStudentCertificateModels($student));
+    }
 
-        return $certificates->map(fn (CourseCertificate $c) => [
+    /**
+     * Query verified certificates belonging to a student, including email-matched teacher-issued records.
+     */
+    protected function fetchStudentCertificateModels(User $student)
+    {
+        $emailLower = strtolower(trim((string) $student->email));
+
+        return CourseCertificate::query()
+            ->where('status', CertificateStatus::VERIFIED)
+            ->where(function ($q) use ($student, $emailLower) {
+                $q->where('student_id', $student->id);
+                if ($emailLower !== '') {
+                    $q->orWhere(function ($q2) use ($emailLower) {
+                        $q2->whereNull('student_id')
+                            ->whereRaw('LOWER(student_email) = ?', [$emailLower]);
+                    });
+                }
+            })
+            ->with(['teacher.teacherProfile', 'course:id,uuid,title_ar,title_en'])
+            ->latest('issue_date')
+            ->latest('id')
+            ->get();
+    }
+
+    /**
+     * Map certificate models with real per-course completion percentages and teacher details.
+     */
+    protected function mapStudentCertificateModels(User $student, $certModels): array
+    {
+        $linkedCourseIds = $certModels->pluck('course_id')->filter()->unique()->values()->all();
+        $completionMap = [];
+
+        if (! empty($linkedCourseIds)) {
+            $publishedByCourse = Lesson::query()
+                ->whereIn('course_id', $linkedCourseIds)
+                ->where('status', LessonStatus::PUBLISHED)
+                ->select(['course_id', DB::raw('COUNT(*) as total_lessons')])
+                ->groupBy('course_id')
+                ->pluck('total_lessons', 'course_id');
+
+            $doneByCourse = StudentLessonProgress::forStudent($student->id)
+                ->whereIn('course_id', $linkedCourseIds)
+                ->where('is_completed', true)
+                ->whereHas('lesson', fn ($q) => $q->where('status', LessonStatus::PUBLISHED))
+                ->select(['course_id', DB::raw('COUNT(DISTINCT lesson_id) as done_lessons')])
+                ->groupBy('course_id')
+                ->pluck('done_lessons', 'course_id');
+
+            foreach ($linkedCourseIds as $cid) {
+                $tot = (int) ($publishedByCourse[$cid] ?? 0);
+                $done = (int) ($doneByCourse[$cid] ?? 0);
+                $completionMap[(int) $cid] = $tot > 0 ? min(100, (int) round(($done / $tot) * 100)) : 100;
+            }
+        }
+
+        return $certModels
+            ->map(fn (CourseCertificate $c) => $this->formatStudentCertificate(
+                $c,
+                $c->course_id ? ($completionMap[(int) $c->course_id] ?? 100) : 100
+            ))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Canonical student certificate payload matching OfficialCertificateDocument + public QR verification.
+     */
+    protected function formatStudentCertificate(CourseCertificate $c, int $completionPercent = 100): array
+    {
+        $teacherProfile = $c->teacher?->teacherProfile;
+        $teacherNameAr = $teacherProfile?->name_ar ?: ($c->teacher?->name ?: 'معلم معتمد');
+        $teacherNameEn = $teacherProfile?->name_en ?: $teacherNameAr;
+        $teacherTitleAr = $teacherProfile?->title_ar ?: 'معلم معتمد على منصة متفوّق';
+        $teacherTitleEn = $teacherProfile?->title_en ?: 'Certified Motafawweq Educator';
+        $issueDate = $c->issue_date?->format('Y-m-d');
+        $gradePercent = (float) $c->grade_percent;
+        $scoreLabel = fmod($gradePercent, 1.0) === 0.0
+            ? sprintf('%d%%', (int) $gradePercent)
+            : sprintf('%.1f%%', $gradePercent);
+
+        return [
             'id' => $c->uuid,
+            'serialId' => $c->certificate_number,
             'certificateNumber' => $c->certificate_number,
             'signatureHash' => $c->signature_hash,
+            'issuerType' => 'teacher',
+            'category' => 'teacher',
+            'issuerNameAr' => $teacherNameAr,
+            'issuerNameEn' => $teacherNameEn,
+            'instructorAr' => $teacherNameAr,
+            'instructorEn' => $teacherNameEn,
+            'instructorTitleAr' => $teacherTitleAr,
+            'instructorTitleEn' => $teacherTitleEn,
             'studentNameAr' => $c->student_name_ar,
+            'studentNameEn' => $c->student_name_en ?: $c->student_name_ar,
+            'courseId' => $c->course?->uuid,
             'courseNameAr' => $c->course_name_ar,
-            'gradeAr' => $c->grade_ar,
-            'gradePercent' => (float) $c->grade_percent,
+            'courseNameEn' => $c->course_name_en ?: ($c->course?->title_en ?: $c->course_name_ar),
+            'gradeAr' => $c->grade_ar ?: 'الصف الثالث الثانوي',
+            'gradePercent' => $gradePercent,
+            'score' => $scoreLabel,
+            'scoreEn' => $scoreLabel,
+            'completionRate' => "{$completionPercent}%",
             'honorsTitleAr' => $c->honors_title_ar,
-            'issueDate' => $c->issue_date?->format('Y-m-d'),
+            'honorsTitleEn' => $c->honors_title_en ?: 'Certificate of Academic Excellence',
+            'issueDate' => $issueDate,
+            'completionDate' => $issueDate,
+            'completionDateEn' => $c->issue_date?->format('F j, Y'),
+            'status' => $c->status?->value ?? CertificateStatus::VERIFIED->value,
             'verifyUrl' => "/api/v1/verify-certificate/{$c->certificate_number}",
-        ])->values()->all();
+            'verifyPath' => "/verify/{$c->certificate_number}",
+        ];
     }
 }

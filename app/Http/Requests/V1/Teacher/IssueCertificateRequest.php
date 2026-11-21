@@ -14,8 +14,8 @@ class IssueCertificateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'student_id' => ['nullable', 'integer', 'exists:users,id'],
-            'course_id' => ['nullable', 'string'],
+            'student_id' => ['nullable', 'max:64'],
+            'course_id' => ['nullable', 'string', 'max:64'],
             'student_name_ar' => ['required', 'string', 'max:150'],
             'student_name_en' => ['nullable', 'string', 'max:150'],
             'student_email' => ['nullable', 'email', 'max:150'],

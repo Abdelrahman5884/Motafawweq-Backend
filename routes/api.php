@@ -260,6 +260,10 @@ Route::prefix('v1')->group(function () {
                     ->middleware('throttle:student-read');
                 Route::get('/certificates', [StudentGamificationController::class, 'certificates'])
                     ->middleware('throttle:student-read');
+                Route::get('/certificates/workspace', [StudentGamificationController::class, 'certificatesWorkspace'])
+                    ->middleware('throttle:student-read');
+                Route::post('/certificates/claim', [StudentGamificationController::class, 'claimCourseCertificate'])
+                    ->middleware(['throttle:student-write', 'idempotent']);
 
                 // Phase 9: Billing, Coupon Validation & Direct Teacher Payments
                 Route::get('/billing', [StudentBillingController::class, 'overview'])

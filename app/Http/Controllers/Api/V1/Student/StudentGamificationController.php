@@ -68,6 +68,25 @@ class StudentGamificationController extends BaseApiController
         return $this->successResponse($this->gamificationService->getCertificateEligibility($this->authenticatedUser()));
     }
 
+    public function certificatesWorkspace(): JsonResponse
+    {
+        return $this->successResponse($this->gamificationService->getCertificatesWorkspace($this->authenticatedUser()));
+    }
+
+    public function claimCourseCertificate(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'course_id' => ['required', 'uuid'],
+        ]);
+
+        $cert = $this->gamificationService->claimCourseCertificate(
+            $this->authenticatedUser(),
+            (string) $validated['course_id']
+        );
+
+        return $this->createdResponse($cert, 'تم إصدار وتوثيق شهادة إتمام المقرر بنجاح.');
+    }
+
     public function activityHeatmap(Request $request): JsonResponse
     {
         $timezone = $request->query('timezone');
