@@ -54,4 +54,14 @@ class Course extends Model
     {
         return $this->hasMany(Lesson::class);
     }
+
+    public function studyGroups(): HasMany
+    {
+        return $this->hasMany(StudyGroup::class, 'course_id');
+    }
+
+    public function directPayments(): HasMany
+    {
+        return $this->hasMany(StudentDirectPayment::class, 'course_id');
+    }
 }

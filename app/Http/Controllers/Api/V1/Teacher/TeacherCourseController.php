@@ -22,15 +22,16 @@ class TeacherCourseController extends BaseApiController
      */
     public function index(Request $request): JsonResponse
     {
+        $teacher = $this->authenticatedUser();
         $courses = $this->courseService->listCourses(
-            $this->authenticatedUser(),
+            $teacher,
             $request->only(['search', 'q', 'stage', 'stage_id', 'status'])
         );
 
         return $this->successResponse(
             TeacherCourseResource::collection($courses),
             __('messages.courses_fetched'),
-            meta: ['total' => $courses->count()]
+            meta: $this->courseService->getCoursesMeta($teacher, $courses->count())
         );
     }
 

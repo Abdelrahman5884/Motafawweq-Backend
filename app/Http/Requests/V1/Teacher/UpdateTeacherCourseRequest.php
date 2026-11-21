@@ -32,10 +32,38 @@ class UpdateTeacherCourseRequest extends BaseApiRequest
             }
         }
 
+        if ($this->hasAny(['stage_id', 'stageId', 'stage_type', 'stageType', 'stage'])) {
+            $stageId = $this->input('stage_id') ?? $this->input('stageId') ?? $this->input('stage_type') ?? $this->input('stageType') ?? $this->input('stage');
+            if ($stageId !== null) {
+                $merged['stage_id'] = trim(strip_tags((string) $stageId));
+            }
+        }
+
+        if ($this->hasAny(['subject_ar', 'subjectAr', 'subject'])) {
+            $subjectAr = $this->input('subject_ar') ?? $this->input('subjectAr') ?? $this->input('subject');
+            if ($subjectAr !== null) {
+                $merged['subject_ar'] = trim(strip_tags((string) $subjectAr));
+            }
+        }
+
         if ($this->hasAny(['price_egp', 'priceEgp', 'price'])) {
             $priceEgp = $this->input('price_egp') ?? $this->input('priceEgp') ?? $this->input('price');
             if ($priceEgp !== null) {
                 $merged['price_egp'] = $priceEgp;
+            }
+        }
+
+        if ($this->hasAny(['description_ar', 'descriptionAr', 'description'])) {
+            $descriptionAr = $this->input('description_ar') ?? $this->input('descriptionAr') ?? $this->input('description');
+            if ($descriptionAr !== null) {
+                $merged['description_ar'] = trim(strip_tags((string) $descriptionAr));
+            }
+        }
+
+        if ($this->hasAny(['hours_total', 'hoursTotal', 'hours'])) {
+            $hoursTotal = $this->input('hours_total') ?? $this->input('hoursTotal') ?? $this->input('hours');
+            if ($hoursTotal !== null) {
+                $merged['hours_total'] = trim(strip_tags((string) $hoursTotal));
             }
         }
 
@@ -55,6 +83,8 @@ class UpdateTeacherCourseRequest extends BaseApiRequest
             'stage' => ['sometimes', 'nullable', 'string', 'max:50'],
             'stageId' => ['sometimes', 'nullable', 'string', 'max:50'],
             'stage_id' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'stage_type' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'stageType' => ['sometimes', 'nullable', 'string', 'max:50'],
             'grade_ar' => ['sometimes', 'required', 'string', Rule::in(StageType::allowedGradesAr())],
             'gradeAr' => ['sometimes', 'nullable', 'string', 'max:100'],
             'grade' => ['sometimes', 'nullable', 'string', 'max:100'],
@@ -74,8 +104,8 @@ class UpdateTeacherCourseRequest extends BaseApiRequest
             'hours' => ['sometimes', 'nullable', 'string', 'max:60'],
             'hoursTotal' => ['sometimes', 'nullable', 'string', 'max:60'],
             'hours_total' => ['sometimes', 'nullable', 'string', 'max:60'],
-            'lessonsCount' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:500'],
-            'lessons_count' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:500'],
+            'lessonsCount' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:500'],
+            'lessons_count' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:500'],
             'status' => ['sometimes', 'nullable', 'string', Rule::in(CourseStatus::values())],
         ];
     }

@@ -2,14 +2,24 @@
 
 namespace Tests\Feature\Teacher;
 
+use App\Enums\CourseStatus;
+use App\Enums\DirectPaymentStatus;
+use App\Enums\EnrollmentStatus;
+use App\Enums\PaymentMethod;
 use App\Enums\TeacherPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\Course;
+use App\Models\GroupEnrollment;
+use App\Models\Lesson;
+use App\Models\StudentDirectPayment;
+use App\Models\StudentLessonProgress;
+use App\Models\StudyGroup;
 use App\Models\TeacherProfile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class TeacherCourseTest extends TestCase
@@ -220,5 +230,132 @@ class TeacherCourseTest extends TestCase
             'event' => 'teacher.idor_attempt_blocked',
             'level' => 'warning',
         ]);
+    }
+
+    public function test_courses_list_hydrates_live_metrics_supports_full_edit_and_returns_quota_meta(): void
+    {
+        [$teacher, $token, $profile] = $this->createAuthenticatedTeacher('live.courses@motafawweq.com', TeacherPlanTier::PLUS);
+        $profile->update(['subject_ar' => 'الفيزياء', 'subject_en' => 'Physics']);
+
+        // Create primary-stage free course (verifying prim stage + 0 EGP + default profile subject)
+        $createRes = $this->withToken($token)
+            ->postJson('/api/v1/teacher/courses', [
+                'title_ar' => 'العلوم المبسطة للصف السادس',
+                'stage_id' => 'prim',
+                'grade_ar' => 'الصف السادس الابتدائي',
+                'price_egp' => 0,
+                'status' => CourseStatus::DRAFT->value,
+            ]);
+
+        $createRes->assertCreated()
+            ->assertJsonPath('data.stageId', 'prim')
+            ->assertJsonPath('data.stage', 'المرحلة الابتدائية')
+            ->assertJsonPath('data.subjectAr', 'الفيزياء')
+            ->assertJsonPath('data.priceEgp', 0)
+            ->assertJsonPath('data.status', 'draft')
+            ->assertJsonPath('data.lessonsCount', 0);
+
+        $courseUuid = $createRes->json('data.id');
+        $course = Course::where('uuid', $courseUuid)->firstOrFail();
+
+        // Full edit of ALL fields including subject, stage, grade, status, price, hours, description
+        $updateRes = $this->withToken($token)
+            ->putJson("/api/v1/teacher/courses/{$courseUuid}", [
+                'title_ar' => 'مقرر الفيزياء الحديثة للثانوية',
+                'stage_id' => 'sec',
+                'grade_ar' => 'الصف الثالث الثانوي',
+                'subject_ar' => 'الفيزياء الحديثة',
+                'price_egp' => 250,
+                'status' => CourseStatus::PUBLISHED->value,
+                'description_ar' => 'شرح كامل لمنهج الفيزياء الحديثة والتطبيقات.',
+            ]);
+
+        $updateRes->assertOk()
+            ->assertJsonPath('data.uuid', $courseUuid)
+            ->assertJsonPath('data.stageId', 'sec')
+            ->assertJsonPath('data.stage', 'المرحلة الثانوية')
+            ->assertJsonPath('data.gradeAr', 'الصف الثالث الثانوي')
+            ->assertJsonPath('data.subjectAr', 'الفيزياء الحديثة')
+            ->assertJsonPath('data.priceEgp', 250)
+            ->assertJsonPath('data.status', 'published');
+
+        // Seed real linked group enrollment, lessons, direct payment & student progress
+        $student = User::factory()->create([
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
+            'email_verified_at' => now(),
+        ]);
+
+        $group = StudyGroup::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'name_ar' => 'مجموعة الفيزياء أ',
+            'subject_ar' => 'الفيزياء الحديثة',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'center_name' => 'سنتر الدقي',
+            'max_students' => 40,
+            'status' => 'active',
+        ]);
+
+        GroupEnrollment::create([
+            'study_group_id' => $group->id,
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::ENROLLED,
+        ]);
+
+        $lesson1 = Lesson::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'الحصة الأولى',
+            'duration_seconds' => 3600,
+        ]);
+        Lesson::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'الحصة الثانية',
+            'duration_seconds' => 1800,
+        ]);
+
+        StudentDirectPayment::create([
+            'teacher_id' => $teacher->id,
+            'student_id' => $student->id,
+            'course_id' => $course->id,
+            'study_group_id' => $group->id,
+            'student_name_ar' => $student->name,
+            'course_name_ar' => $course->title_ar,
+            'amount_egp' => 500,
+            'payment_method' => PaymentMethod::VODAFONE,
+            'reference_num' => 'REF-CRS-100',
+            'status' => DirectPaymentStatus::CONFIRMED,
+            'paid_at' => now(),
+            'confirmed_at' => now(),
+        ]);
+
+        StudentLessonProgress::create([
+            'uuid' => (string) Str::uuid(),
+            'student_id' => $student->id,
+            'lesson_id' => $lesson1->id,
+            'course_id' => $course->id,
+            'watched_seconds' => 2700,
+            'max_position_seconds' => 2700,
+            'duration_seconds' => 3600,
+            'progress_percent' => 75,
+            'is_completed' => false,
+            'last_heartbeat_at' => now(),
+        ]);
+
+        $listRes = $this->withToken($token)->getJson('/api/v1/teacher/courses');
+        $listRes->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('meta.activeCoursesCount', 1)
+            ->assertJsonPath('meta.maxCourses', 10)
+            ->assertJsonPath('meta.planTier', 'plus')
+            ->assertJsonPath('meta.defaultSubjectAr', 'الفيزياء')
+            ->assertJsonPath('data.0.studentsCount', 1)
+            ->assertJsonPath('data.0.lessonsCount', 2)
+            ->assertJsonPath('data.0.actualLessonsCount', 2)
+            ->assertJsonPath('data.0.hoursTotal', '1.5 ساعة')
+            ->assertJsonPath('data.0.revenueEgp', 500)
+            ->assertJsonPath('data.0.completionRate', 75);
     }
 }
