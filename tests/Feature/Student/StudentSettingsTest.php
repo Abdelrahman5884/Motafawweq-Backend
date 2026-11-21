@@ -241,4 +241,50 @@ class StudentSettingsTest extends TestCase
 
         $this->deleteJson('/api/v1/student/profile/avatar')->assertForbidden();
     }
+
+    public function test_student_can_permanently_delete_own_account_with_password_confirmation(): void
+    {
+        Storage::fake('public');
+
+        $student = $this->createStudent();
+        /** @var TokenService $tokenService */
+        $tokenService = app(TokenService::class);
+        $tokens = $tokenService->issuePair($student, '127.0.0.1', 'Mozilla/5.0 Chrome/120');
+
+        // Initialize profile & upload an avatar to verify full cascade + file cleanup
+        $pngBytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+        $validPng = UploadedFile::fake()->createWithContent('avatar.png', $pngBytes);
+
+        $this->withHeader('Authorization', 'Bearer '.$tokens['access_token'])
+            ->post('/api/v1/student/profile/avatar', ['avatar' => $validPng], ['Accept' => 'application/json'])
+            ->assertOk();
+
+        $stored = StoredFile::where('user_id', $student->id)->where('entity_type', 'user_avatar')->firstOrFail();
+        Storage::disk('public')->assertExists($stored->storage_path);
+
+        // Wrong password must fail with 422 and keep account intact
+        $this->withHeader('Authorization', 'Bearer '.$tokens['access_token'])
+            ->deleteJson('/api/v1/auth/account', ['password' => 'WrongPassword!'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['password']);
+
+        $this->assertDatabaseHas('users', ['id' => $student->id]);
+
+        // Correct password deletes account, revokes tokens, cascades profile, and cleans avatar file
+        $this->withHeader('Authorization', 'Bearer '.$tokens['access_token'])
+            ->deleteJson('/api/v1/auth/account', ['password' => 'OldPass@2026!'])
+            ->assertOk()
+            ->assertJsonPath('success', true);
+
+        $this->assertDatabaseMissing('users', ['id' => $student->id]);
+        $this->assertDatabaseMissing('student_profiles', ['student_id' => $student->id]);
+        $this->assertDatabaseMissing('personal_access_tokens', ['tokenable_id' => $student->id]);
+        Storage::disk('public')->assertMissing($stored->storage_path);
+
+        // Old token is rejected
+        $this->app['auth']->forgetGuards();
+        $this->withHeader('Authorization', 'Bearer '.$tokens['access_token'])
+            ->getJson('/api/v1/auth/me')
+            ->assertUnauthorized();
+    }
 }

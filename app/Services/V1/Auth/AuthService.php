@@ -8,6 +8,7 @@ use App\Enums\UserStatus;
 use App\Enums\VerificationCodeType;
 use App\Exceptions\AuthSecurityException;
 use App\Models\PersonalAccessToken;
+use App\Models\StoredFile;
 use App\Models\User;
 use App\Notifications\Auth\NewDeviceLoginNotification;
 use App\Notifications\Auth\PasswordChangedNotification;
@@ -16,7 +17,9 @@ use App\Repositories\Contracts\LoginHistoryRepositoryInterface;
 use App\Repositories\Contracts\UserRepositoryInterface;
 use App\Services\BaseService;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class AuthService extends BaseService
 {
@@ -251,6 +254,51 @@ class AuthService extends BaseService
         $allowed = array_intersect_key($data, array_flip(['name', 'phone', 'avatar']));
 
         return $this->userRepository->update($user->id, $allowed);
+    }
+
+    /**
+     * Permanently delete the authenticated user's account after verifying their current password.
+     * Cleans up stored avatar files, revokes all active tokens, logs an audit trail, and deletes the user.
+     *
+     * @throws ValidationException
+     */
+    public function deleteAccount(User $user, string $password): void
+    {
+        if (! Hash::check($password, $user->password)) {
+            $this->logSecurityEvent('FAILED_ACCOUNT_DELETE_ATTEMPT', ['user_id' => $user->id], 'warning');
+
+            throw ValidationException::withMessages([
+                'password' => [__('messages.current_password_wrong')],
+            ]);
+        }
+
+        $this->transaction(function () use ($user) {
+            if ($user->avatar && preg_match('#/storage/(avatars/(?:students|teachers)/[a-zA-Z0-9\-]+\.(jpg|png|webp))$#', $user->avatar, $matches)) {
+                Storage::disk('public')->delete($matches[1]);
+            }
+
+            $storedFiles = StoredFile::where('user_id', $user->id)
+                ->where('entity_type', 'user_avatar')
+                ->get();
+
+            foreach ($storedFiles as $file) {
+                try {
+                    if ($file->storage_disk && $file->storage_path) {
+                        Storage::disk($file->storage_disk)->delete($file->storage_path);
+                    }
+                } catch (Throwable) {
+                    // Never block account deletion on external storage cleanup errors
+                }
+            }
+
+            $this->logSecurityEvent('USER_ACCOUNT_DELETED', [
+                'deleted_user_id' => $user->id,
+                'role' => $user->role?->value,
+            ], 'warning');
+
+            $user->tokens()->delete();
+            $user->delete();
+        });
     }
 
     private static function dummyHash(): string

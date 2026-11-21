@@ -100,7 +100,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/me', [AuthController::class, 'me']);
             Route::post('/logout', [AuthController::class, 'logout']);
             Route::post('/logout-all', [AuthController::class, 'logoutAll']);
-            Route::delete('/account', [AuthController::class, 'deleteAccount']);
+            Route::delete('/account', [AuthController::class, 'deleteAccount'])->middleware('throttle:strict');
 
             Route::middleware('throttle:otp')->prefix('email')->group(function () {
                 Route::post('/verify', [EmailVerificationController::class, 'verify']);

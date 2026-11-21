@@ -54,6 +54,7 @@ return [
     'student_avatar_updated' => 'Profile picture updated successfully.',
     'student_avatar_deleted' => 'Profile picture removed successfully.',
     'user_deleted' => 'User deleted successfully.',
+    'account_deleted' => 'Your account has been permanently deleted.',
     'role_not_allowed' => 'The selected role is not available for registration.',
     'invalid_student_code' => 'Invalid student code. No student was found with this code.',
 

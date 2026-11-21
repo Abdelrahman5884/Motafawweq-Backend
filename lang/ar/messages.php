@@ -54,6 +54,7 @@ return [
     'student_avatar_updated' => 'تم تحديث الصورة الشخصية بنجاح.',
     'student_avatar_deleted' => 'تم حذف الصورة الشخصية بنجاح.',
     'user_deleted' => 'تم حذف المستخدم بنجاح',
+    'account_deleted' => 'تم حذف حسابك نهائياً بنجاح.',
     'role_not_allowed' => 'الدور المختار غير متاح للتسجيل.',
     'invalid_student_code' => 'كود الطالب غير صحيح أو غير مسجل لأي طالب في المنصة.',
 

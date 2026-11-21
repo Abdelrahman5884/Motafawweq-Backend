@@ -14,8 +14,6 @@ use App\Models\PersonalAccessToken;
 use App\Services\V1\Auth\AuthService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
 
 class AuthController extends BaseApiController
 {
@@ -108,20 +106,12 @@ class AuthController extends BaseApiController
 
     public function deleteAccount(Request $request): JsonResponse
     {
-        $user = $request->user();
         $validated = $request->validate([
-            'password' => ['required', 'string'],
+            'password' => ['required', 'string', 'max:128'],
         ]);
 
-        if (! Hash::check($validated['password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'password' => ['كلمة المرور غير صحيحة.'],
-            ]);
-        }
+        $this->authService->deleteAccount($request->user(), $validated['password']);
 
-        $user->tokens()->delete();
-        $user->delete();
-
-        return $this->successResponse(null, 'تم حذف الحساب نهائياً بنجاح.');
+        return $this->successResponse(null, __('messages.account_deleted'));
     }
 }
