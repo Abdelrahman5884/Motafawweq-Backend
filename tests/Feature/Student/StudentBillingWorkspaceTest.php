@@ -55,12 +55,12 @@ class StudentBillingWorkspaceTest extends TestCase
         $this->assertCount(3, $plans);
         $this->assertSame(['free', 'plus', 'pro'], $plans->pluck('tier')->all());
         $this->assertSame(0, $plans[0]['pricing']['monthly']['priceEgp']);
-        $this->assertSame(99, $plans[1]['pricing']['monthly']['priceEgp']);
-        $this->assertSame(395, $plans[1]['pricing']['term']['priceEgp']);
-        $this->assertSame(690, $plans[1]['pricing']['annual']['priceEgp']);
-        $this->assertSame(179, $plans[2]['pricing']['monthly']['priceEgp']);
-        $this->assertSame(715, $plans[2]['pricing']['term']['priceEgp']);
-        $this->assertSame(1250, $plans[2]['pricing']['annual']['priceEgp']);
+        $this->assertSame(50, $plans[1]['pricing']['monthly']['priceEgp']);
+        $this->assertSame(200, $plans[1]['pricing']['term']['priceEgp']);
+        $this->assertSame(350, $plans[1]['pricing']['annual']['priceEgp']);
+        $this->assertSame(80, $plans[2]['pricing']['monthly']['priceEgp']);
+        $this->assertSame(320, $plans[2]['pricing']['term']['priceEgp']);
+        $this->assertSame(560, $plans[2]['pricing']['annual']['priceEgp']);
     }
 
     public function test_student_can_subscribe_with_coupon_and_upgrade_persistently(): void
@@ -80,15 +80,15 @@ class StudentBillingWorkspaceTest extends TestCase
 
         Sanctum::actingAs($student, [TokenType::ACCESS->value]);
 
-        // 1. Validate coupon on Plus Term (395 EGP -> 20% = 79 EGP off -> 316 EGP)
+        // 1. Validate coupon on Plus Term (200 EGP -> 20% = 40 EGP off -> 160 EGP)
         $valRes = $this->postJson('/api/v1/student/billing/coupons/validate', [
             'code' => 'std20',
-            'amount_egp' => 395,
+            'amount_egp' => 200,
         ]);
         $valRes->assertOk()
             ->assertJsonPath('data.discountPercent', 20)
-            ->assertJsonPath('data.discountEgp', 79)
-            ->assertJsonPath('data.finalAmountEgp', 316);
+            ->assertJsonPath('data.discountEgp', 40)
+            ->assertJsonPath('data.finalAmountEgp', 160);
 
         // 2. Subscribe to Plus Term using coupon
         $subRes = $this->postJson('/api/v1/student/billing/subscribe', [
@@ -102,17 +102,17 @@ class StudentBillingWorkspaceTest extends TestCase
             ->assertJsonPath('data.activeSub.planTier', 'plus')
             ->assertJsonPath('data.activeSub.billingPeriod', 'term')
             ->assertJsonPath('data.activeSub.isFree', false)
-            ->assertJsonPath('data.activeSub.amountEgp', 316)
-            ->assertJsonPath('data.invoice.baseAmountEgp', 395)
-            ->assertJsonPath('data.invoice.discountAmountEgp', 79)
-            ->assertJsonPath('data.invoice.amountEgp', 316)
+            ->assertJsonPath('data.activeSub.amountEgp', 160)
+            ->assertJsonPath('data.invoice.baseAmountEgp', 200)
+            ->assertJsonPath('data.invoice.discountAmountEgp', 40)
+            ->assertJsonPath('data.invoice.amountEgp', 160)
             ->assertJsonPath('data.invoice.couponCode', 'STD20');
 
         $this->assertSame(1, $coupon->fresh()->used_count);
         $this->assertSame(1, StudentSubscription::where('student_id', $student->id)->where('status', 'active')->count());
         $this->assertSame(1, StudentInvoice::where('student_id', $student->id)->count());
 
-        // 3. Upgrade to Pro Annual (1250 EGP, no coupon) -> old Plus becomes superseded!
+        // 3. Upgrade to Pro Annual (560 EGP, no coupon) -> old Plus becomes superseded!
         $upRes = $this->postJson('/api/v1/student/billing/subscribe', [
             'plan_tier' => 'pro',
             'billing_period' => 'annual',
@@ -122,7 +122,7 @@ class StudentBillingWorkspaceTest extends TestCase
         $upRes->assertCreated()
             ->assertJsonPath('data.activeSub.planTier', 'pro')
             ->assertJsonPath('data.activeSub.billingPeriod', 'annual')
-            ->assertJsonPath('data.activeSub.amountEgp', 1250);
+            ->assertJsonPath('data.activeSub.amountEgp', 560);
 
         $this->assertSame(1, StudentSubscription::where('student_id', $student->id)->where('status', 'active')->count());
         $this->assertSame(1, StudentSubscription::where('student_id', $student->id)->where('status', 'superseded')->count());

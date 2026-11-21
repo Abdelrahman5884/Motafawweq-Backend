@@ -24,7 +24,7 @@ class StudentBillingService extends BaseService
 {
     /**
      * Authoritative server-side pricing matrix (EGP) for the 3 student subscription tiers:
-     * Free (0 EGP), Plus (99 / 395 / 690 EGP), Pro (179 / 715 / 1,250 EGP).
+     * Free (0 EGP), Plus (50 / 200 / 350 EGP), Pro (80 / 320 / 560 EGP).
      * Term = 5 months (20% savings vs monthly), Annual = 10 academic months (30% savings vs monthly).
      */
     public const PRICING = [
@@ -34,14 +34,14 @@ class StudentBillingService extends BaseService
             'annual' => 0.0,
         ],
         'plus' => [
-            'monthly' => 99.0,
-            'term' => 395.0,
-            'annual' => 690.0,
+            'monthly' => 50.0,
+            'term' => 200.0,
+            'annual' => 350.0,
         ],
         'pro' => [
-            'monthly' => 179.0,
-            'term' => 715.0,
-            'annual' => 1250.0,
+            'monthly' => 80.0,
+            'term' => 320.0,
+            'annual' => 560.0,
         ],
     ];
 
@@ -95,23 +95,23 @@ class StudentBillingService extends BaseService
                     'الوصول للحصص المنشورة في مجموعاتك والملخصات الأساسية',
                     'الانضمام لمجموعات المعلمين عبر كود الدعوة وحل الواجبات',
                     'متابعة الجدول الأسبوعي وسجل الحضور والاستريك اليومي',
-                    'المشاركة في الامتحانات الدورية ودوريات المعلمين',
+                    'حل الاختبارات الدورية المقررة من المعلم',
                 ],
                 'featuresEn' => [
                     'Access published lessons and core notes in your groups',
                     'Join teacher study groups via join code and submit homework',
                     'Weekly study schedule, attendance log, and daily streak tracker',
-                    'Participate in scheduled exams and teacher course leagues',
+                    'Take scheduled exams assigned by your teachers',
                 ],
                 'limitationsAr' => [
-                    'تحويل المحاضرات الذكي بالـ AI (صوت / فيديو / PDF)',
-                    'مركز تقوية نقاط الضعف وخطة المراجعة الذكية',
-                    'تقارير الأداء التفصيلية المتقدمة لولي الأمر',
+                    'دوريات المتفوقين (دوري المعلمين ودوري الجمهورية) والأوسمة والتحديات الأسبوعية',
+                    'شهادات الإتمام والتفوق المعتمدة بكود QR',
+                    'تحويل المحاضرات الذكي بالـ AI وتوليد كويزات البابل شيت',
                 ],
                 'limitationsEn' => [
-                    'AI Smart Lecture Converter (Audio / Video / PDF)',
-                    'AI Weak-Areas Diagnostics & personalized revision plan',
-                    'Advanced weekly analytics reports for parents',
+                    'Honors Leagues (Course & Republic Leagues), badges & weekly challenges',
+                    'Verified QR completion & excellence certificates',
+                    'AI Smart Lecture Converter & Bubble-Sheet quiz generation',
                 ],
             ],
             [
@@ -119,29 +119,29 @@ class StudentBillingService extends BaseService
                 'tier' => StudentPlanTier::PLUS->value,
                 'nameAr' => 'باقة الطالب بلس (Plus)',
                 'nameEn' => 'Student Plus',
-                'subtitleAr' => 'للطالب الطموح الباحث عن تدريبات مكثفة وتحليلات أداء وشهادات معتمدة.',
-                'subtitleEn' => 'For ambitious students seeking unlimited practice, analytics, and certificates.',
+                'subtitleAr' => 'للطالب الطموح: دوريات المتفوقين، التحديات والأوسمة، الشهادات المعتمدة والاختبارات التدريبية.',
+                'subtitleEn' => 'For ambitious students: Honors Leagues, badges, weekly challenges, certificates & practice exams.',
                 'popular' => false,
                 'pricing' => [
                     'monthly' => [
-                        'priceEgp' => 99,
+                        'priceEgp' => 50,
                         'originalPriceEgp' => null,
                         'periodAr' => 'اشتراك شهري (30 يوماً)',
                         'periodEn' => 'Monthly (30 days)',
-                        'badgeAr' => 'الأكثر توفيراً',
-                        'badgeEn' => 'Great Value',
+                        'badgeAr' => 'شاملة الدوريات والتفوق',
+                        'badgeEn' => 'Leagues & Honors',
                     ],
                     'term' => [
-                        'priceEgp' => 395,
-                        'originalPriceEgp' => 495,
+                        'priceEgp' => 200,
+                        'originalPriceEgp' => 250,
                         'periodAr' => 'نصف سنة دراسية (5 شهور)',
                         'periodEn' => 'Semester Pass (5 Months)',
                         'badgeAr' => 'وفر 20%',
                         'badgeEn' => 'Save 20%',
                     ],
                     'annual' => [
-                        'priceEgp' => 690,
-                        'originalPriceEgp' => 990,
+                        'priceEgp' => 350,
+                        'originalPriceEgp' => 500,
                         'periodAr' => 'سنة دراسية كاملة (12 شهراً)',
                         'periodEn' => 'Full Academic Year',
                         'badgeAr' => 'وفر 30%',
@@ -150,23 +150,23 @@ class StudentBillingService extends BaseService
                 ],
                 'featuresAr' => [
                     'كل مزايا الباقة المجانية بدون قيود أو إعلانات',
-                    'اختبارات تدريبية وبنوك أسئلة غير محدودة مع التصحيح الفوري',
-                    'تحليلات أداء تفصيلية لمتابعة تطورك في كل مادة',
+                    'المنافسة الكاملة في دوري المعلمين ودوري أبطال الجمهورية ونظام النقاط والترتيب',
+                    'لوحة إنجازاتي الكاملة: التحديات الأسبوعية، شارات التميز، وخريطة الالتزام اليومي',
                     'شهادات إتمام وتفوق رسمية موثّقة برقم تسلسلي وكود QR',
-                    'تقارير أسبوعية منتظمة لولي الأمر بالالتزام والدرجات',
+                    'اختبارات تدريبية وبنوك أسئلة غير محدودة مع تحليلات الأداء وتقارير ولي الأمر',
                 ],
                 'featuresEn' => [
                     'Everything in Student Free with zero limits',
-                    'Unlimited practice quizzes & question banks with instant grading',
-                    'Detailed subject-by-subject performance analytics',
-                    'Official verified certificates with serial ID and QR code',
-                    'Weekly parent progress & attendance summaries',
+                    'Full access to Teacher Course Leagues, Republic League & official rankings',
+                    'Achievements hub: weekly challenges, badges & 52-week activity heatmap',
+                    'Official verified certificates with serial ID and QR verification',
+                    'Unlimited practice exams, performance analytics & weekly parent reports',
                 ],
                 'limitationsAr' => [
-                    'تحويل المحاضرات الذكي بالـ AI وتوليد كويزات البابل شيت التلقائية',
+                    'تحويل المحاضرات الذكي بالـ AI (صوت وفيديو وPDF) وتوليد كويزات البابل شيت الفورية',
                 ],
                 'limitationsEn' => [
-                    'AI Smart Lecture Transcription & automatic Bubble-Sheet quiz generation',
+                    'AI Smart Lecture Converter (Audio, Video & PDF) & instant Bubble-Sheet quiz generator',
                 ],
             ],
             [
@@ -174,12 +174,12 @@ class StudentBillingService extends BaseService
                 'tier' => StudentPlanTier::PRO->value,
                 'nameAr' => 'باقة الطالب برو (Pro)',
                 'nameEn' => 'Student Pro',
-                'subtitleAr' => 'التجربة الكاملة بالذكاء الاصطناعي لتحويل المحاضرات وتفوق الثانوية العامة.',
-                'subtitleEn' => 'The complete AI-powered study suite for top academic performance.',
+                'subtitleAr' => 'كل مزايا بلس والدوريات + كامل أدوات الذكاء الاصطناعي لتحويل المحاضرات وتفوق الثانوية العامة.',
+                'subtitleEn' => 'Everything in Plus & Leagues + the complete AI study suite for top academic performance.',
                 'popular' => true,
                 'pricing' => [
                     'monthly' => [
-                        'priceEgp' => 179,
+                        'priceEgp' => 80,
                         'originalPriceEgp' => null,
                         'periodAr' => 'اشتراك شهري (30 يوماً)',
                         'periodEn' => 'Monthly (30 days)',
@@ -187,16 +187,16 @@ class StudentBillingService extends BaseService
                         'badgeEn' => 'Most Popular • AI',
                     ],
                     'term' => [
-                        'priceEgp' => 715,
-                        'originalPriceEgp' => 895,
+                        'priceEgp' => 320,
+                        'originalPriceEgp' => 400,
                         'periodAr' => 'نصف سنة دراسية (5 شهور)',
                         'periodEn' => 'Semester Pass (5 Months)',
                         'badgeAr' => 'الأكثر طلباً • وفر 20%',
                         'badgeEn' => 'Best Seller • Save 20%',
                     ],
                     'annual' => [
-                        'priceEgp' => 1250,
-                        'originalPriceEgp' => 1790,
+                        'priceEgp' => 560,
+                        'originalPriceEgp' => 800,
                         'periodAr' => 'سنة دراسية كاملة (12 شهراً)',
                         'periodEn' => 'Full Academic Year',
                         'badgeAr' => 'الأقوى • وفر 30%',
@@ -204,20 +204,18 @@ class StudentBillingService extends BaseService
                     ],
                 ],
                 'featuresAr' => [
-                    'كل مزايا باقة الطالب بلس بلا حدود',
+                    'كل مزايا باقة الطالب بلس (الدوريات والأوسمة والشهادات) بلا حدود',
                     'تحويل المحاضرات الذكي بالـ AI (تفريغ صوت وفيديو وPDF إلى ملخصات)',
                     'توليد كويزات البابل شيت الفورية من أي محاضرة مع شرح كل إجابة',
-                    'مركز تقوية نقاط الضعف الذكي وخرائط المفاهيم وخطة المراجعة',
-                    'أولوية كاملة في معسكرات المراجعة ودوري أبطال الجمهورية',
-                    'شهادات تميز رسمية لكل المقررات والاختبارات والدوريات + دعم سريع',
+                    'مركز تقوية نقاط الضعف الذكي وخرائط المفاهيم وخطة المراجعة الشخصية',
+                    'أولوية كاملة في معسكرات المراجعة النهائية ودعم فني سريع',
                 ],
                 'featuresEn' => [
-                    'Everything in Student Plus unlimited',
+                    'Everything in Student Plus (Leagues, Badges & Certificates) unlimited',
                     'AI Smart Lecture Converter (Audio, Video & PDF to smart summaries)',
                     'Instant Bubble-Sheet quiz generator with step-by-step explanations',
                     'AI Weak-Areas Hub, concept maps & personalized revision planner',
-                    'Priority access to revision bootcamps & Republic Honors League',
-                    'Official distinction certificates across all tracks + priority support',
+                    'Priority access to final revision bootcamps & fast support',
                 ],
                 'limitationsAr' => [],
                 'limitationsEn' => [],
@@ -288,10 +286,10 @@ class StudentBillingService extends BaseService
                 'تقارير أسبوعية لولي الأمر',
             ],
             StudentPlanTier::PLUS => [
-                'اختبارات وبنوك أسئلة غير محدودة',
-                'تحليلات أداء تفصيلية لكل مادة',
+                'دوري المعلمين والجمهورية والأوسمة',
+                'التحديات الأسبوعية ولوحة الإنجازات',
                 'شهادات رسمية بكود QR',
-                'تقارير أسبوعية لولي الأمر',
+                'اختبارات وتحليلات أداء وتقارير ولي الأمر',
             ],
             StudentPlanTier::FREE => [
                 'الحصص المسجلة ومجموعات المعلمين',
@@ -308,10 +306,10 @@ class StudentBillingService extends BaseService
                 'Weekly Parent Reports',
             ],
             StudentPlanTier::PLUS => [
-                'Unlimited Practice Exams',
-                'Detailed Subject Analytics',
+                'Course & Republic Leagues',
+                'Weekly Challenges & Badges',
                 'Official QR Certificates',
-                'Weekly Parent Reports',
+                'Analytics & Parent Reports',
             ],
             StudentPlanTier::FREE => [
                 'Recorded Lessons & Groups',
