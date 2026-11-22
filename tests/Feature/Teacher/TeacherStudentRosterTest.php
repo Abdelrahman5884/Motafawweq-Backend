@@ -332,4 +332,54 @@ class TeacherStudentRosterTest extends TestCase
             'level' => 'warning',
         ]);
     }
+
+    public function test_empty_search_returns_active_students_without_fake_avatars_and_accept_is_idempotent(): void
+    {
+        $teacher = $this->createTeacher('teacher.extra@motafawweq.com');
+        $group = $this->createGroup($teacher);
+        $student = $this->createStudent('أحمد سامي', 'ahmed.extra@motafawweq.com');
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        // Empty search returns active students and avatar is null (no fake Unsplash fallback)
+        $searchRes = $this->getJson('/api/v1/teacher/students/search');
+        $searchRes->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.nameAr', 'أحمد سامي')
+            ->assertJsonPath('data.0.avatar', null);
+
+        // Invite new unregistered student by name & phone
+        $inviteManual = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/invite", [
+            'name_ar' => 'زياد محمد حسن',
+            'phone' => '01099887766',
+            'parent_name_ar' => 'محمد حسن',
+            'parent_phone' => '01055443322',
+        ]);
+        $inviteManual->assertCreated()
+            ->assertJsonPath('data.nameAr', 'زياد محمد حسن')
+            ->assertJsonPath('data.avatar', null);
+
+        $enrollmentUuid = $inviteManual->json('data.id');
+
+        // Accept first time
+        $accept1 = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$enrollmentUuid}/accept");
+        $accept1->assertOk();
+        $barcode1 = $accept1->json('data.studentBarcode');
+
+        // Re-accepting is idempotent and preserves existing barcode
+        $accept2 = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$enrollmentUuid}/accept");
+        $accept2->assertOk()
+            ->assertJsonPath('data.studentBarcode', $barcode1);
+
+        // Rejecting an already enrolled student is rejected with 422
+        $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$enrollmentUuid}/reject")
+            ->assertUnprocessable();
+
+        // Inviting with a phone number belonging to a non-student account returns 422 (never 500)
+        $this->postJson("/api/v1/teacher/groups/{$group->uuid}/invite", [
+            'name_ar' => 'رقم مكرر لمعلم',
+            'phone' => $teacher->phone,
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors(['phone']);
+    }
 }

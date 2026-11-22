@@ -46,7 +46,7 @@ class InviteStudentRequest extends BaseApiRequest
         return [
             'student_id' => ['nullable', 'string', 'max:64'],
             'name_ar' => ['required_without:student_id', 'nullable', 'string', 'min:2', 'max:150'],
-            'phone' => ['required_without:student_id', 'nullable', 'string', 'min:8', 'max:30'],
+            'phone' => ['required_without:student_id', 'nullable', 'string', 'min:8', 'max:20'],
             'parent_name_ar' => ['nullable', 'string', 'max:150'],
             'parent_phone' => ['nullable', 'string', 'max:30'],
         ];

@@ -4,11 +4,14 @@ namespace App\Services\V1\Teacher;
 
 use App\Enums\AcademicStatus;
 use App\Enums\EnrollmentStatus;
+use App\Enums\ExamSubmissionStatus;
 use App\Enums\JoinMethod;
 use App\Enums\TeacherPlanTier;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
+use App\Models\ExamSubmission;
 use App\Models\GroupEnrollment;
+use App\Models\StudentProfile;
 use App\Models\StudyGroup;
 use App\Models\TeacherProfile;
 use App\Models\User;
@@ -17,6 +20,7 @@ use App\Repositories\Contracts\StudyGroupRepositoryInterface;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -29,7 +33,8 @@ class TeacherRosterService extends BaseService
     ) {}
 
     /**
-     * Retrieve the full student roster for a specific study group (enrolled + pending).
+     * Retrieve the full student roster for a specific study group (enrolled + pending)
+     * hydrated with live graded exam averages and streaks (zero N+1).
      *
      * @return array{group: StudyGroup, enrolled: Collection, pending: Collection, stats: array<string, mixed>}
      */
@@ -40,40 +45,94 @@ class TeacherRosterService extends BaseService
         $enrolled = $this->enrollmentRepository->getEnrolledForGroup($group->id, $search);
         $pending = $this->enrollmentRepository->getPendingForGroup($group->id, $search);
 
+        $studentIds = $enrolled->pluck('student_id')->filter()->unique()->values()->all();
+        if (! empty($studentIds)) {
+            $streaksByStudent = StudentProfile::whereIn('student_id', $studentIds)
+                ->pluck('current_streak_days', 'student_id');
+
+            $examStatsByStudent = ExamSubmission::query()
+                ->join('exams', 'exams.id', '=', 'exam_submissions.exam_id')
+                ->where('exams.teacher_id', $teacher->id)
+                ->whereIn('exam_submissions.student_id', $studentIds)
+                ->where('exam_submissions.status', ExamSubmissionStatus::GRADED->value)
+                ->select([
+                    'exam_submissions.student_id',
+                    DB::raw('AVG(exam_submissions.percentage) as avg_pct'),
+                    DB::raw('COUNT(*) as graded_count'),
+                ])
+                ->groupBy('exam_submissions.student_id')
+                ->get()
+                ->keyBy('student_id');
+
+            foreach ($enrolled as $item) {
+                $sid = (int) $item->student_id;
+                $liveStreak = max((int) $item->streak_days, (int) ($streaksByStudent[$sid] ?? 0));
+                $examRow = $examStatsByStudent->get($sid);
+                $gradedCount = (int) ($examRow?->graded_count ?? 0);
+                $liveAvgQuiz = $gradedCount > 0
+                    ? (int) round((float) $examRow->avg_pct)
+                    : (int) $item->avg_quiz_score;
+
+                $attendance = (int) $item->attendance_rate;
+                $liveStatus = match (true) {
+                    $gradedCount > 0 && $liveAvgQuiz >= 95 && $attendance >= 85 => AcademicStatus::TOP_1_PERCENT->value,
+                    $gradedCount > 0 && $liveAvgQuiz >= 85 && $attendance >= 75 => AcademicStatus::EXCELLENCE->value,
+                    ($gradedCount > 0 && $liveAvgQuiz < 60) || ($item->total_sessions > 0 && $attendance < 65) => AcademicStatus::NEEDS_SUPPORT->value,
+                    default => ($item->academic_status instanceof AcademicStatus ? $item->academic_status->value : AcademicStatus::GOOD->value),
+                };
+
+                $item->setAttribute('live_streak_days', $liveStreak);
+                $item->setAttribute('live_avg_quiz_score', $liveAvgQuiz);
+                $item->setAttribute('live_graded_exams_count', $gradedCount);
+                $item->setAttribute('live_academic_status', $liveStatus);
+            }
+        }
+
+        $totalEnrolled = $enrolled->count();
+        $avgAttendance = $totalEnrolled > 0
+            ? (int) round((float) $enrolled->avg('attendance_rate'))
+            : 0;
+
         return [
             'group' => $group,
             'enrolled' => $enrolled,
             'pending' => $pending,
             'stats' => [
-                'enrolledCount' => $enrolled->count(),
+                'enrolledCount' => $totalEnrolled,
                 'pendingCount' => $pending->count(),
                 'maxStudents' => (int) $group->max_students,
-                'isFull' => $enrolled->count() >= $group->max_students,
+                'isFull' => $totalEnrolled >= $group->max_students,
+                'avgAttendanceRate' => $avgAttendance,
             ],
         ];
     }
 
     /**
      * Search registered students in the platform for teacher invitation.
+     * When query is empty, returns the most recent active students up to $limit.
      */
     public function searchStudents(User $teacher, string $query, int $limit = 20): Collection
     {
         $clean = trim($query);
-        if ($clean === '') {
-            return new Collection;
-        }
+        $safeLimit = min(50, max(1, $limit));
 
-        return User::query()
+        $builder = User::query()
             ->where('role', UserRole::STUDENT->value)
             ->where('status', UserStatus::ACTIVE->value)
-            ->where(function ($q) use ($clean) {
+            ->with(['parents', 'studentProfile:student_id,grade_ar']);
+
+        if ($clean !== '') {
+            $builder->where(function ($q) use ($clean) {
                 $q->where('name', 'like', "%{$clean}%")
                     ->orWhere('email', 'like', "%{$clean}%")
                     ->orWhere('phone', 'like', "%{$clean}%")
                     ->orWhere('student_code', 'like', "%{$clean}%");
-            })
-            ->with(['parents'])
-            ->limit(min(50, max(1, $limit)))
+            });
+        }
+
+        return $builder
+            ->orderByDesc('id')
+            ->limit($safeLimit)
             ->get();
     }
 
@@ -107,19 +166,23 @@ class TeacherRosterService extends BaseService
                 ->first();
 
             if ($existing) {
-                if ($existing->status === EnrollmentStatus::ENROLLED) {
-                    throw ValidationException::withMessages([
-                        'student' => [__('messages.student_already_enrolled')],
-                    ]);
-                }
-                if ($existing->status === EnrollmentStatus::PENDING) {
-                    throw ValidationException::withMessages([
-                        'student' => [__('messages.student_already_pending')],
-                    ]);
+                if (! $existing->trashed()) {
+                    if ($existing->status === EnrollmentStatus::ENROLLED) {
+                        throw ValidationException::withMessages([
+                            'student' => [__('messages.student_already_enrolled')],
+                        ]);
+                    }
+                    if ($existing->status === EnrollmentStatus::PENDING) {
+                        throw ValidationException::withMessages([
+                            'student' => [__('messages.student_already_pending')],
+                        ]);
+                    }
                 }
 
                 // Restore soft-deleted or rejected enrollment back to pending
-                $existing->restore();
+                if ($existing->trashed()) {
+                    $existing->restore();
+                }
                 $existing->update([
                     'status' => EnrollmentStatus::PENDING,
                     'join_method' => JoinMethod::TEACHER_INVITE,
@@ -168,6 +231,17 @@ class TeacherRosterService extends BaseService
             throw (new ModelNotFoundException)->setModel(GroupEnrollment::class, [$enrollmentUuid]);
         }
 
+        // Idempotency guard: never reset attendance/barcode on an already enrolled student
+        if ($enrollment->status === EnrollmentStatus::ENROLLED) {
+            return $enrollment->load('student');
+        }
+
+        if ($enrollment->status !== EnrollmentStatus::PENDING) {
+            throw ValidationException::withMessages([
+                'enrollment' => ['يمكن قبول طلبات الانضمام المعلقة فقط.'],
+            ]);
+        }
+
         // Check group capacity
         $currentEnrolled = $this->enrollmentRepository->countEnrolledInGroup($group->id);
         if ($currentEnrolled >= $group->max_students) {
@@ -180,8 +254,8 @@ class TeacherRosterService extends BaseService
         $this->assertTeacherPlanStudentQuota($teacher);
 
         return $this->transaction(function () use ($group, $enrollment) {
-            $barcode = GroupEnrollment::generateUniqueBarcode($group->id, $enrollment->student_id);
-            $passcode = GroupEnrollment::generatePasscode();
+            $barcode = $enrollment->student_barcode ?: GroupEnrollment::generateUniqueBarcode($group->id, $enrollment->student_id);
+            $passcode = $enrollment->student_passcode ?: GroupEnrollment::generatePasscode();
 
             $enrollment->update([
                 'status' => EnrollmentStatus::ENROLLED,
@@ -217,6 +291,12 @@ class TeacherRosterService extends BaseService
             throw (new ModelNotFoundException)->setModel(GroupEnrollment::class, [$enrollmentUuid]);
         }
 
+        if ($enrollment->status !== EnrollmentStatus::PENDING) {
+            throw ValidationException::withMessages([
+                'enrollment' => ['يمكن رفض طلبات الانضمام المعلقة فقط.'],
+            ]);
+        }
+
         return $this->transaction(function () use ($group, $enrollment) {
             $enrollment->update([
                 'status' => EnrollmentStatus::REJECTED,
@@ -227,7 +307,7 @@ class TeacherRosterService extends BaseService
                 'enrollment_uuid' => $enrollment->uuid,
             ], 'info', $enrollment);
 
-            return $enrollment;
+            return $enrollment->load('student');
         });
     }
 
@@ -355,28 +435,52 @@ class TeacherRosterService extends BaseService
      */
     protected function resolveStudentUser(array $data): User
     {
-        $studentIdentifier = $data['student_id'] ?? null;
-        if ($studentIdentifier) {
-            $user = User::where('id', is_numeric($studentIdentifier) ? (int) $studentIdentifier : 0)
-                ->orWhere('student_code', (string) $studentIdentifier)
+        $studentIdentifier = trim((string) ($data['student_id'] ?? ''));
+        if ($studentIdentifier !== '') {
+            $user = User::query()
+                ->where('role', UserRole::STUDENT->value)
+                ->where(function ($q) use ($studentIdentifier) {
+                    if (is_numeric($studentIdentifier)) {
+                        $q->where('id', (int) $studentIdentifier);
+                    } else {
+                        $q->where('student_code', $studentIdentifier)
+                            ->orWhere('uuid', $studentIdentifier);
+                    }
+                })
                 ->first();
 
-            if ($user && $user->role === UserRole::STUDENT) {
+            if ($user) {
                 return $user;
+            }
+
+            if (empty($data['name_ar']) && empty($data['phone'])) {
+                throw ValidationException::withMessages([
+                    'student_id' => [__('messages.student_not_found')],
+                ]);
             }
         }
 
         $phone = trim((string) ($data['phone'] ?? ''));
         if ($phone !== '') {
-            $user = User::where('phone', $phone)->first();
-            if ($user) {
-                return $user;
+            $existingByPhone = User::where('phone', $phone)->first();
+            if ($existingByPhone) {
+                if ($existingByPhone->role === UserRole::STUDENT) {
+                    return $existingByPhone;
+                }
+
+                throw ValidationException::withMessages([
+                    'phone' => ['رقم الهاتف مسجل بالفعل لحساب غير طالب على المنصة.'],
+                ]);
             }
         }
 
-        // If no user exists, auto-provision a platform student account for them
+        // If no student user exists, auto-provision a platform student account for them
         $name = trim((string) ($data['name_ar'] ?? 'طالب جديد'));
         $safeEmail = 'std_'.time().'_'.Str::random(5).'@student.motafawweq.local';
+
+        do {
+            $studentCode = 'STD-'.random_int(100000, 999999);
+        } while (User::where('student_code', $studentCode)->exists());
 
         return User::create([
             'name' => $name,
@@ -385,7 +489,7 @@ class TeacherRosterService extends BaseService
             'password' => Hash::make(Str::random(16)),
             'role' => UserRole::STUDENT,
             'status' => UserStatus::ACTIVE,
-            'student_code' => 'STD-'.random_int(100000, 999999),
+            'student_code' => $studentCode,
             'email_verified_at' => now(),
         ]);
     }
@@ -405,6 +509,7 @@ class TeacherRosterService extends BaseService
 
         $totalEnrolled = GroupEnrollment::query()
             ->join('study_groups', 'study_groups.id', '=', 'group_enrollments.study_group_id')
+            ->whereNull('study_groups.deleted_at')
             ->where('study_groups.teacher_id', $teacher->id)
             ->where('group_enrollments.status', EnrollmentStatus::ENROLLED->value)
             ->count();

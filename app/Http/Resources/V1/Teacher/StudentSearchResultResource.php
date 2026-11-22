@@ -15,6 +15,7 @@ class StudentSearchResultResource extends BaseJsonResource
     public function toArray(Request $request): array
     {
         $parent = $this->relationLoaded('parents') ? $this->parents->first() : null;
+        $profile = $this->relationLoaded('studentProfile') ? $this->studentProfile : null;
 
         return [
             'id' => $this->id,
@@ -24,10 +25,10 @@ class StudentSearchResultResource extends BaseJsonResource
             'nameEn' => $this->name,
             'phone' => $this->phone,
             'email' => $this->email,
-            'parentNameAr' => $parent?->name ?? 'ولي الأمر',
-            'parentPhone' => $parent?->phone ?? $this->phone,
-            'gradeAr' => 'الصف الثالث الثانوي',
-            'avatar' => $this->avatar_url ?? 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=100&auto=format&fit=crop&q=80',
+            'parentNameAr' => $parent?->name ?? '',
+            'parentPhone' => $parent?->phone ?? '',
+            'gradeAr' => $profile?->grade_ar ?? '',
+            'avatar' => $this->avatar ?: null,
         ];
     }
 }
