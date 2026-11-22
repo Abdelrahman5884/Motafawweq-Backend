@@ -161,6 +161,23 @@ class TeacherLeagueController extends BaseApiController
     }
 
     /**
+     * POST /api/v1/teacher/leagues/{uuid}/crown
+     * Officially crown winners, permanently stop the league, and unlock league certificates.
+     */
+    public function crown(string $uuid): JsonResponse
+    {
+        $league = $this->leagueService->crownLeague(
+            $this->authenticatedUser(),
+            $uuid
+        );
+
+        return $this->successResponse(
+            new CourseLeagueDetailResource($league),
+            'تم إعلان تتويج أبطال الدوري وإيقاف الدوري نهائياً، وأصبحت شهادات الأوائل متاحة الآن.'
+        );
+    }
+
+    /**
      * DELETE /api/v1/teacher/leagues/{uuid}
      * Delete a league.
      */

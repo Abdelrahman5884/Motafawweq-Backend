@@ -14,6 +14,8 @@ class BulkIssueCertificateRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'certificate_type' => ['nullable', 'string', 'in:general,course_completion,league'],
+            'league_id' => ['nullable', 'max:64'],
             'course_id' => ['nullable', 'max:64'],
             'course_name_ar' => ['required', 'string', 'max:200'],
             'course_name_en' => ['nullable', 'string', 'max:200'],

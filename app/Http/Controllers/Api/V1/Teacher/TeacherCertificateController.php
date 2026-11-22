@@ -47,6 +47,17 @@ class TeacherCertificateController extends Controller
         );
     }
 
+    public function eligibilityContext(Request $request): JsonResponse
+    {
+        $courseId = $request->query('course_id');
+        $context = $this->certificateService->getEligibilityContext(
+            $request->user(),
+            is_string($courseId) && $courseId !== '' ? $courseId : null
+        );
+
+        return $this->successResponse($context);
+    }
+
     public function store(IssueCertificateRequest $request): JsonResponse
     {
         $certificate = $this->certificateService->issueCertificate(

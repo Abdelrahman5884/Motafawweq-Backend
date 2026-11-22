@@ -371,7 +371,7 @@ class StudentCertificatesWorkspaceTest extends TestCase
             ->assertJsonPath('data.issuerType', 'ministry')
             ->assertJsonPath('data.score', '94%');
 
-        // 8. Track 03 (league): Active course league where student has rank #1 and 45 points -> claimable!
+        // 8. Track 03 (league): Active course league is NOT claimable until league ends or teacher crowns it!
         $league = CourseLeague::create([
             'teacher_id' => $teacher->id,
             'course_id' => $course->id,
@@ -390,6 +390,24 @@ class StudentCertificatesWorkspaceTest extends TestCase
             'rank' => 1,
             'xp_points' => 45,
             'streak_days' => 3,
+        ]);
+
+        // While league is still active -> NOT eligible & claiming returns 422
+        $wsActiveLeague = $this->getJson('/api/v1/student/certificates/workspace');
+        $wsActiveLeague->assertOk();
+        $this->assertFalse($wsActiveLeague->json('data.eligibility.league.eligible'));
+        $this->assertCount(0, $wsActiveLeague->json('data.eligibility.league.claimableLeagues'));
+
+        $this->postJson('/api/v1/student/certificates/claim', [
+            'track' => 'league',
+            'target_id' => $league->uuid,
+        ])->assertUnprocessable();
+
+        // Once teacher crowns/ends the league -> immediately becomes eligible & claimable!
+        $league->update([
+            'is_active' => false,
+            'crowned_at' => now(),
+            'ends_at' => now(),
         ]);
 
         $wsLeague = $this->getJson('/api/v1/student/certificates/workspace');

@@ -539,6 +539,8 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('uuid');
                     Route::post('/{uuid}/recalculate', [TeacherLeagueController::class, 'recalculate'])
                         ->whereUuid('uuid');
+                    Route::post('/{uuid}/crown', [TeacherLeagueController::class, 'crown'])
+                        ->whereUuid('uuid');
                     Route::delete('/{uuid}', [TeacherLeagueController::class, 'destroy'])
                         ->whereUuid('uuid');
                 });
@@ -557,6 +559,7 @@ Route::prefix('v1')->group(function () {
                 // Stage 15: Certificates, Direct Payments & Teacher Billing
                 Route::prefix('certificates')->group(function () {
                     Route::get('/', [TeacherCertificateController::class, 'index']);
+                    Route::get('/eligibility-context', [TeacherCertificateController::class, 'eligibilityContext']);
                     Route::post('/', [TeacherCertificateController::class, 'store']);
                     Route::post('/bulk-issue', [TeacherCertificateController::class, 'bulkStore']);
                     Route::patch('/{uuid}/revoke', [TeacherCertificateController::class, 'revoke'])

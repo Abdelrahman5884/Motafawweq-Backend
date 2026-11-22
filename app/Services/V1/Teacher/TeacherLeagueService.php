@@ -220,7 +220,13 @@ class TeacherLeagueService extends BaseService
             }
 
             if (array_key_exists('is_active', $data)) {
-                $updates['is_active'] = (bool) $data['is_active'];
+                $requestedActive = (bool) $data['is_active'];
+                if ($requestedActive && $league->isCrowned()) {
+                    throw ValidationException::withMessages([
+                        'is_active' => ['لا يمكن إعادة تفعيل دوري تم إعلان تتويجه وإيقافه نهائياً.'],
+                    ]);
+                }
+                $updates['is_active'] = $requestedActive;
             }
 
             if (array_key_exists('duration', $data)) {
@@ -361,6 +367,12 @@ class TeacherLeagueService extends BaseService
     {
         $league = $this->leagueRepository->findByUuidForTeacher($leagueUuid, $teacher);
 
+        if ($league->isConcluded()) {
+            throw ValidationException::withMessages([
+                'league' => ['لا يمكن إضافة طلاب إلى دوري منتهي أو تم إعلان تتويجه.'],
+            ]);
+        }
+
         $identifier = trim((string) ($data['student_id'] ?? ''));
         /** @var User|null $student */
         $student = User::where(function ($q) use ($identifier) {
@@ -464,6 +476,12 @@ class TeacherLeagueService extends BaseService
     {
         $league = $this->leagueRepository->findByUuidForTeacher($leagueUuid, $teacher);
 
+        if ($league->isCrowned()) {
+            throw ValidationException::withMessages([
+                'league' => ['لا يمكن إزالة متنافسين من دوري تم إعلان تتويجه نهائياً.'],
+            ]);
+        }
+
         $identifier = trim($participantIdentifier);
         /** @var LeagueParticipant|null $participant */
         $participant = LeagueParticipant::where('course_league_id', $league->id)
@@ -509,6 +527,12 @@ class TeacherLeagueService extends BaseService
     public function awardXp(User $teacher, string $leagueUuid, array $data): CourseLeague
     {
         $league = $this->leagueRepository->findByUuidForTeacher($leagueUuid, $teacher);
+
+        if ($league->isConcluded()) {
+            throw ValidationException::withMessages([
+                'league' => ['لا يمكن منح نقاط بونص لدوري منتهي أو تم إعلان تتويجه.'],
+            ]);
+        }
 
         $studentIdentifier = trim((string) ($data['student_id'] ?? ''));
         /** @var User|null $student */
@@ -619,6 +643,56 @@ class TeacherLeagueService extends BaseService
                 [
                     'teacher_id' => $teacher->id,
                     'league_uuid' => $league->uuid,
+                ],
+                'info',
+                $league
+            );
+
+            return $league->fresh(['course', 'studyGroup', 'participants.student']);
+        });
+    }
+
+    /**
+     * Officially crown winners, permanently stop the league, and unlock league certificates.
+     */
+    public function crownLeague(User $teacher, string $leagueUuid): CourseLeague
+    {
+        $league = $this->leagueRepository->findByUuidForTeacher($leagueUuid, $teacher);
+
+        if ($league->isCrowned()) {
+            throw ValidationException::withMessages([
+                'league' => ['تم إعلان تتويج هذا الدوري وإيقافه مسبقاً.'],
+            ]);
+        }
+
+        return $this->transaction(function () use ($teacher, $league) {
+            // Final sync & ranking lock before stopping the league
+            $this->leagueRulesService->syncCourseLeague($league);
+            $league->recalculateRanksAndMetrics();
+
+            if ($league->participants()->count() === 0) {
+                throw ValidationException::withMessages([
+                    'league' => ['لا يمكن إعلان تتويج دوري لا يحتوي على طلاب مشاركين.'],
+                ]);
+            }
+
+            $now = Carbon::now();
+            $finalEndsAt = ($league->ends_at && $league->ends_at->isPast())
+                ? $league->ends_at
+                : $now;
+
+            $league->update([
+                'is_active' => false,
+                'crowned_at' => $now,
+                'ends_at' => $finalEndsAt,
+            ]);
+
+            $this->logSecurityEvent(
+                'course_league_crowned',
+                [
+                    'teacher_id' => $teacher->id,
+                    'league_uuid' => $league->uuid,
+                    'total_competitors' => (int) $league->total_competitors,
                 ],
                 'info',
                 $league

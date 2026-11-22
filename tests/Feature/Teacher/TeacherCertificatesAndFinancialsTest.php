@@ -5,6 +5,8 @@ namespace Tests\Feature\Teacher;
 use App\Enums\BillingPeriod;
 use App\Enums\CertificateStatus;
 use App\Enums\DirectPaymentStatus;
+use App\Enums\LeagueDuration;
+use App\Enums\LessonStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\TeacherPlanTier;
 use App\Enums\TokenType;
@@ -12,8 +14,12 @@ use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\Course;
 use App\Models\CourseCertificate;
+use App\Models\CourseLeague;
 use App\Models\DiscountCoupon;
+use App\Models\LeagueParticipant;
+use App\Models\Lesson;
 use App\Models\StudentDirectPayment;
+use App\Models\StudentLessonProgress;
 use App\Models\StudyGroup;
 use App\Models\TeacherProfile;
 use App\Models\User;
@@ -221,7 +227,7 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
             'course_id' => $course->uuid,
             'course_name_ar' => $course->title_ar,
             'grade_ar' => 'الصف الثالث الثانوي',
-            'honors_title_ar' => 'شهادة إتمام الكورس بمرتبة الشرف',
+            'honors_title_ar' => 'شهادة تميز وتفوق بالدرجة النهائية (Full Mark)',
             'students' => [
                 [
                     'student_id' => (string) $std1->id,
@@ -259,6 +265,131 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
             ->assertJsonPath('meta.stats.total', 2)
             ->assertJsonPath('meta.stats.verifiedCount', 1)
             ->assertJsonPath('meta.stats.revokedCount', 1);
+    }
+
+    public function test_teacher_certificate_enforces_100_percent_course_completion_and_concluded_league(): void
+    {
+        $teacher = $this->createTeacher('cert.strict@motafawweq.com');
+        $course = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'كورس الكيمياء العضوية',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
+        ]);
+        $lesson1 = Lesson::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'الدرس الأول',
+            'sort_order' => 1,
+            'status' => LessonStatus::PUBLISHED,
+        ]);
+        $lesson2 = Lesson::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'الدرس الثاني',
+            'sort_order' => 2,
+            'status' => LessonStatus::PUBLISHED,
+        ]);
+
+        $student = $this->createStudent('ندى طارق', 'nada.strict@motafawweq.com');
+
+        // Only 1/2 lessons completed (50%)
+        StudentLessonProgress::create([
+            'student_id' => $student->id,
+            'course_id' => $course->id,
+            'lesson_id' => $lesson1->id,
+            'is_completed' => true,
+            'watched_seconds' => 300,
+            'completed_at' => now()->subHour(),
+        ]);
+
+        $league = CourseLeague::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'دوري الكيمياء الشهري',
+            'course_name_ar' => $course->title_ar,
+            'duration_type' => LeagueDuration::MONTHLY,
+            'duration_days' => 30,
+            'is_active' => true,
+            'starts_at' => now()->subDays(3),
+            'ends_at' => now()->addDays(27),
+        ]);
+        LeagueParticipant::create([
+            'course_league_id' => $league->id,
+            'student_id' => $student->id,
+            'rank' => 1,
+            'xp_points' => 260,
+            'tier' => 'Diamond',
+        ]);
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        // 1. Course completion certificate MUST be blocked while student is at 50%
+        $this->postJson('/api/v1/teacher/certificates', [
+            'certificate_type' => 'course_completion',
+            'course_id' => $course->uuid,
+            'student_id' => (string) $student->id,
+            'student_name_ar' => $student->name,
+            'course_name_ar' => $course->title_ar,
+            'grade_percent' => 98,
+            'honors_title_ar' => 'شهادة إتمام الكورس بمرتبة الشرف',
+        ])->assertUnprocessable();
+
+        // 2. League certificate MUST be blocked while league is still active
+        $this->postJson('/api/v1/teacher/certificates', [
+            'certificate_type' => 'league',
+            'league_id' => $league->uuid,
+            'course_id' => $course->uuid,
+            'student_id' => (string) $student->id,
+            'student_name_ar' => $student->name,
+            'course_name_ar' => $league->title_ar,
+            'grade_percent' => 100,
+            'honors_title_ar' => 'شهادة صدارة وبطل الدوري الأكاديمي',
+        ])->assertUnprocessable();
+
+        // 3. Complete 2nd lesson (100%) -> course completion certificate succeeds!
+        StudentLessonProgress::create([
+            'student_id' => $student->id,
+            'course_id' => $course->id,
+            'lesson_id' => $lesson2->id,
+            'is_completed' => true,
+            'watched_seconds' => 350,
+            'completed_at' => now(),
+        ]);
+
+        // Check eligibility-context reports 100% eligible
+        $ctxRes = $this->getJson("/api/v1/teacher/certificates/eligibility-context?course_id={$course->uuid}");
+        $ctxRes->assertOk()
+            ->assertJsonPath("data.courseCompletion.byStudent.{$student->id}.percent", 100)
+            ->assertJsonPath("data.courseCompletion.byStudent.{$student->id}.eligible", true)
+            ->assertJsonPath('data.leagues.0.isConcluded', false);
+
+        $this->postJson('/api/v1/teacher/certificates', [
+            'certificate_type' => 'course_completion',
+            'course_id' => $course->uuid,
+            'student_id' => (string) $student->id,
+            'student_name_ar' => $student->name,
+            'course_name_ar' => $course->title_ar,
+            'grade_percent' => 98,
+            'honors_title_ar' => 'شهادة إتمام الكورس بمرتبة الشرف',
+        ])->assertCreated();
+
+        // 4. Crown the league -> stops league and unlocks league certificate!
+        $this->postJson("/api/v1/teacher/leagues/{$league->uuid}/crown")
+            ->assertOk()
+            ->assertJsonPath('data.isCrowned', true);
+
+        $this->postJson('/api/v1/teacher/certificates', [
+            'certificate_type' => 'league',
+            'league_id' => $league->uuid,
+            'course_id' => $course->uuid,
+            'student_id' => (string) $student->id,
+            'student_name_ar' => $student->name,
+            'course_name_ar' => $league->title_ar,
+            'grade_percent' => 100,
+            'honors_title_ar' => 'شهادة صدارة وبطل الدوري الأكاديمي',
+        ])->assertCreated()
+            ->assertJsonPath('data.issuerType', 'league');
     }
 
     /* ----------------------------------------------------------------- */

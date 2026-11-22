@@ -514,4 +514,68 @@ class TeacherLeagueTest extends TestCase
         ]);
         $nonStudentRes->assertStatus(422);
     }
+
+    public function test_crowning_league_permanently_stops_it_and_blocks_further_changes(): void
+    {
+        $teacher = $this->createTeacher('teacher.crown@motafawweq.com');
+        $course = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'كورس الرياضيات',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
+        ]);
+        $league = CourseLeague::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'دوري الرياضيات الشهري',
+            'duration_type' => LeagueDuration::MONTHLY,
+            'duration_days' => 30,
+            'is_active' => true,
+            'starts_at' => now()->subDays(5),
+            'ends_at' => now()->addDays(25),
+        ]);
+        $student1 = $this->createStudent('أحمد الأول', 'ahmed.c1@motafawweq.com');
+        $student2 = $this->createStudent('سلمى الثانية', 'salma.c2@motafawweq.com');
+
+        $part = LeagueParticipant::create([
+            'course_league_id' => $league->id,
+            'student_id' => $student1->id,
+            'rank' => 1,
+            'xp_points' => 300,
+            'tier' => 'Diamond',
+        ]);
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        // Crown the league
+        $crownRes = $this->postJson("/api/v1/teacher/leagues/{$league->uuid}/crown");
+        $crownRes->assertOk()
+            ->assertJsonPath('data.isActive', false)
+            ->assertJsonPath('data.isCrowned', true)
+            ->assertJsonPath('data.isConcluded', true);
+
+        $this->assertNotNull($league->fresh()->crowned_at);
+        $this->assertFalse((bool) $league->fresh()->is_active);
+
+        // Cannot crown twice
+        $this->postJson("/api/v1/teacher/leagues/{$league->uuid}/crown")
+            ->assertUnprocessable();
+
+        // Cannot award XP, add participant, remove participant, or reactivate crowned league
+        $this->postJson("/api/v1/teacher/leagues/{$league->uuid}/award-xp", [
+            'student_id' => (string) $student1->id,
+            'xp_amount' => 50,
+        ])->assertUnprocessable();
+
+        $this->postJson("/api/v1/teacher/leagues/{$league->uuid}/participants", [
+            'student_id' => (string) $student2->id,
+        ])->assertUnprocessable();
+
+        $this->deleteJson("/api/v1/teacher/leagues/{$league->uuid}/participants/{$part->uuid}")
+            ->assertUnprocessable();
+
+        $this->putJson("/api/v1/teacher/leagues/{$league->uuid}", [
+            'is_active' => true,
+        ])->assertUnprocessable();
+    }
 }

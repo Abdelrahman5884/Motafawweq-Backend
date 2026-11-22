@@ -985,26 +985,35 @@ class StudentGamificationService extends BaseService
             ];
         }
 
-        // ── Track 03: Top 10 League Standings (strictly requiring xp_points > 0) ──
+        // ── Track 03: Top 10 League Standings — ONLY AFTER League Ends or Teacher Crowns It ──
+        CourseLeague::query()
+            ->where('is_active', true)
+            ->whereNotNull('ends_at')
+            ->where('ends_at', '<=', Carbon::now())
+            ->whereHas('participants', fn ($q) => $q->where('student_id', $student->id))
+            ->update(['is_active' => false]);
+
         $podiumParts = LeagueParticipant::where('student_id', $student->id)
             ->where('rank', '>', 0)
             ->where('xp_points', '>', 0)
-            ->with('league:id,uuid,teacher_id,title_ar,course_name_ar,is_active')
+            ->with('league:id,uuid,teacher_id,title_ar,course_name_ar,is_active,ends_at,crowned_at')
             ->orderBy('rank')
             ->get();
 
-        $bestRank = $podiumParts->isNotEmpty() ? (int) $podiumParts->min('rank') : null;
+        $bestConcludedRank = null;
         $claimableLeagues = [];
 
         foreach ($podiumParts as $part) {
-            if (! $part->league || (int) $part->rank > 10) {
+            if (! $part->league || ! $part->league->isConcluded() || (int) $part->rank > 10) {
                 continue;
             }
+            $rankNum = (int) $part->rank;
+            $bestConcludedRank = $bestConcludedRank === null ? $rankNum : min($bestConcludedRank, $rankNum);
+
             $leagueKey = 'course:'.$part->league->uuid;
             if (isset($issuedLeagueLookup[$leagueKey])) {
                 continue;
             }
-            $rankNum = (int) $part->rank;
             $xpNum = (int) $part->xp_points;
             $claimableLeagues[] = [
                 'track' => 'league',
@@ -1018,26 +1027,35 @@ class StudentGamificationService extends BaseService
             ];
         }
 
-        $activeRepublic = RepublicLeague::currentActive();
-        if ($activeRepublic) {
-            $ranked = $this->computeGeneralRankedStudents($student, $activeRepublic);
+        // Auto-expire any past-due Republic League round, then ONLY evaluate concluded rounds
+        RepublicLeague::currentActive();
+        $concludedRepublicLeagues = RepublicLeague::query()
+            ->where('is_active', false)
+            ->latest('ends_at')
+            ->limit(5)
+            ->get();
+
+        foreach ($concludedRepublicLeagues as $rep) {
+            $ranked = $this->computeGeneralRankedStudents($student, $rep);
             $myRow = collect($ranked)->firstWhere('studentId', (int) $student->id);
             if ($myRow && (int) ($myRow['xpPoints'] ?? 0) > 0 && (int) ($myRow['rank'] ?? 0) > 0) {
                 $repRank = (int) $myRow['rank'];
                 $repXp = (int) $myRow['xpPoints'];
-                $bestRank = $bestRank === null ? $repRank : min($bestRank, $repRank);
-                $repKey = 'republic:'.$activeRepublic->uuid;
-                if ($repRank <= 10 && ! isset($issuedLeagueLookup[$repKey])) {
-                    $claimableLeagues[] = [
-                        'track' => 'league',
-                        'targetId' => 'general',
-                        'titleAr' => $activeRepublic->title_ar ?: 'دوري الجمهورية العام',
-                        'titleEn' => 'General Republic League',
-                        'subtitleAr' => "المركز #{$repRank} على الجمهورية • {$repXp} نقطة",
-                        'subtitleEn' => "National Rank #{$repRank} • {$repXp} pts",
-                        'rank' => $repRank,
-                        'points' => $repXp,
-                    ];
+                if ($repRank <= 10) {
+                    $bestConcludedRank = $bestConcludedRank === null ? $repRank : min($bestConcludedRank, $repRank);
+                    $repKey = 'republic:'.$rep->uuid;
+                    if (! isset($issuedLeagueLookup[$repKey])) {
+                        $claimableLeagues[] = [
+                            'track' => 'league',
+                            'targetId' => 'republic:'.$rep->uuid,
+                            'titleAr' => $rep->title_ar ?: 'دوري الجمهورية العام',
+                            'titleEn' => 'General Republic League',
+                            'subtitleAr' => "المركز #{$repRank} على الجمهورية • {$repXp} نقطة",
+                            'subtitleEn' => "National Rank #{$repRank} • {$repXp} pts",
+                            'rank' => $repRank,
+                            'points' => $repXp,
+                        ];
+                    }
                 }
             }
         }
@@ -1056,8 +1074,8 @@ class StudentGamificationService extends BaseService
                 'claimableExams' => $claimableExams,
             ],
             'league' => [
-                'eligible' => $bestRank !== null && $bestRank <= 10,
-                'progressValue' => $bestRank,
+                'eligible' => $bestConcludedRank !== null && $bestConcludedRank <= 10,
+                'progressValue' => $bestConcludedRank,
                 'claimableLeagues' => $claimableLeagues,
             ],
         ];
@@ -1282,14 +1300,20 @@ class StudentGamificationService extends BaseService
      */
     public function claimLeagueCertificate(User $student, string $leagueTarget): array
     {
-        $isRepublic = $leagueTarget === 'general';
+        $isRepublic = $leagueTarget === 'general' || str_starts_with($leagueTarget, 'republic:');
         $profile = StudentProfile::where('student_id', $student->id)->first();
 
         if ($isRepublic) {
-            $republic = RepublicLeague::currentActive();
-            if (! $republic) {
+            // Auto-expire any past-due Republic League round first
+            RepublicLeague::currentActive();
+
+            $republic = str_starts_with($leagueTarget, 'republic:')
+                ? RepublicLeague::where('uuid', substr($leagueTarget, strlen('republic:')))->first()
+                : RepublicLeague::where('is_active', false)->latest('ends_at')->first();
+
+            if (! $republic || $republic->is_active) {
                 throw ValidationException::withMessages([
-                    'target_id' => ['دوري الجمهورية العام غير نشط حالياً.'],
+                    'target_id' => ['لا يمكن إصدار شهادة دوري الجمهورية قبل انتهاء الجولة وإعلان النتائج رسمياً.'],
                 ]);
             }
             $ranked = $this->computeGeneralRankedStudents($student, $republic);
@@ -1335,6 +1359,13 @@ class StudentGamificationService extends BaseService
             );
 
             $this->leagueRulesService->syncCourseLeague($league);
+            $league->refresh();
+
+            if (! $league->isConcluded()) {
+                throw ValidationException::withMessages([
+                    'target_id' => ['لا يمكن إصدار شهادة الدوري قبل انتهاء موعده أو إعلان المعلم تتويج الدوري وإيقافه.'],
+                ]);
+            }
 
             /** @var LeagueParticipant|null $part */
             $part = LeagueParticipant::where('course_league_id', $league->id)

@@ -3,11 +3,17 @@
 namespace App\Services\V1\Teacher;
 
 use App\Enums\CertificateStatus;
+use App\Enums\LessonStatus;
 use App\Models\Course;
 use App\Models\CourseCertificate;
+use App\Models\CourseLeague;
+use App\Models\LeagueParticipant;
+use App\Models\Lesson;
+use App\Models\StudentLessonProgress;
 use App\Models\User;
 use App\Repositories\Contracts\CourseCertificateRepositoryInterface;
 use App\Traits\HasSecurityAudit;
+use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -32,6 +38,152 @@ class TeacherCertificateService
     public function getStats(User $teacher): array
     {
         return $this->certificateRepository->getTeacherStats($teacher->id);
+    }
+
+    /**
+     * Provide live eligibility context for issuing League & 100%-Course-Completion certificates.
+     *
+     * @return array<string, mixed>
+     */
+    public function getEligibilityContext(User $teacher, ?string $courseIdentifier = null): array
+    {
+        // Auto-expire any active leagues whose end date has passed
+        CourseLeague::forTeacher($teacher->id)
+            ->where('is_active', true)
+            ->whereNotNull('ends_at')
+            ->where('ends_at', '<=', Carbon::now())
+            ->update(['is_active' => false]);
+
+        $leagues = CourseLeague::forTeacher($teacher->id)
+            ->with(['course:id,uuid,title_ar', 'participants.student:id,name,email,phone,avatar,student_code'])
+            ->orderByDesc('crowned_at')
+            ->orderByDesc('ends_at')
+            ->orderByDesc('id')
+            ->get();
+
+        $leaguesPayload = $leagues->map(function (CourseLeague $lg) {
+            $concluded = $lg->isConcluded();
+            $participants = $concluded
+                ? $lg->participants
+                    ->sortBy('rank')
+                    ->values()
+                    ->map(fn (LeagueParticipant $p) => [
+                        'id' => $p->uuid,
+                        'studentId' => (string) $p->student_id,
+                        'nameAr' => $p->student?->name ?: 'طالب',
+                        'email' => $p->student?->email,
+                        'phone' => $p->student?->phone,
+                        'avatar' => $p->student?->avatar,
+                        'studentCode' => $p->student?->student_code,
+                        'rank' => (int) $p->rank,
+                        'score' => (int) $p->xp_points,
+                    ])->all()
+                : [];
+
+            return [
+                'id' => $lg->uuid,
+                'titleAr' => $lg->title_ar,
+                'courseId' => $lg->course?->uuid,
+                'courseNameAr' => $lg->course_name_ar ?: ($lg->course?->title_ar ?? 'المقرر الدراسي'),
+                'isActive' => (bool) $lg->is_active && ! $concluded,
+                'isCrowned' => $lg->isCrowned(),
+                'isConcluded' => $concluded,
+                'crownedAt' => $lg->crowned_at?->toIso8601String(),
+                'endsAt' => $lg->ends_at?->toIso8601String(),
+                'totalCompetitors' => $lg->participants->count(),
+                'participants' => $participants,
+            ];
+        })->values()->all();
+
+        $courseCompletion = null;
+        if (! empty($courseIdentifier)) {
+            $rawCourseId = trim($courseIdentifier);
+            $course = Course::where('teacher_id', $teacher->id)
+                ->where(function ($q) use ($rawCourseId) {
+                    if (is_numeric($rawCourseId)) {
+                        $q->where('id', (int) $rawCourseId);
+                    } else {
+                        $q->where('uuid', $rawCourseId);
+                    }
+                })
+                ->first();
+
+            if ($course) {
+                $totalPublished = Lesson::where('course_id', $course->id)
+                    ->where('status', LessonStatus::PUBLISHED)
+                    ->count();
+
+                $completedByStudent = $totalPublished > 0
+                    ? StudentLessonProgress::where('course_id', $course->id)
+                        ->where('is_completed', true)
+                        ->whereHas('lesson', fn ($q) => $q->where('status', LessonStatus::PUBLISHED))
+                        ->select(['student_id', DB::raw('COUNT(DISTINCT lesson_id) as done_count')])
+                        ->groupBy('student_id')
+                        ->pluck('done_count', 'student_id')
+                    : collect();
+
+                $studentMap = [];
+                foreach ($completedByStudent as $sid => $done) {
+                    $doneInt = min($totalPublished, (int) $done);
+                    $percent = $totalPublished > 0 ? (int) round(($doneInt / $totalPublished) * 100) : 0;
+                    $studentMap[(string) $sid] = [
+                        'completedLessons' => $doneInt,
+                        'totalLessons' => $totalPublished,
+                        'percent' => $percent,
+                        'eligible' => $totalPublished > 0 && $doneInt >= $totalPublished,
+                    ];
+                }
+
+                $courseCompletion = [
+                    'courseId' => $course->uuid,
+                    'courseTitleAr' => $course->title_ar,
+                    'totalPublishedLessons' => $totalPublished,
+                    'byStudent' => $studentMap,
+                ];
+            }
+        }
+
+        return [
+            'leagues' => $leaguesPayload,
+            'courseCompletion' => $courseCompletion,
+        ];
+    }
+
+    /**
+     * Resolve certificate issuance track (general | course_completion | league).
+     */
+    protected function resolveCertificateType(array $data): string
+    {
+        $explicit = strtolower(trim((string) ($data['certificate_type'] ?? '')));
+        if (in_array($explicit, ['general', 'course_completion', 'league'], true)) {
+            return $explicit;
+        }
+
+        if (! empty($data['league_id'])) {
+            return 'league';
+        }
+
+        $honorsAr = trim((string) ($data['honors_title_ar'] ?? $data['honorsTitleAr'] ?? ''));
+        $honorsEn = strtolower(trim((string) ($data['honors_title_en'] ?? $data['honorsTitleEn'] ?? '')));
+
+        if (
+            str_contains($honorsAr, 'الدوري')
+            || str_contains($honorsEn, 'league')
+        ) {
+            return 'league';
+        }
+
+        if (
+            str_contains($honorsAr, 'إتمام الكورس')
+            || str_contains($honorsAr, 'اتمام الكورس')
+            || str_contains($honorsAr, 'إتمام المقرر')
+            || str_contains($honorsAr, 'اتمام المقرر')
+            || str_contains($honorsEn, 'course completion')
+        ) {
+            return 'course_completion';
+        }
+
+        return 'general';
     }
 
     public function issueCertificate(User $teacher, array $data): CourseCertificate
@@ -74,8 +226,129 @@ class TeacherCertificateService
         }
         $studentId = $student?->id;
 
-        $certNumber = CourseCertificate::generateUniqueCertNumber();
         $studentNameAr = trim((string) ($data['student_name_ar'] ?? $data['studentNameAr'] ?? $student?->name ?? ''));
+        $certificateType = $this->resolveCertificateType($data);
+        $issuerType = 'teacher';
+        $certPrefix = 'BIO';
+        $metadata = null;
+
+        // ── Strict Rule 1: League certificates ONLY allowed after league ends or teacher crowns it ──
+        if ($certificateType === 'league') {
+            /** @var CourseLeague|null $league */
+            $league = null;
+            if (! empty($data['league_id'])) {
+                $rawLeagueId = trim((string) $data['league_id']);
+                $league = CourseLeague::forTeacher($teacher->id)
+                    ->where(function ($q) use ($rawLeagueId) {
+                        if (is_numeric($rawLeagueId)) {
+                            $q->where('id', (int) $rawLeagueId);
+                        } else {
+                            $q->where('uuid', $rawLeagueId);
+                        }
+                    })
+                    ->first();
+            } else {
+                $leagueQuery = CourseLeague::forTeacher($teacher->id)
+                    ->orderByDesc('crowned_at')
+                    ->orderByDesc('ends_at')
+                    ->orderByDesc('id');
+                if ($courseId) {
+                    $league = (clone $leagueQuery)->where('course_id', $courseId)->first()
+                        ?? $leagueQuery->first();
+                } else {
+                    $league = $leagueQuery->first();
+                }
+            }
+
+            if ($league && $league->is_active && $league->ends_at && $league->ends_at->isPast()) {
+                $league->update(['is_active' => false]);
+            }
+
+            if (! $league || ! $league->isConcluded()) {
+                throw ValidationException::withMessages([
+                    'league_id' => ['لا يمكن إصدار أو إعلان شهادة الدوري قبل انتهاء موعد الدوري أو إعلان تتويج الدوري وإيقافه أولاً.'],
+                ]);
+            }
+
+            $issuerType = 'league';
+            $certPrefix = 'LGE';
+            $courseId ??= $league->course_id;
+            $metadata = [
+                'league_key' => 'course:'.$league->uuid,
+                'league_uuid' => $league->uuid,
+                'is_republic' => false,
+            ];
+
+            if ($student) {
+                $part = LeagueParticipant::where('course_league_id', $league->id)
+                    ->where('student_id', $student->id)
+                    ->first();
+                if ($part) {
+                    $rank = (int) $part->rank;
+                    $points = (int) $part->xp_points;
+                    $metadata['rank'] = $rank;
+                    $metadata['points'] = $points;
+                    $metadata['rankAr'] = match ($rank) {
+                        1 => 'المركز الأول 🥇',
+                        2 => 'المركز الثاني 🥈',
+                        3 => 'المركز الثالث 🥉',
+                        default => "المركز #{$rank}",
+                    };
+                    $metadata['rankEn'] = match ($rank) {
+                        1 => '1st Place 🥇',
+                        2 => '2nd Place 🥈',
+                        3 => '3rd Place 🥉',
+                        default => "Rank #{$rank}",
+                    };
+                    $metadata['pointsAr'] = number_format($points).' نقطة';
+                    $metadata['pointsEn'] = number_format($points).' pts';
+                }
+            }
+        }
+
+        // ── Strict Rule 2: Course Completion certificates REQUIRE student to complete 100% of course ──
+        if ($certificateType === 'course_completion') {
+            if (! $course) {
+                throw ValidationException::withMessages([
+                    'course_id' => ['يجب اختيار المقرر الدراسي المرتبط لإصدار شهادة إتمام الكورس.'],
+                ]);
+            }
+            if (! $student) {
+                throw ValidationException::withMessages([
+                    'student_id' => ['يجب اختيار طالب مسجل على المنصة للتحقق من إكماله 100% من الكورس.'],
+                ]);
+            }
+
+            $totalPublished = Lesson::where('course_id', $course->id)
+                ->where('status', LessonStatus::PUBLISHED)
+                ->count();
+
+            if ($totalPublished === 0) {
+                throw ValidationException::withMessages([
+                    'course_id' => ['لا يمكن إصدار شهادة إتمام الكورس لعدم وجود حصص منشورة في هذا المقرر بعد.'],
+                ]);
+            }
+
+            $completedLessons = StudentLessonProgress::where('student_id', $student->id)
+                ->where('course_id', $course->id)
+                ->where('is_completed', true)
+                ->whereHas('lesson', fn ($q) => $q->where('status', LessonStatus::PUBLISHED))
+                ->distinct('lesson_id')
+                ->count('lesson_id');
+
+            if ($completedLessons < $totalPublished) {
+                $percent = (int) round(($completedLessons / $totalPublished) * 100);
+                throw ValidationException::withMessages([
+                    'student_id' => [
+                        "لا يمكن إصدار شهادة إتمام الكورس للطالب ({$studentNameAr}) قبل إكمال 100% من حصص المقرر المنشورة (المكتمل حالياً: {$completedLessons} من {$totalPublished} حصة — {$percent}%).",
+                    ],
+                ]);
+            }
+
+            $certPrefix = 'CRS';
+        }
+
+        $certNumber = CourseCertificate::generateUniqueCertNumber($certPrefix);
         $gradePercent = round(min(100.0, max(0.0, (float) ($data['grade_percent'] ?? $data['gradePercent'] ?? 100.0))), 2);
         $issueDate = ! empty($data['issue_date']) ? substr(trim((string) $data['issue_date']), 0, 10) : now()->toDateString();
 
@@ -106,7 +379,8 @@ class TeacherCertificateService
             'honors_title_en' => $data['honors_title_en'] ?? $data['honorsTitleEn'] ?? 'Certificate of Academic Excellence',
             'issue_date' => $issueDate,
             'status' => CertificateStatus::VERIFIED,
-            'issuer_type' => 'teacher',
+            'issuer_type' => $issuerType,
+            'metadata' => $metadata,
         ]);
 
         $this->logSecurityEvent(

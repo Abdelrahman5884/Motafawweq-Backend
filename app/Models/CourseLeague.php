@@ -31,6 +31,7 @@ class CourseLeague extends Model
         'is_active',
         'starts_at',
         'ends_at',
+        'crowned_at',
         'total_competitors',
     ];
 
@@ -42,6 +43,7 @@ class CourseLeague extends Model
             'is_active' => 'boolean',
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
+            'crowned_at' => 'datetime',
             'total_competitors' => 'integer',
         ];
     }
@@ -71,11 +73,29 @@ class CourseLeague extends Model
     }
 
     /**
+     * Whether the teacher has officially crowned winners and stopped this league.
+     */
+    public function isCrowned(): bool
+    {
+        return $this->crowned_at !== null;
+    }
+
+    /**
+     * Whether this league has ended (either by teacher crowning, manual end, or passing ends_at).
+     */
+    public function isConcluded(): bool
+    {
+        return $this->crowned_at !== null
+            || ! $this->is_active
+            || ($this->ends_at !== null && $this->ends_at->isPast());
+    }
+
+    /**
      * Compute remaining days in current league round.
      */
     public function roundDaysRemaining(): int
     {
-        if (! $this->ends_at) {
+        if ($this->isConcluded() || ! $this->ends_at) {
             return 0;
         }
 

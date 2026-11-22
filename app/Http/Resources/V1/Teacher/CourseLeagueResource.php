@@ -34,9 +34,12 @@ class CourseLeagueResource extends BaseJsonResource
                 ? (int) $this->participants_count
                 : (int) $this->total_competitors,
             'roundDaysRemaining' => $this->roundDaysRemaining(),
-            'isActive' => (bool) $this->is_active,
+            'isActive' => (bool) $this->is_active && ! $this->isConcluded(),
+            'isCrowned' => $this->isCrowned(),
+            'isConcluded' => $this->isConcluded(),
             'startsAt' => $this->formatDate($this->starts_at),
             'endsAt' => $this->formatDate($this->ends_at),
+            'crownedAt' => $this->formatDate($this->crowned_at),
             'createdAt' => $this->formatDate($this->created_at),
         ];
     }
