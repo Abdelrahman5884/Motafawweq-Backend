@@ -231,8 +231,8 @@ class TeacherStudioController extends BaseApiController
                 ->firstOrFail();
         }
 
-        $disk = $attachment->storage_disk ?? 'local';
-        if (! Storage::disk($disk)->exists($attachment->storage_path)) {
+        $disk = $this->resolveExistingDisk($attachment->storage_disk, $attachment->storage_path);
+        if (! $disk) {
             return $this->notFoundResponse(__('messages.not_found'));
         }
 
@@ -240,14 +240,12 @@ class TeacherStudioController extends BaseApiController
             return redirect()->away(Storage::disk($disk)->temporaryUrl($attachment->storage_path, now()->addMinutes(60)));
         }
 
-        return response(
-            Storage::disk($disk)->get($attachment->storage_path),
-            Response::HTTP_OK,
-            [
-                'Content-Type' => $attachment->mime_type,
-                'Content-Disposition' => 'inline; filename="'.addslashes($attachment->original_file_name).'"',
-                'X-Content-Type-Options' => 'nosniff',
-            ]
+        return $this->streamStoredFile(
+            $disk,
+            $attachment->storage_path,
+            $attachment->mime_type ?: 'application/octet-stream',
+            $attachment->original_file_name ?: 'attachment',
+            $request->boolean('download')
         );
     }
 
@@ -268,8 +266,8 @@ class TeacherStudioController extends BaseApiController
             $lesson = Lesson::where('uuid', $uuid)->firstOrFail();
         }
 
-        $disk = $lesson->media_disk ?? 'local';
-        if (! $lesson->media_path || ! Storage::disk($disk)->exists($lesson->media_path)) {
+        $disk = $this->resolveExistingDisk($lesson->media_disk, $lesson->media_path);
+        if (! $disk || ! $lesson->media_path) {
             return $this->notFoundResponse(__('messages.not_found'));
         }
 
@@ -277,14 +275,87 @@ class TeacherStudioController extends BaseApiController
             return redirect()->away(Storage::disk($disk)->temporaryUrl($lesson->media_path, now()->addMinutes(60)));
         }
 
+        return $this->streamStoredFile(
+            $disk,
+            $lesson->media_path,
+            $lesson->media_mime_type ?? 'video/mp4',
+            $lesson->media_original_name ?? 'lesson.mp4',
+            $request->boolean('download')
+        );
+    }
+
+    private function resolveExistingDisk(?string $declaredDisk, ?string $path): ?string
+    {
+        if (! $path) {
+            return null;
+        }
+
+        $primary = $declaredDisk ?: 'local';
+        $candidates = $primary === 'local' ? ['local'] : [$primary, 'local'];
+
+        foreach ($candidates as $candidate) {
+            try {
+                if (Storage::disk($candidate)->exists($path)) {
+                    return $candidate;
+                }
+            } catch (\Throwable) {
+                // try fallback candidate
+            }
+        }
+
+        return null;
+    }
+
+    private function streamStoredFile(
+        string $disk,
+        string $path,
+        string $mimeType,
+        string $originalName,
+        bool $forceDownload = false
+    ): Response {
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $displayName = trim($originalName) ?: 'file';
+        if ($ext && ! str_contains($displayName, '.')) {
+            $displayName .= '.'.$ext;
+        }
+
+        $asciiFallback = preg_replace('/[^a-zA-Z0-9._\- ]/', '_', $displayName) ?: ('file'.($ext ? '.'.$ext : ''));
+        $asciiFallback = trim($asciiFallback, " ._\t\n\r") ?: ('file'.($ext ? '.'.$ext : ''));
+        $disposition = sprintf(
+            '%s; filename="%s"; filename*=UTF-8\'\'%s',
+            $forceDownload ? 'attachment' : 'inline',
+            str_replace(['"', '\\'], '', $asciiFallback),
+            rawurlencode($displayName)
+        );
+
+        $headers = [
+            'Content-Type' => $mimeType,
+            'Content-Disposition' => $disposition,
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'private, max-age=3600',
+        ];
+
+        if ($disk === 'local') {
+            return response()->file(Storage::disk('local')->path($path), $headers);
+        }
+
+        $stream = Storage::disk($disk)->readStream($path);
+        if (is_resource($stream)) {
+            return response()->stream(function () use ($stream) {
+                try {
+                    fpassthru($stream);
+                } finally {
+                    if (is_resource($stream)) {
+                        fclose($stream);
+                    }
+                }
+            }, Response::HTTP_OK, $headers);
+        }
+
         return response(
-            Storage::disk($disk)->get($lesson->media_path),
+            (string) Storage::disk($disk)->get($path),
             Response::HTTP_OK,
-            [
-                'Content-Type' => $lesson->media_mime_type ?? 'video/mp4',
-                'Content-Disposition' => 'inline; filename="'.addslashes($lesson->media_original_name ?? 'lesson.mp4').'"',
-                'X-Content-Type-Options' => 'nosniff',
-            ]
+            $headers
         );
     }
 }

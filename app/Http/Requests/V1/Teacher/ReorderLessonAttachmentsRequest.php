@@ -15,7 +15,10 @@ class ReorderLessonAttachmentsRequest extends BaseApiRequest
 
     protected function prepareForValidation(): void
     {
-        $orderedIds = $this->input('ordered_ids') ?? $this->input('orderedIds') ?? $this->input('ids');
+        $orderedIds = $this->input('ordered_ids')
+            ?? $this->input('orderedIds')
+            ?? $this->input('attachment_uuids')
+            ?? $this->input('ids');
         if (is_array($orderedIds)) {
             $this->merge(['ordered_ids' => $orderedIds]);
         }

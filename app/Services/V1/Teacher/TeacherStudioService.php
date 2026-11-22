@@ -17,6 +17,7 @@ use App\Services\BaseService;
 use finfo;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Support\Testing\Fakes\StorageFake;
@@ -59,9 +60,9 @@ class TeacherStudioService extends BaseService
             $descAr = trim((string) ($data['description_ar'] ?? $data['descriptionAr'] ?? $data['description'] ?? ''));
             $descEn = trim((string) ($data['description_en'] ?? $data['descriptionEn'] ?? $descAr));
 
-            $subjectAr = trim((string) ($data['subject_ar'] ?? $data['subjectAr'] ?? $data['subject'] ?? $course?->subject_ar ?? 'الأحياء'));
+            $subjectAr = trim((string) ($data['subject_ar'] ?? $data['subjectAr'] ?? $data['subject'] ?? $course?->subject_ar ?? $teacher->teacherProfile?->subject_ar ?? 'الأحياء'));
             $gradeAr = $this->normalizeGradeAr((string) ($data['grade_ar'] ?? $data['gradeAr'] ?? $data['grade'] ?? $course?->grade_ar ?? 'الصف الثالث الثانوي'));
-            $targetGroup = trim((string) ($data['target_group_code'] ?? $data['classGroup'] ?? $data['targetGroup'] ?? 'cls-dokki-301'));
+            $targetGroup = trim((string) ($data['target_group_code'] ?? $data['classGroup'] ?? $data['targetGroup'] ?? ''));
 
             $rawEmbedUrl = trim((string) ($data['embed_url'] ?? $data['embedUrl'] ?? $data['videoUrl'] ?? ''));
             [$safeEmbedUrl, $isYoutube] = $this->sanitizeEmbedUrl($rawEmbedUrl);
@@ -259,14 +260,18 @@ class TeacherStudioService extends BaseService
      */
     protected function getStorageDisk(): string
     {
-        if (Storage::disk('local') instanceof StorageFake) {
-            return 'local';
-        }
         if (Storage::disk('supabase') instanceof StorageFake) {
             return 'supabase';
         }
+        if (Storage::disk('local') instanceof StorageFake) {
+            return 'local';
+        }
 
-        return config('filesystems.disks.supabase.key') ? 'supabase' : 'local';
+        $hasSupabase = ! empty(config('filesystems.disks.supabase.key'))
+            && ! empty(config('filesystems.disks.supabase.secret'))
+            && ! empty(config('filesystems.disks.supabase.endpoint'));
+
+        return $hasSupabase ? 'supabase' : 'local';
     }
 
     /**
@@ -292,7 +297,10 @@ class TeacherStudioService extends BaseService
                     }
                 }
             } catch (\Throwable $e) {
-                // Fall back to local private disk if Supabase S3 times out or fails
+                Log::warning('Supabase lesson media upload failed; falling back to local disk', [
+                    'path' => $storagePath,
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
 
@@ -323,7 +331,10 @@ class TeacherStudioService extends BaseService
                     return 'supabase';
                 }
             } catch (\Throwable $e) {
-                // Fall back to local private disk
+                Log::warning('Supabase lesson attachment upload failed; falling back to local disk', [
+                    'path' => $storagePath,
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
 
@@ -346,7 +357,7 @@ class TeacherStudioService extends BaseService
 
         $realPath = $file->getRealPath();
         $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $detectedMime = $realPath ? $finfo->file($realPath) : $file->getMimeType();
+        $detectedMime = $realPath ? $finfo->file($realPath) : (string) $file->getMimeType();
 
         $allowedMediaMimes = [
             'audio/mpeg' => 'mp3',
@@ -356,8 +367,14 @@ class TeacherStudioService extends BaseService
             'audio/webm' => 'webm',
             'audio/ogg' => 'ogg',
             'audio/mp4' => 'm4a',
+            'audio/m4a' => 'm4a',
+            'audio/x-m4a' => 'm4a',
+            'audio/aac' => 'aac',
+            'audio/x-aac' => 'aac',
+            'audio/flac' => 'flac',
             'video/mp4' => 'mp4',
             'video/webm' => 'webm',
+            'video/x-matroska' => 'webm',
             'video/ogg' => 'ogv',
             'video/quicktime' => 'mov',
         ];
@@ -516,9 +533,12 @@ class TeacherStudioService extends BaseService
 
             $disk = $this->storeBytesWithFallback($preferredDisk, $storagePath, $rawContent);
 
-            $nextOrder = (int) LessonAttachment::where('lesson_id', $lesson->id)
+            $requestedOrder = isset($meta['order']) || isset($meta['display_order'])
+                ? max(1, (int) ($meta['order'] ?? $meta['display_order']))
+                : null;
+            $nextOrder = $requestedOrder ?? ((int) LessonAttachment::where('lesson_id', $lesson->id)
                 ->where('type', $type)
-                ->max('display_order') + 1;
+                ->max('display_order') + 1);
 
             $cleanFileName = $this->sanitizeOriginalFileName($file->getClientOriginalName());
             $defaultTitle = pathinfo($cleanFileName, PATHINFO_FILENAME) ?: 'مرفق الحصة';
@@ -527,6 +547,7 @@ class TeacherStudioService extends BaseService
             }
 
             $sizeBytes = (int) $file->getSize();
+            $rawPagesCount = $meta['pages_count'] ?? $meta['pagesCount'] ?? null;
 
             $attachment = LessonAttachment::create([
                 'lesson_id' => $lesson->id,
@@ -540,8 +561,8 @@ class TeacherStudioService extends BaseService
                 'mime_type' => $detectedMime,
                 'file_size_bytes' => $sizeBytes,
                 'file_size_label' => $this->formatBytes($sizeBytes),
-                'pages_count' => $type === LessonAttachmentType::PDF
-                    ? max(1, (int) ($meta['pages_count'] ?? $meta['pagesCount'] ?? 12))
+                'pages_count' => $type === LessonAttachmentType::PDF && $rawPagesCount !== null
+                    ? max(1, (int) $rawPagesCount)
                     : null,
                 'display_order' => $nextOrder,
             ]);
@@ -649,8 +670,22 @@ class TeacherStudioService extends BaseService
 
             $attachment->delete();
 
-            if ($path && Storage::disk($disk)->exists($path)) {
-                Storage::disk($disk)->delete($path);
+            if ($path) {
+                $candidateDisks = array_values(array_unique([$disk, 'local']));
+                foreach ($candidateDisks as $candidate) {
+                    try {
+                        if (Storage::disk($candidate)->exists($path)) {
+                            Storage::disk($candidate)->delete($path);
+                            break;
+                        }
+                    } catch (\Throwable $e) {
+                        Log::warning('Lesson attachment delete skipped on disk', [
+                            'disk' => $candidate,
+                            'path' => $path,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
             }
 
             StoredFile::where('storage_path', $path)->delete();
@@ -698,22 +733,12 @@ class TeacherStudioService extends BaseService
         $isYoutube = false;
         $embedUrl = $rawUrl;
 
-        if (str_contains($rawUrl, 'youtube.com/watch?v=')) {
-            $parts = explode('v=', $rawUrl);
-            $videoId = explode('&', $parts[1] ?? '')[0] ?? '';
-            if (preg_match('/^[a-zA-Z0-9_-]{6,20}$/', $videoId)) {
-                $embedUrl = "https://www.youtube.com/embed/{$videoId}";
-                $isYoutube = true;
-            }
-        } elseif (str_contains($rawUrl, 'youtu.be/')) {
-            $parts = explode('youtu.be/', $rawUrl);
-            $videoId = explode('?', $parts[1] ?? '')[0] ?? '';
-            if (preg_match('/^[a-zA-Z0-9_-]{6,20}$/', $videoId)) {
-                $embedUrl = "https://www.youtube.com/embed/{$videoId}";
-                $isYoutube = true;
-            }
-        } elseif (str_contains($rawUrl, 'youtube.com/embed/')) {
+        if (preg_match('#(?:youtube\.com/(?:watch\?.*v=|shorts/|live/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{6,20})#i', $rawUrl, $matches)) {
+            $embedUrl = "https://www.youtube.com/embed/{$matches[1]}";
             $isYoutube = true;
+        } elseif (preg_match('#vimeo\.com/(?:video/)?(\d{5,15})#i', $rawUrl, $matches)) {
+            $embedUrl = "https://player.vimeo.com/video/{$matches[1]}";
+            $isYoutube = false;
         }
 
         return [$embedUrl, $isYoutube];

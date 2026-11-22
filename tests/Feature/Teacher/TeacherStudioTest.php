@@ -313,4 +313,82 @@ class TeacherStudioTest extends TestCase
             ->assertJsonPath('data.aiFeatures.conceptGraph', false)
             ->assertJsonPath('data.aiFeatures.chapterIndexing', true);
     }
+
+    public function test_studio_uploads_media_and_ordered_attachments_to_supabase_and_supports_shorts_and_vimeo(): void
+    {
+        Storage::fake('supabase');
+
+        [$teacher, $token] = $this->createAuthenticatedTeacher('teacher.cloud.studio@motafawweq.com');
+
+        // 1. YouTube Shorts embed sanitization
+        $shortsRes = $this->withToken($token)->postJson('/api/v1/teacher/lessons', [
+            'title_ar' => 'مراجعة سريعة على الخلية',
+            'media_mode' => 'embed',
+            'embed_url' => 'https://www.youtube.com/shorts/AbCdEf12345',
+        ])->assertCreated()
+            ->assertJsonPath('data.embedUrl', 'https://www.youtube.com/embed/AbCdEf12345')
+            ->assertJsonPath('data.isYoutube', true);
+
+        $lessonUuid = $shortsRes->json('data.id');
+
+        // 2. Upload valid WAV audio with duration_seconds=0 -> stored on supabase & streams via signed URL
+        $wavHeader = "RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80\x3e\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00";
+        $wavFile = UploadedFile::fake()->createWithContent('lecture_audio.wav', $wavHeader);
+
+        $mediaRes = $this->withToken($token)->post("/api/v1/teacher/lessons/{$lessonUuid}/media", [
+            'media' => $wavFile,
+            'mode' => 'audio',
+            'duration_seconds' => 0,
+        ], ['Accept' => 'application/json']);
+
+        $mediaRes->assertOk()
+            ->assertJsonPath('data.mediaType', 'audio');
+
+        $lesson = Lesson::where('uuid', $lessonUuid)->firstOrFail();
+        $this->assertSame('supabase', $lesson->media_disk);
+        Storage::disk('supabase')->assertExists($lesson->media_path);
+
+        $signedMediaUrl = $mediaRes->json('data.mediaStreamUrl');
+        $this->assertNotEmpty($signedMediaUrl);
+        $this->get($signedMediaUrl)
+            ->assertOk()
+            ->assertHeader('X-Content-Type-Options', 'nosniff');
+
+        $this->getJson("/api/v1/teacher/lessons/{$lessonUuid}/media/stream")
+            ->assertForbidden();
+
+        // 3. Explicit order on whiteboard images + attachment_uuids alias on reorder
+        $validPngBytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+
+        $imgB = $this->withToken($token)->post("/api/v1/teacher/lessons/{$lessonUuid}/attachments/images", [
+            'file' => UploadedFile::fake()->createWithContent('b2.png', $validPngBytes),
+            'title' => 'سبورة 2',
+            'order' => 2,
+        ], ['Accept' => 'application/json'])->assertCreated()->json('data');
+
+        $imgA = $this->withToken($token)->post("/api/v1/teacher/lessons/{$lessonUuid}/attachments/images", [
+            'file' => UploadedFile::fake()->createWithContent('b1.png', $validPngBytes),
+            'title' => 'سبورة 1',
+            'order' => 1,
+        ], ['Accept' => 'application/json'])->assertCreated()->json('data');
+
+        $this->assertSame(2, $imgB['order']);
+        $this->assertSame(1, $imgA['order']);
+
+        $this->withToken($token)->putJson("/api/v1/teacher/lessons/{$lessonUuid}/attachments/reorder", [
+            'type' => 'whiteboard_image',
+            'attachment_uuids' => [$imgB['id'], $imgA['id']],
+        ])->assertOk()
+            ->assertJsonPath('data.0.id', $imgB['id'])
+            ->assertJsonPath('data.0.order', 1);
+
+        // 4. Vimeo embed sanitization
+        $this->withToken($token)->postJson('/api/v1/teacher/lessons', [
+            'title_ar' => 'شرح فيميو',
+            'media_mode' => 'embed',
+            'embed_url' => 'https://vimeo.com/987654321',
+        ])->assertCreated()
+            ->assertJsonPath('data.embedUrl', 'https://player.vimeo.com/video/987654321')
+            ->assertJsonPath('data.isYoutube', false);
+    }
 }

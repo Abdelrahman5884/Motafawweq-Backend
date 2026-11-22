@@ -22,6 +22,8 @@ class UploadLessonAttachmentRequest extends BaseApiRequest
             'caption' => ['nullable', 'string', 'max:500'],
             'pages_count' => ['nullable', 'integer', 'min:1', 'max:2000'],
             'pagesCount' => ['nullable', 'integer', 'min:1', 'max:2000'],
+            'order' => ['nullable', 'integer', 'min:1', 'max:500'],
+            'display_order' => ['nullable', 'integer', 'min:1', 'max:500'],
         ];
     }
 }

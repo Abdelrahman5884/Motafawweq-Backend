@@ -18,8 +18,8 @@ class UploadLessonMediaRequest extends BaseApiRequest
         return [
             'media' => ['required', 'file', 'max:512000'], // up to 500MB in API request
             'mode' => ['nullable', 'string', Rule::in(LessonMediaMode::values())],
-            'duration_seconds' => ['nullable', 'integer', 'min:1', 'max:86400'],
-            'durationSeconds' => ['nullable', 'integer', 'min:1', 'max:86400'],
+            'duration_seconds' => ['nullable', 'integer', 'min:0', 'max:86400'],
+            'durationSeconds' => ['nullable', 'integer', 'min:0', 'max:86400'],
         ];
     }
 }
