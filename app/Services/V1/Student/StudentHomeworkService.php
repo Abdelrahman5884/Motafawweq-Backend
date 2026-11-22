@@ -11,6 +11,7 @@ use App\Models\HomeworkSubmission;
 use App\Models\StudentXpLedger;
 use App\Models\User;
 use App\Services\BaseService;
+use App\Services\V1\Storage\HomeworkAttachmentStorage;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
@@ -21,15 +22,9 @@ use Illuminate\Validation\ValidationException;
 
 class StudentHomeworkService extends BaseService
 {
-    private const ALLOWED_MIMES = [
-        'application/pdf',
-        'image/jpeg',
-        'image/png',
-        'image/webp',
-    ];
-
     public function __construct(
-        protected StudentAccessService $accessService
+        protected StudentAccessService $accessService,
+        protected HomeworkAttachmentStorage $attachmentStorage
     ) {}
 
     /**
@@ -80,12 +75,16 @@ class StudentHomeworkService extends BaseService
                 ? $hw->type->value
                 : (string) ($hw->type ?? ($hw->attachment_path ? 'file' : 'text'));
 
-            $hasTeacherAttachment = $hw->attachment_path && Storage::disk('local')->exists($hw->attachment_path);
+            $hwDisk = $hw->attachment_disk ?: 'local';
+            $hasTeacherAttachment = ! empty($hw->attachment_path)
+                && ($hwDisk !== 'local' || Storage::disk('local')->exists($hw->attachment_path));
             $attachmentUrl = null;
             $attachmentDownloadUrl = null;
-            $attachmentSizeBytes = null;
+            $attachmentSizeBytes = $hw->attachment_size_bytes ? (int) $hw->attachment_size_bytes : null;
             if ($hasTeacherAttachment) {
-                $attachmentSizeBytes = (int) Storage::disk('local')->size($hw->attachment_path);
+                if ($attachmentSizeBytes === null && $hwDisk === 'local') {
+                    $attachmentSizeBytes = (int) Storage::disk('local')->size($hw->attachment_path);
+                }
                 $attachmentUrl = URL::temporarySignedRoute(
                     'api.v1.student.homeworks.attachment.stream',
                     $signedExpiry,
@@ -98,7 +97,9 @@ class StudentHomeworkService extends BaseService
                 );
             }
 
-            $hasSubmissionAttachment = $sub?->attachment_path && Storage::disk('local')->exists($sub->attachment_path);
+            $subDisk = $sub?->attachment_disk ?: 'local';
+            $hasSubmissionAttachment = ! empty($sub?->attachment_path)
+                && ($subDisk !== 'local' || Storage::disk('local')->exists($sub->attachment_path));
             $submittedAttachmentUrl = null;
             $submittedAttachmentDownloadUrl = null;
             if ($hasSubmissionAttachment) {
@@ -218,8 +219,15 @@ class StudentHomeworkService extends BaseService
                 ]);
             }
 
+            $submissionUuid = $existing?->uuid ?: (string) Str::uuid();
+            $oldDisk = $existing?->attachment_disk ?: 'local';
+            $oldPath = $existing?->attachment_path;
+
             $attachmentName = $existing?->attachment_name;
             $attachmentPath = $existing?->attachment_path;
+            $attachmentDisk = $oldDisk;
+            $attachmentMime = $existing?->attachment_mime_type;
+            $attachmentSize = $existing?->attachment_size_bytes;
             $hasExistingFile = ! empty($attachmentPath) && ! $removeAttachment;
 
             if (! $file && ! $hasExistingFile && empty($solutionText)) {
@@ -229,11 +237,14 @@ class StudentHomeworkService extends BaseService
             }
 
             if ($removeAttachment && ! $file) {
-                if ($attachmentPath && Storage::disk('local')->exists($attachmentPath)) {
-                    Storage::disk('local')->delete($attachmentPath);
+                if ($oldPath) {
+                    $this->attachmentStorage->deleteFile($oldDisk, $oldPath);
                 }
                 $attachmentName = null;
                 $attachmentPath = null;
+                $attachmentDisk = 'local';
+                $attachmentMime = null;
+                $attachmentSize = null;
             }
 
             $submissionType = $attachmentPath
@@ -241,14 +252,25 @@ class StudentHomeworkService extends BaseService
                 : ($data['submission_type'] ?? 'text');
 
             if ($file) {
-                $uploaded = $this->validateAndStoreFile($student, $file, "homeworks/{$homework->uuid}/submissions");
+                $uploaded = $this->attachmentStorage->storeFile(
+                    user: $student,
+                    file: $file,
+                    subPath: "homeworks/{$homework->uuid}/submissions",
+                    entityType: 'student_submission',
+                    entityId: $submissionUuid,
+                    auditEventOnBlock: 'student.homework.malicious_upload_blocked',
+                    errorTranslationKey: 'messages.invalid_homework_file_mime'
+                );
 
-                if ($attachmentPath && Storage::disk('local')->exists($attachmentPath)) {
-                    Storage::disk('local')->delete($attachmentPath);
+                if ($oldPath && $oldPath !== $uploaded['path']) {
+                    $this->attachmentStorage->deleteFile($oldDisk, $oldPath);
                 }
 
                 $attachmentName = $uploaded['name'];
                 $attachmentPath = $uploaded['path'];
+                $attachmentDisk = $uploaded['disk'];
+                $attachmentMime = $uploaded['mime_type'];
+                $attachmentSize = $uploaded['size_bytes'];
                 $submissionType = $uploaded['file_type'];
             }
 
@@ -257,6 +279,9 @@ class StudentHomeworkService extends BaseService
                 'submission_type' => $submissionType,
                 'attachment_name' => $attachmentName,
                 'attachment_path' => $attachmentPath,
+                'attachment_disk' => $attachmentDisk,
+                'attachment_mime_type' => $attachmentMime,
+                'attachment_size_bytes' => $attachmentSize,
                 'solution_text' => $solutionText,
                 'status' => HomeworkSubmissionStatus::PENDING,
                 'max_score' => (int) $homework->max_grade,
@@ -275,6 +300,7 @@ class StudentHomeworkService extends BaseService
                 $submission = $existing->fresh(['homework', 'student']);
             } else {
                 $submission = HomeworkSubmission::create(array_merge([
+                    'uuid' => $submissionUuid,
                     'homework_id' => $homework->id,
                     'student_id' => $student->id,
                 ], $attributes));
@@ -297,6 +323,7 @@ class StudentHomeworkService extends BaseService
                     'homework_uuid' => $homework->uuid,
                     'submission_uuid' => $submission->uuid,
                     'submission_type' => $submissionType,
+                    'attachment_disk' => $attachmentPath ? $attachmentDisk : null,
                 ],
                 'info',
                 $submission
@@ -304,51 +331,5 @@ class StudentHomeworkService extends BaseService
 
             return $submission;
         });
-    }
-
-    /**
-     * Validate magic-byte MIME and store file in private local disk.
-     *
-     * @return array{name: string, path: string, file_type: string}
-     */
-    protected function validateAndStoreFile(User $user, UploadedFile $file, string $subPath): array
-    {
-        $realPath = $file->getRealPath();
-        $finfo = new \finfo(FILEINFO_MIME_TYPE);
-        $detectedMime = $realPath ? $finfo->file($realPath) : $file->getMimeType();
-
-        if (! in_array($detectedMime, self::ALLOWED_MIMES, true)) {
-            $this->logSecurityEvent(
-                'student.homework.malicious_upload_blocked',
-                [
-                    'user_id' => $user->id,
-                    'detected_mime' => $detectedMime,
-                    'original_name' => $file->getClientOriginalName(),
-                ],
-                'warning'
-            );
-
-            throw ValidationException::withMessages([
-                'file' => [__('messages.invalid_homework_file_mime')],
-            ]);
-        }
-
-        $safeOriginalName = preg_replace('/[^a-zA-Z0-9._\-\x{0600}-\x{06FF} ]/u', '', $file->getClientOriginalName());
-        $safeOriginalName = Str::limit(trim($safeOriginalName ?: 'solution'), 150, '');
-
-        $extension = match ($detectedMime) {
-            'application/pdf' => 'pdf',
-            'image/png' => 'png',
-            'image/webp' => 'webp',
-            default => $file->guessExtension() ?: 'jpg',
-        };
-        $storedFileName = Str::uuid()->toString().'.'.$extension;
-        $storagePath = $file->storeAs($subPath, $storedFileName, 'local');
-
-        return [
-            'name' => $safeOriginalName,
-            'path' => $storagePath,
-            'file_type' => $detectedMime === 'application/pdf' ? 'pdf' : 'image',
-        ];
     }
 }

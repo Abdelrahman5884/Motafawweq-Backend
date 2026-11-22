@@ -437,4 +437,127 @@ class TeacherHomeworkTest extends TestCase
             'event' => 'teacher.idor_attempt_blocked',
         ]);
     }
+
+    public function test_homework_and_submission_files_upload_to_supabase_and_stream_via_signed_urls(): void
+    {
+        Storage::fake('supabase');
+
+        $teacher = $this->createTeacher('teacher.cloud@motafawweq.com');
+        $student = $this->createStudent('student.cloud@motafawweq.com');
+
+        // 1. Teacher creates homework with PDF -> stored on supabase disk & StoredFile recorded
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        $pdf = UploadedFile::fake()->createWithContent(
+            'cloud_sheet.pdf',
+            "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
+        );
+
+        $createRes = $this->post('/api/v1/teacher/homeworks', [
+            'titleAr' => 'واجب مرفوع على السيرفر السحابي',
+            'maxGrade' => 25,
+            'file' => $pdf,
+        ], ['Accept' => 'application/json']);
+
+        $createRes->assertCreated()
+            ->assertJsonPath('data.attachmentDisk', 'supabase')
+            ->assertJsonPath('data.attachmentName', 'cloud_sheet.pdf')
+            ->assertJsonPath('data.fileType', 'pdf');
+
+        $hwUuid = $createRes->json('data.id');
+        $signedHwUrl = $createRes->json('data.attachmentUrl');
+        $this->assertNotEmpty($signedHwUrl);
+
+        $hw = Homework::where('uuid', $hwUuid)->firstOrFail();
+        $this->assertSame('supabase', $hw->attachment_disk);
+        Storage::disk('supabase')->assertExists($hw->attachment_path);
+
+        $this->assertDatabaseHas('stored_files', [
+            'entity_type' => 'homework_attachment',
+            'entity_id' => $hwUuid,
+            'storage_disk' => 'supabase',
+            'storage_provider' => 'supabase',
+            'upload_status' => 'completed',
+        ]);
+
+        // Signed teacher URL streams cleanly; unsigned URL is blocked
+        $this->get($signedHwUrl)
+            ->assertOk()
+            ->assertHeader('X-Content-Type-Options', 'nosniff');
+
+        $this->get("/api/v1/media/teacher-homeworks/{$hwUuid}/attachment/stream")
+            ->assertForbidden();
+
+        // 2. Teacher replaces homework attachment via multipart POST + _method=PUT
+        $oldPath = $hw->attachment_path;
+        $validPng = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+        $newImage = UploadedFile::fake()->createWithContent('updated_sheet.png', $validPng);
+
+        $replaceRes = $this->post("/api/v1/teacher/homeworks/{$hwUuid}", [
+            '_method' => 'PUT',
+            'titleAr' => 'واجب محدّث بصورة على السيرفر',
+            'file' => $newImage,
+        ], ['Accept' => 'application/json']);
+
+        $replaceRes->assertOk()
+            ->assertJsonPath('data.attachmentDisk', 'supabase')
+            ->assertJsonPath('data.fileType', 'image')
+            ->assertJsonPath('data.titleAr', 'واجب محدّث بصورة على السيرفر');
+
+        $hw->refresh();
+        Storage::disk('supabase')->assertMissing($oldPath);
+        Storage::disk('supabase')->assertExists($hw->attachment_path);
+
+        // 3. Student submits PDF solution -> stored on supabase, teacher streams via signed submission URL
+        Sanctum::actingAs($student, [TokenType::ACCESS->value]);
+
+        $studentPdf = UploadedFile::fake()->createWithContent(
+            'student_cloud_solution.pdf',
+            "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
+        );
+
+        $subRes = $this->post("/api/v1/student/homeworks/{$hwUuid}/submit", [
+            'solution_text' => 'تم الحل بالكامل وإرفاق الملف.',
+            'file' => $studentPdf,
+        ], ['Accept' => 'application/json']);
+
+        $subRes->assertCreated()
+            ->assertJsonPath('data.attachmentDisk', 'supabase');
+
+        $subUuid = $subRes->json('data.id');
+        $submission = HomeworkSubmission::where('uuid', $subUuid)->firstOrFail();
+        Storage::disk('supabase')->assertExists($submission->attachment_path);
+
+        // Teacher views submissions list, gets signed submission URL, streams it, and grades with meta metrics
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+        $listSubs = $this->getJson("/api/v1/teacher/homeworks/{$hwUuid}/submissions")
+            ->assertOk()
+            ->assertJsonPath('data.0.attachmentDisk', 'supabase');
+
+        $signedSubUrl = $listSubs->json('data.0.attachmentUrl');
+        $this->assertNotEmpty($signedSubUrl);
+        $this->get($signedSubUrl)->assertOk();
+
+        $this->patchJson("/api/v1/teacher/homeworks/{$hwUuid}/submissions/{$subUuid}/grade", [
+            'status' => 'graded',
+            'score' => 23,
+            'feedbackAr' => 'عمل ممتاز ومرتب.',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'graded')
+            ->assertJsonPath('data.score', 23)
+            ->assertJsonPath('meta.gradedCount', 1)
+            ->assertJsonPath('meta.pendingGrading', 0);
+
+        // 4. Teacher removes homework attachment cleanly
+        $currentPath = $hw->attachment_path;
+        $this->putJson("/api/v1/teacher/homeworks/{$hwUuid}", [
+            'remove_attachment' => true,
+            'text_content' => 'تحويل الواجب إلى نصي بعد إزالة الملف.',
+        ])->assertOk()
+            ->assertJsonPath('data.attachmentUrl', null)
+            ->assertJsonPath('data.attachmentName', null)
+            ->assertJsonPath('data.type', 'text');
+
+        Storage::disk('supabase')->assertMissing($currentPath);
+    }
 }

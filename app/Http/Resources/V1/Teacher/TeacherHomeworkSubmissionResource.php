@@ -4,13 +4,15 @@ namespace App\Http\Resources\V1\Teacher;
 
 use App\Enums\HomeworkSubmissionStatus;
 use App\Http\Resources\BaseJsonResource;
+use App\Services\V1\Storage\HomeworkAttachmentStorage;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\URL;
 
 class TeacherHomeworkSubmissionResource extends BaseJsonResource
 {
     /**
-     * Transform the submission for TeacherHomeworkView.jsx grading drawer and submissions list.
+     * Transform the submission for TeacherHomeworkView.jsx grading desk and submissions list.
      *
      * @return array<string, mixed>
      */
@@ -27,22 +29,47 @@ class TeacherHomeworkSubmissionResource extends BaseJsonResource
         $student = $this->whenLoaded('student');
 
         $attachmentUrl = null;
-        if ($this->attachment_path && Storage::disk('local')->exists($this->attachment_path)) {
-            $attachmentUrl = url("/api/v1/teacher/homeworks/submissions/{$this->uuid}/attachment");
+        $attachmentDownloadUrl = null;
+        if (! empty($this->attachment_path)) {
+            if (Route::has('api.v1.teacher.homeworks.submission.attachment.stream')) {
+                $expiry = now()->addHours(2);
+                $attachmentUrl = URL::temporarySignedRoute(
+                    'api.v1.teacher.homeworks.submission.attachment.stream',
+                    $expiry,
+                    ['submissionUuid' => $this->uuid]
+                );
+                $attachmentDownloadUrl = URL::temporarySignedRoute(
+                    'api.v1.teacher.homeworks.submission.attachment.stream',
+                    $expiry,
+                    ['submissionUuid' => $this->uuid, 'download' => 1]
+                );
+            } else {
+                $attachmentUrl = url("/api/v1/teacher/homeworks/submissions/{$this->uuid}/attachment");
+                $attachmentDownloadUrl = url("/api/v1/teacher/homeworks/submissions/{$this->uuid}/attachment?download=1");
+            }
         }
+
+        $sizeBytes = $this->attachment_size_bytes ? (int) $this->attachment_size_bytes : null;
 
         return [
             'id' => $this->uuid,
+            'uuid' => $this->uuid,
             'homeworkId' => $this->whenLoaded('homework', fn () => $this->homework?->uuid),
-            'studentId' => $student ? (string) ($student->id) : null,
+            'studentId' => $student ? (string) $student->id : null,
             'studentNameAr' => $student?->name ?? 'طالب مجهول',
+            'studentEmail' => $student?->email ?? null,
             'studentAvatar' => $student?->avatar,
             'studentCode' => $student?->student_code ?? null,
             'locationAr' => $this->location_ar ?? 'أونلاين',
             'submittedAt' => $this->formatDate($this->submitted_at),
-            'type' => $this->submission_type ?? 'file',
+            'type' => $this->submission_type ?? ($this->attachment_path ? 'file' : 'text'),
             'attachmentName' => $this->attachment_name,
+            'attachmentDisk' => $this->attachment_path ? ($this->attachment_disk ?: 'local') : null,
+            'attachmentMimeType' => $this->attachment_mime_type,
+            'attachmentSizeBytes' => $sizeBytes,
+            'attachmentSizeLabel' => HomeworkAttachmentStorage::formatBytes($sizeBytes),
             'attachmentUrl' => $attachmentUrl,
+            'attachmentDownloadUrl' => $attachmentDownloadUrl,
             'solutionText' => $this->solution_text,
             'sampleSolutionText' => $this->solution_text,
             'status' => $status,

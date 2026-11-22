@@ -6,6 +6,7 @@ use App\Enums\LessonAttachmentType;
 use App\Enums\LessonMediaMode;
 use App\Enums\UserRole;
 use App\Models\Course;
+use App\Models\Homework;
 use App\Models\HomeworkSubmission;
 use App\Models\Lesson;
 use App\Models\LessonAttachment;
@@ -87,6 +88,11 @@ class SupabaseStorageService extends BaseService
             'folder' => 'lessons/quizzes',
             'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
             'max_size' => 20971520, // 20 MB
+        ],
+        'homework_attachment' => [
+            'folder' => 'homeworks/attachments',
+            'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+            'max_size' => 26214400, // 25 MB
         ],
         'student_submission' => [
             'folder' => 'students/submissions',
@@ -444,6 +450,18 @@ class SupabaseStorageService extends BaseService
                 }
                 break;
 
+            case 'homework_attachment':
+                if ($user->role !== UserRole::TEACHER && $user->role !== UserRole::ADMIN) {
+                    throw ValidationException::withMessages(['entity_type' => [__('messages.forbidden')]]);
+                }
+                if ($entityId) {
+                    $homework = Homework::where('uuid', $entityId)->first();
+                    if ($homework && $homework->teacher_id !== $user->id && $user->role !== UserRole::ADMIN) {
+                        throw ValidationException::withMessages(['entity_id' => [__('messages.unauthorized_action')]]);
+                    }
+                }
+                break;
+
             case 'student_submission':
                 if ($user->role !== UserRole::STUDENT && $user->role !== UserRole::ADMIN) {
                     throw ValidationException::withMessages(['entity_type' => [__('messages.forbidden')]]);
@@ -472,8 +490,8 @@ class SupabaseStorageService extends BaseService
             return;
         }
 
-        // Student accessing course materials or lesson attachments
-        if (in_array($storedFile->entity_type, ['lesson_media', 'lesson_attachment', 'course_resource'], true)) {
+        // Student accessing course materials, lesson attachments, or teacher homework attachments
+        if (in_array($storedFile->entity_type, ['lesson_media', 'lesson_attachment', 'course_resource', 'homework_attachment'], true)) {
             return;
         }
 
@@ -572,6 +590,34 @@ class SupabaseStorageService extends BaseService
                 }
                 break;
 
+            case 'homework_attachment':
+                if ($storedFile->entity_id) {
+                    $homework = Homework::where('uuid', $storedFile->entity_id)->first();
+                    if ($homework) {
+                        if ($homework->attachment_path && $homework->attachment_path !== $storedFile->storage_path) {
+                            $oldDisk = $homework->attachment_disk ?: $this->diskName;
+                            try {
+                                if (Storage::disk($oldDisk)->exists($homework->attachment_path)) {
+                                    Storage::disk($oldDisk)->delete($homework->attachment_path);
+                                }
+                            } catch (\Throwable) {
+                                // Best-effort cleanup of replaced attachment
+                            }
+                        }
+
+                        $homework->update([
+                            'type' => 'file',
+                            'file_type' => $storedFile->mime_type === 'application/pdf' ? 'pdf' : 'image',
+                            'attachment_name' => $storedFile->original_filename,
+                            'attachment_path' => $storedFile->storage_path,
+                            'attachment_disk' => $this->diskName,
+                            'attachment_mime_type' => $storedFile->mime_type,
+                            'attachment_size_bytes' => $storedFile->file_size_bytes,
+                        ]);
+                    }
+                }
+                break;
+
             case 'student_submission':
                 if ($storedFile->entity_id) {
                     $submission = HomeworkSubmission::where('uuid', $storedFile->entity_id)->first();
@@ -579,6 +625,9 @@ class SupabaseStorageService extends BaseService
                         $submission->update([
                             'attachment_name' => $storedFile->original_filename,
                             'attachment_path' => $storedFile->storage_path,
+                            'attachment_disk' => $this->diskName,
+                            'attachment_mime_type' => $storedFile->mime_type,
+                            'attachment_size_bytes' => $storedFile->file_size_bytes,
                             'submission_type' => $storedFile->mime_type === 'application/pdf' ? 'pdf' : 'image',
                         ]);
                     }

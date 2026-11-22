@@ -8,17 +8,19 @@ use App\Http\Requests\V1\Teacher\StoreHomeworkRequest;
 use App\Http\Requests\V1\Teacher\UpdateHomeworkRequest;
 use App\Http\Resources\V1\Teacher\TeacherHomeworkResource;
 use App\Http\Resources\V1\Teacher\TeacherHomeworkSubmissionResource;
+use App\Models\Homework;
 use App\Models\HomeworkSubmission;
+use App\Services\V1\Storage\HomeworkAttachmentStorage;
 use App\Services\V1\Teacher\TeacherHomeworkService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 class TeacherHomeworkController extends BaseApiController
 {
     public function __construct(
-        protected TeacherHomeworkService $homeworkService
+        protected TeacherHomeworkService $homeworkService,
+        protected HomeworkAttachmentStorage $attachmentStorage
     ) {}
 
     /**
@@ -41,10 +43,11 @@ class TeacherHomeworkController extends BaseApiController
 
     /**
      * POST /api/v1/teacher/homeworks
-     * Create a new homework with optional file attachment.
+     * Create a new homework with optional file attachment uploaded to cloud/server storage.
      */
     public function store(StoreHomeworkRequest $request): JsonResponse
     {
+        @set_time_limit(180);
         $file = $request->file('file') ?? $request->file('attachment');
 
         $homework = $this->homeworkService->createHomework(
@@ -78,10 +81,11 @@ class TeacherHomeworkController extends BaseApiController
 
     /**
      * PUT /api/v1/teacher/homeworks/{uuid}
-     * Update an existing homework.
+     * Update an existing homework (also supports POST + _method=PUT for multipart file replacement).
      */
     public function update(UpdateHomeworkRequest $request, string $uuid): JsonResponse
     {
+        @set_time_limit(180);
         $file = $request->file('file') ?? $request->file('attachment');
 
         $homework = $this->homeworkService->updateHomework(
@@ -171,38 +175,70 @@ class TeacherHomeworkController extends BaseApiController
             $request->validated()
         );
 
+        $hw = $submission->homework;
+
         return $this->successResponse(
             new TeacherHomeworkSubmissionResource($submission),
-            __('messages.homework_submission_graded')
+            __('messages.homework_submission_graded'),
+            meta: $hw ? [
+                'totalAssigned' => (int) $hw->total_assigned,
+                'submittedCount' => (int) $hw->submitted_count,
+                'gradedCount' => (int) $hw->graded_count,
+                'pendingGrading' => (int) $hw->pending_grading,
+                'avgGrade' => (float) $hw->avg_grade,
+            ] : []
         );
     }
 
     /**
      * GET /api/v1/teacher/homeworks/{uuid}/attachment
-     * Stream or download homework attachment file.
+     * Authenticated teacher streams or downloads homework attachment file.
      */
-    public function downloadAttachment(string $uuid): BinaryFileResponse
+    public function downloadAttachment(Request $request, string $uuid): Response
     {
         $homework = $this->homeworkService->getHomework(
             $this->authenticatedUser(),
             $uuid
         );
 
-        if (! $homework->attachment_path || ! Storage::disk('local')->exists($homework->attachment_path)) {
-            abort(404, __('messages.file_not_found'));
+        return $this->attachmentStorage->streamResponse(
+            declaredDisk: $homework->attachment_disk,
+            path: $homework->attachment_path,
+            fallbackBase: 'homework-attachment',
+            originalName: $homework->attachment_name,
+            declaredMime: $homework->attachment_mime_type,
+            forceDownload: $request->boolean('download')
+        );
+    }
+
+    /**
+     * GET /api/v1/media/teacher-homeworks/{uuid}/attachment/stream (temporary signed URL)
+     * Stream or download teacher homework attachment directly for inline browser preview/download.
+     */
+    public function streamAttachment(Request $request, string $uuid): Response
+    {
+        if (! $request->hasValidSignature()) {
+            return $this->forbiddenResponse(__('messages.invalid_signed_url'));
         }
 
-        return response()->file(
-            Storage::disk('local')->path($homework->attachment_path),
-            ['Content-Disposition' => 'inline; filename="'.($homework->attachment_name ?: 'homework-attachment').'"']
+        /** @var Homework $homework */
+        $homework = Homework::where('uuid', $uuid)->firstOrFail();
+
+        return $this->attachmentStorage->streamResponse(
+            declaredDisk: $homework->attachment_disk,
+            path: $homework->attachment_path,
+            fallbackBase: 'homework-attachment',
+            originalName: $homework->attachment_name,
+            declaredMime: $homework->attachment_mime_type,
+            forceDownload: $request->boolean('download')
         );
     }
 
     /**
      * GET /api/v1/teacher/homeworks/submissions/{submissionUuid}/attachment
-     * Stream or download student submission attachment file.
+     * Authenticated teacher streams or downloads student submission attachment file.
      */
-    public function downloadSubmissionAttachment(string $submissionUuid): BinaryFileResponse
+    public function downloadSubmissionAttachment(Request $request, string $submissionUuid): Response
     {
         $teacher = $this->authenticatedUser();
 
@@ -213,13 +249,36 @@ class TeacherHomeworkController extends BaseApiController
 
         $submission->homework->assertOwnedBy($teacher);
 
-        if (! $submission->attachment_path || ! Storage::disk('local')->exists($submission->attachment_path)) {
-            abort(404, __('messages.file_not_found'));
+        return $this->attachmentStorage->streamResponse(
+            declaredDisk: $submission->attachment_disk,
+            path: $submission->attachment_path,
+            fallbackBase: 'student-solution',
+            originalName: $submission->attachment_name,
+            declaredMime: $submission->attachment_mime_type,
+            forceDownload: $request->boolean('download')
+        );
+    }
+
+    /**
+     * GET /api/v1/media/teacher-homeworks/submissions/{submissionUuid}/attachment/stream (temporary signed URL)
+     * Stream or download student submission attachment for inline browser preview/download on teacher grading desk.
+     */
+    public function streamSubmissionAttachment(Request $request, string $submissionUuid): Response
+    {
+        if (! $request->hasValidSignature()) {
+            return $this->forbiddenResponse(__('messages.invalid_signed_url'));
         }
 
-        return response()->file(
-            Storage::disk('local')->path($submission->attachment_path),
-            ['Content-Disposition' => 'inline; filename="'.($submission->attachment_name ?: 'solution').'"']
+        /** @var HomeworkSubmission $submission */
+        $submission = HomeworkSubmission::where('uuid', $submissionUuid)->firstOrFail();
+
+        return $this->attachmentStorage->streamResponse(
+            declaredDisk: $submission->attachment_disk,
+            path: $submission->attachment_path,
+            fallbackBase: 'student-solution',
+            originalName: $submission->attachment_name,
+            declaredMime: $submission->attachment_mime_type,
+            forceDownload: $request->boolean('download')
         );
     }
 }

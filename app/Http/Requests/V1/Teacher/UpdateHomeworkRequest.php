@@ -30,19 +30,20 @@ class UpdateHomeworkRequest extends BaseApiRequest
         $dueTime = $this->input('due_time') ?? $this->input('dueTime');
         $maxGrade = $this->input('max_grade') ?? $this->input('maxGrade');
         $totalAssigned = $this->input('total_assigned') ?? $this->input('totalAssigned');
+        $removeAttachment = $this->input('remove_attachment') ?? $this->input('removeAttachment');
 
         $merged = [];
         if ($titleAr !== null) {
             $merged['title_ar'] = trim(strip_tags((string) $titleAr));
         }
-        if ($courseId !== null) {
-            $merged['course_id'] = $courseId;
+        if ($this->has('course_id') || $this->has('courseId')) {
+            $merged['course_id'] = $courseId ?: null;
         }
         if ($courseTitleAr !== null) {
             $merged['course_title_ar'] = trim(strip_tags((string) $courseTitleAr));
         }
-        if ($lessonId !== null) {
-            $merged['lesson_id'] = $lessonId;
+        if ($this->has('lesson_id') || $this->has('lessonId')) {
+            $merged['lesson_id'] = $lessonId ?: null;
         }
         if ($lessonTitleAr !== null) {
             $merged['lesson_title_ar'] = trim(strip_tags((string) $lessonTitleAr));
@@ -59,8 +60,8 @@ class UpdateHomeworkRequest extends BaseApiRequest
         if ($textContent !== null) {
             $merged['text_content'] = trim((string) $textContent);
         }
-        if ($dueDate !== null) {
-            $merged['due_date'] = $dueDate;
+        if ($this->has('due_date') || $this->has('dueDate')) {
+            $merged['due_date'] = $dueDate !== '' ? $dueDate : null;
         }
         if ($dueTime !== null) {
             $merged['due_time'] = trim((string) $dueTime);
@@ -70,6 +71,9 @@ class UpdateHomeworkRequest extends BaseApiRequest
         }
         if ($totalAssigned !== null) {
             $merged['total_assigned'] = (int) $totalAssigned;
+        }
+        if ($removeAttachment !== null) {
+            $merged['remove_attachment'] = filter_var($removeAttachment, FILTER_VALIDATE_BOOLEAN);
         }
 
         if (! empty($merged)) {
@@ -93,8 +97,9 @@ class UpdateHomeworkRequest extends BaseApiRequest
             'due_time' => ['nullable', 'string', 'max:10'],
             'max_grade' => ['nullable', 'numeric', 'min:1', 'max:500'],
             'total_assigned' => ['nullable', 'integer', 'min:0'],
-            'file' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
-            'attachment' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg', 'max:25600'],
+            'remove_attachment' => ['nullable', 'boolean'],
+            'file' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg,webp', 'max:25600'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,png,jpg,jpeg,webp', 'max:25600'],
         ];
     }
 }

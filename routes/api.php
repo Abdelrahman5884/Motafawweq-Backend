@@ -604,4 +604,13 @@ Route::prefix('v1')->group(function () {
             ->whereUuid('submissionUuid')
             ->name('api.v1.student.homeworks.submission.attachment.stream');
     });
+
+    Route::prefix('media/teacher-homeworks')->group(function () {
+        Route::get('/{uuid}/attachment/stream', [TeacherHomeworkController::class, 'streamAttachment'])
+            ->whereUuid('uuid')
+            ->name('api.v1.teacher.homeworks.attachment.stream');
+        Route::get('/submissions/{submissionUuid}/attachment/stream', [TeacherHomeworkController::class, 'streamSubmissionAttachment'])
+            ->whereUuid('submissionUuid')
+            ->name('api.v1.teacher.homeworks.submission.attachment.stream');
+    });
 });

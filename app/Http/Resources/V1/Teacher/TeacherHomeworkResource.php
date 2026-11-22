@@ -4,8 +4,10 @@ namespace App\Http\Resources\V1\Teacher;
 
 use App\Enums\HomeworkType;
 use App\Http\Resources\BaseJsonResource;
+use App\Services\V1\Storage\HomeworkAttachmentStorage;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\URL;
 
 class TeacherHomeworkResource extends BaseJsonResource
 {
@@ -18,16 +20,34 @@ class TeacherHomeworkResource extends BaseJsonResource
     {
         $type = $this->type instanceof HomeworkType
             ? $this->type->value
-            : (string) ($this->type ?? 'file');
+            : (string) ($this->type ?? ($this->attachment_path ? 'file' : 'text'));
 
         $attachmentUrl = null;
-        if ($this->attachment_path && Storage::disk('local')->exists($this->attachment_path)) {
-            // Temporary signed route or storage URL
-            $attachmentUrl = url("/api/v1/teacher/homeworks/{$this->uuid}/attachment");
+        $attachmentDownloadUrl = null;
+        if (! empty($this->attachment_path)) {
+            if (Route::has('api.v1.teacher.homeworks.attachment.stream')) {
+                $expiry = now()->addHours(2);
+                $attachmentUrl = URL::temporarySignedRoute(
+                    'api.v1.teacher.homeworks.attachment.stream',
+                    $expiry,
+                    ['uuid' => $this->uuid]
+                );
+                $attachmentDownloadUrl = URL::temporarySignedRoute(
+                    'api.v1.teacher.homeworks.attachment.stream',
+                    $expiry,
+                    ['uuid' => $this->uuid, 'download' => 1]
+                );
+            } else {
+                $attachmentUrl = url("/api/v1/teacher/homeworks/{$this->uuid}/attachment");
+                $attachmentDownloadUrl = url("/api/v1/teacher/homeworks/{$this->uuid}/attachment?download=1");
+            }
         }
+
+        $sizeBytes = $this->attachment_size_bytes ? (int) $this->attachment_size_bytes : null;
 
         return [
             'id' => $this->uuid,
+            'uuid' => $this->uuid,
             'titleAr' => $this->title_ar,
             'courseId' => $this->whenLoaded('course', fn () => $this->course?->uuid),
             'courseTitleAr' => $this->course_title_ar ?: ($this->whenLoaded('course', fn () => $this->course?->title_ar) ?? 'المقرر الدراسي'),
@@ -38,7 +58,12 @@ class TeacherHomeworkResource extends BaseJsonResource
             'type' => $type,
             'fileType' => $this->file_type,
             'attachmentName' => $this->attachment_name,
+            'attachmentDisk' => $this->attachment_path ? ($this->attachment_disk ?: 'local') : null,
+            'attachmentMimeType' => $this->attachment_mime_type,
+            'attachmentSizeBytes' => $sizeBytes,
+            'attachmentSizeLabel' => HomeworkAttachmentStorage::formatBytes($sizeBytes),
             'attachmentUrl' => $attachmentUrl,
+            'attachmentDownloadUrl' => $attachmentDownloadUrl,
             'textContent' => $this->text_content,
             'dueDate' => $this->due_date?->toDateString(),
             'dueTime' => $this->due_time,

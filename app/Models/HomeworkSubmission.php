@@ -25,6 +25,9 @@ class HomeworkSubmission extends Model
         'submission_type',
         'attachment_name',
         'attachment_path',
+        'attachment_disk',
+        'attachment_mime_type',
+        'attachment_size_bytes',
         'solution_text',
         'status',
         'score',
@@ -39,6 +42,7 @@ class HomeworkSubmission extends Model
     {
         return [
             'status' => HomeworkSubmissionStatus::class,
+            'attachment_size_bytes' => 'integer',
             'score' => 'float',
             'max_score' => 'integer',
             'submitted_at' => 'datetime',

@@ -19,6 +19,7 @@ class Homework extends Model
     protected $table = 'homeworks';
 
     protected $fillable = [
+        'uuid',
         'teacher_id',
         'course_id',
         'course_title_ar',
@@ -31,6 +32,9 @@ class Homework extends Model
         'file_type',
         'attachment_name',
         'attachment_path',
+        'attachment_disk',
+        'attachment_mime_type',
+        'attachment_size_bytes',
         'text_content',
         'due_date',
         'due_time',
@@ -47,6 +51,7 @@ class Homework extends Model
         return [
             'type' => HomeworkType::class,
             'due_date' => 'date:Y-m-d',
+            'attachment_size_bytes' => 'integer',
             'max_grade' => 'integer',
             'total_assigned' => 'integer',
             'submitted_count' => 'integer',

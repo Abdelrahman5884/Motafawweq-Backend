@@ -27,15 +27,20 @@ class StudentHomeworkSubmissionResource extends BaseJsonResource
 
         $attachmentUrl = null;
         $attachmentDownloadUrl = null;
-        if ($this->attachment_path && Storage::disk('local')->exists($this->attachment_path)) {
+        $disk = $this->attachment_disk ?: 'local';
+        $hasAttachment = ! empty($this->attachment_path)
+            && ($disk !== 'local' || Storage::disk('local')->exists($this->attachment_path));
+
+        if ($hasAttachment) {
+            $expiry = now()->addHours(2);
             $attachmentUrl = URL::temporarySignedRoute(
                 'api.v1.student.homeworks.submission.attachment.stream',
-                now()->addHours(2),
+                $expiry,
                 ['submissionUuid' => $this->uuid]
             );
             $attachmentDownloadUrl = URL::temporarySignedRoute(
                 'api.v1.student.homeworks.submission.attachment.stream',
-                now()->addHours(2),
+                $expiry,
                 ['submissionUuid' => $this->uuid, 'download' => 1]
             );
         }
@@ -47,6 +52,8 @@ class StudentHomeworkSubmissionResource extends BaseJsonResource
             'statusLabelAr' => $statusLabelAr,
             'submissionType' => $this->submission_type,
             'attachmentName' => $this->attachment_name,
+            'attachmentDisk' => $hasAttachment ? $disk : null,
+            'attachmentSizeBytes' => $this->attachment_size_bytes ? (int) $this->attachment_size_bytes : null,
             'attachmentUrl' => $attachmentUrl,
             'attachmentDownloadUrl' => $attachmentDownloadUrl,
             'solutionText' => $this->solution_text,

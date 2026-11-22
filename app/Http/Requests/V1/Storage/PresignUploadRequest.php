@@ -9,7 +9,7 @@ class PresignUploadRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'entity_type' => ['required', 'string', 'in:user_avatar,center_logo,center_document,course_thumbnail,course_resource,lesson_media,lesson_attachment,lesson_transcript,lesson_mindmap,lesson_quiz,student_submission'],
+            'entity_type' => ['required', 'string', 'in:user_avatar,center_logo,center_document,course_thumbnail,course_resource,lesson_media,lesson_attachment,lesson_transcript,lesson_mindmap,lesson_quiz,homework_attachment,student_submission'],
             'entity_id' => ['nullable', 'string', 'max:100'],
             'filename' => ['required', 'string', 'max:255'],
             'mime_type' => ['required', 'string', 'max:100'],

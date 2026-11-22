@@ -13,19 +13,18 @@ use App\Models\User;
 use App\Repositories\Contracts\HomeworkRepositoryInterface;
 use App\Repositories\Contracts\HomeworkSubmissionRepositoryInterface;
 use App\Services\BaseService;
+use App\Services\V1\Storage\HomeworkAttachmentStorage;
 use Carbon\Carbon;
-use finfo;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
 
 class TeacherHomeworkService extends BaseService
 {
     public function __construct(
         protected HomeworkRepositoryInterface $homeworkRepository,
-        protected HomeworkSubmissionRepositoryInterface $submissionRepository
+        protected HomeworkSubmissionRepositoryInterface $submissionRepository,
+        protected HomeworkAttachmentStorage $attachmentStorage
     ) {}
 
     /**
@@ -45,7 +44,7 @@ class TeacherHomeworkService extends BaseService
     }
 
     /**
-     * Create a new homework with optional file attachment or text assignment.
+     * Create a new homework with optional cloud-stored file attachment and/or text assignment.
      */
     public function createHomework(User $teacher, array $data, ?UploadedFile $file = null): Homework
     {
@@ -77,23 +76,38 @@ class TeacherHomeworkService extends BaseService
             }
         }
 
-        // Handle File Attachment if present
+        $homeworkUuid = (string) Str::uuid();
+
+        // Handle File Attachment via Supabase S3 (with automatic local fallback)
         $attachmentName = null;
         $attachmentPath = null;
+        $attachmentDisk = 'local';
+        $attachmentMime = null;
+        $attachmentSize = null;
         $fileType = null;
+
         if ($file) {
-            $stored = $this->validateAndStoreFile($teacher, $file, "homeworks/{$teacher->id}/teacher_attachments");
+            $stored = $this->attachmentStorage->storeFile(
+                user: $teacher,
+                file: $file,
+                subPath: "homeworks/{$teacher->id}/teacher_attachments",
+                entityType: 'homework_attachment',
+                entityId: $homeworkUuid
+            );
             $attachmentPath = $stored['path'];
+            $attachmentDisk = $stored['disk'];
             $attachmentName = $stored['name'];
+            $attachmentMime = $stored['mime_type'];
+            $attachmentSize = $stored['size_bytes'];
             $fileType = $stored['file_type'];
         }
 
         return $this->transaction(function () use (
-            $teacher, $data, $courseId, $courseTitle, $lessonId, $lessonTitle,
-            $attachmentName, $attachmentPath, $fileType
+            $teacher, $homeworkUuid, $data, $courseId, $courseTitle, $lessonId, $lessonTitle,
+            $attachmentName, $attachmentPath, $attachmentDisk, $attachmentMime, $attachmentSize, $fileType
         ) {
             $typeStr = strtolower(trim((string) ($data['type'] ?? ($attachmentPath ? 'file' : 'text'))));
-            $type = HomeworkType::tryFrom($typeStr) ?? HomeworkType::FILE;
+            $type = HomeworkType::tryFrom($typeStr) ?? ($attachmentPath ? HomeworkType::FILE : HomeworkType::TEXT);
 
             $maxGrade = max(1, (int) ($data['max_grade'] ?? 20));
             $dueDate = ! empty($data['due_date']) ? Carbon::parse($data['due_date'])->toDateString() : null;
@@ -101,16 +115,18 @@ class TeacherHomeworkService extends BaseService
             $targetLocationId = ! empty($data['target_location_id']) ? trim((string) $data['target_location_id']) : 'all';
             $targetLocationAr = ! empty($data['target_location_ar']) ? trim((string) $data['target_location_ar']) : 'جميع الأماكن (كل السناتر + الأونلاين)';
 
-            // Auto-calculate total assigned students if not explicitly given
+            // Auto-calculate total unique assigned students if not explicitly given
             $totalAssigned = isset($data['total_assigned']) ? (int) $data['total_assigned'] : 0;
             if ($totalAssigned === 0) {
                 $totalAssigned = GroupEnrollment::whereHas('group', fn ($q) => $q->where('teacher_id', $teacher->id))
                     ->where('status', 'enrolled')
-                    ->count();
+                    ->distinct('student_id')
+                    ->count('student_id');
             }
 
             /** @var Homework $homework */
             $homework = Homework::create([
+                'uuid' => $homeworkUuid,
                 'teacher_id' => $teacher->id,
                 'course_id' => $courseId,
                 'course_title_ar' => $courseTitle ?: 'المقرر الدراسي',
@@ -123,6 +139,9 @@ class TeacherHomeworkService extends BaseService
                 'file_type' => $fileType,
                 'attachment_name' => $attachmentName,
                 'attachment_path' => $attachmentPath,
+                'attachment_disk' => $attachmentDisk,
+                'attachment_mime_type' => $attachmentMime,
+                'attachment_size_bytes' => $attachmentSize,
                 'text_content' => ! empty($data['text_content']) ? trim((string) $data['text_content']) : null,
                 'due_date' => $dueDate,
                 'due_time' => $dueTime,
@@ -136,6 +155,7 @@ class TeacherHomeworkService extends BaseService
                     'teacher_id' => $teacher->id,
                     'homework_uuid' => $homework->uuid,
                     'title_ar' => $homework->title_ar,
+                    'attachment_disk' => $attachmentPath ? $attachmentDisk : null,
                 ],
                 'info',
                 $homework
@@ -146,7 +166,7 @@ class TeacherHomeworkService extends BaseService
     }
 
     /**
-     * Update an existing homework.
+     * Update an existing homework (metadata and/or cloud-stored attachment).
      */
     public function updateHomework(User $teacher, string $uuid, array $data, ?UploadedFile $file = null): Homework
     {
@@ -167,8 +187,10 @@ class TeacherHomeworkService extends BaseService
                 }
             } else {
                 $courseId = null;
-                $courseTitle = null;
+                $courseTitle = ! empty($data['course_title_ar']) ? trim((string) $data['course_title_ar']) : null;
             }
+        } elseif (! empty($data['course_title_ar'])) {
+            $courseTitle = trim((string) $data['course_title_ar']);
         }
 
         // Resolve Lesson if provided
@@ -186,33 +208,71 @@ class TeacherHomeworkService extends BaseService
                 }
             } else {
                 $lessonId = null;
-                $lessonTitle = null;
+                $lessonTitle = array_key_exists('lesson_title_ar', $data) ? trim((string) $data['lesson_title_ar']) : null;
             }
+        } elseif (array_key_exists('lesson_title_ar', $data)) {
+            $lessonTitle = trim((string) $data['lesson_title_ar']);
         }
 
-        return $this->transaction(function () use ($teacher, $homework, $data, $courseId, $courseTitle, $lessonId, $lessonTitle, $file) {
+        // Validate and upload replacement file BEFORE opening DB transaction
+        $newStoredFile = null;
+        if ($file) {
+            $newStoredFile = $this->attachmentStorage->storeFile(
+                user: $teacher,
+                file: $file,
+                subPath: "homeworks/{$teacher->id}/teacher_attachments",
+                entityType: 'homework_attachment',
+                entityId: $homework->uuid
+            );
+        }
+
+        return $this->transaction(function () use (
+            $teacher, $homework, $data, $courseId, $courseTitle, $lessonId, $lessonTitle, $newStoredFile
+        ) {
+            $oldDisk = $homework->attachment_disk ?: 'local';
+            $oldPath = $homework->attachment_path;
+
             $attachmentName = $homework->attachment_name;
             $attachmentPath = $homework->attachment_path;
+            $attachmentDisk = $homework->attachment_disk ?: 'local';
+            $attachmentMime = $homework->attachment_mime_type;
+            $attachmentSize = $homework->attachment_size_bytes;
             $fileType = $homework->file_type;
 
-            if ($file) {
-                // Delete old file if present
-                if ($attachmentPath && Storage::disk('local')->exists($attachmentPath)) {
-                    Storage::disk('local')->delete($attachmentPath);
+            $removeAttachment = ! empty($data['remove_attachment']);
+
+            if ($newStoredFile) {
+                if ($oldPath && $oldPath !== $newStoredFile['path']) {
+                    $this->attachmentStorage->deleteFile($oldDisk, $oldPath);
                 }
-                $stored = $this->validateAndStoreFile($teacher, $file, "homeworks/{$teacher->id}/teacher_attachments");
-                $attachmentPath = $stored['path'];
-                $attachmentName = $stored['name'];
-                $fileType = $stored['file_type'];
+                $attachmentPath = $newStoredFile['path'];
+                $attachmentDisk = $newStoredFile['disk'];
+                $attachmentName = $newStoredFile['name'];
+                $attachmentMime = $newStoredFile['mime_type'];
+                $attachmentSize = $newStoredFile['size_bytes'];
+                $fileType = $newStoredFile['file_type'];
+            } elseif ($removeAttachment) {
+                if ($oldPath) {
+                    $this->attachmentStorage->deleteFile($oldDisk, $oldPath);
+                }
+                $attachmentPath = null;
+                $attachmentDisk = 'local';
+                $attachmentName = null;
+                $attachmentMime = null;
+                $attachmentSize = null;
+                $fileType = null;
             }
 
             $updatePayload = [
                 'course_id' => $courseId,
-                'course_title_ar' => $courseTitle,
+                'course_title_ar' => $courseTitle ?: 'المقرر الدراسي',
                 'lesson_id' => $lessonId,
                 'lesson_title_ar' => $lessonTitle,
                 'attachment_name' => $attachmentName,
                 'attachment_path' => $attachmentPath,
+                'attachment_disk' => $attachmentDisk,
+                'attachment_mime_type' => $attachmentMime,
+                'attachment_size_bytes' => $attachmentSize,
                 'file_type' => $fileType,
             ];
 
@@ -227,12 +287,19 @@ class TeacherHomeworkService extends BaseService
             }
             if (isset($data['type'])) {
                 $updatePayload['type'] = HomeworkType::tryFrom($data['type']) ?? $homework->type;
+            } elseif ($newStoredFile) {
+                $updatePayload['type'] = HomeworkType::FILE;
+            } elseif ($removeAttachment) {
+                $updatePayload['type'] = HomeworkType::TEXT;
             }
             if (array_key_exists('text_content', $data)) {
-                $updatePayload['text_content'] = $data['text_content'];
+                $trimmedText = trim((string) $data['text_content']);
+                $updatePayload['text_content'] = $trimmedText !== '' ? $trimmedText : null;
             }
-            if (isset($data['due_date'])) {
-                $updatePayload['due_date'] = Carbon::parse($data['due_date'])->toDateString();
+            if (array_key_exists('due_date', $data)) {
+                $updatePayload['due_date'] = ! empty($data['due_date'])
+                    ? Carbon::parse($data['due_date'])->toDateString()
+                    : null;
             }
             if (isset($data['due_time'])) {
                 $updatePayload['due_time'] = trim((string) $data['due_time']);
@@ -261,7 +328,7 @@ class TeacherHomeworkService extends BaseService
     }
 
     /**
-     * Delete a homework.
+     * Soft-delete a homework.
      */
     public function deleteHomework(User $teacher, string $uuid): bool
     {
@@ -324,13 +391,17 @@ class TeacherHomeworkService extends BaseService
             $maxGrade = (int) $homework->max_grade;
             $score = null;
             if ($status === HomeworkSubmissionStatus::GRADED) {
-                $rawScore = isset($data['score']) ? (float) $data['score'] : $maxGrade;
+                $rawScore = array_key_exists('score', $data) && $data['score'] !== null
+                    ? (float) $data['score']
+                    : (float) $maxGrade;
                 $score = max(0.0, min((float) $maxGrade, $rawScore));
             } elseif ($status === HomeworkSubmissionStatus::REJECTED) {
                 $score = 0.00;
             }
 
-            $feedback = isset($data['feedback_ar']) ? trim(strip_tags((string) $data['feedback_ar'])) : $submission->feedback_ar;
+            $feedback = array_key_exists('feedback_ar', $data)
+                ? trim(strip_tags((string) ($data['feedback_ar'] ?? '')))
+                : $submission->feedback_ar;
 
             $submission->update([
                 'status' => $status,
@@ -359,48 +430,5 @@ class TeacherHomeworkService extends BaseService
 
             return $submission->fresh(['student', 'grader', 'homework']);
         });
-    }
-
-    /**
-     * Inspect file magic bytes and securely store it on local disk.
-     */
-    protected function validateAndStoreFile(User $user, UploadedFile $file, string $subPath): array
-    {
-        $realPath = $file->getRealPath();
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $detectedMime = $realPath ? $finfo->file($realPath) : $file->getMimeType();
-
-        $allowedMimes = [
-            'application/pdf' => 'pdf',
-            'image/jpeg' => 'jpg',
-            'image/png' => 'png',
-            'image/webp' => 'webp',
-        ];
-
-        if (! isset($allowedMimes[$detectedMime])) {
-            $this->logSecurityEvent(
-                'malicious_file_upload_blocked',
-                [
-                    'user_id' => $user->id,
-                    'detected_mime' => $detectedMime,
-                    'filename' => $file->getClientOriginalName(),
-                ],
-                'warning'
-            );
-
-            throw ValidationException::withMessages([
-                'file' => [__('messages.invalid_file_type')],
-            ]);
-        }
-
-        $extension = $allowedMimes[$detectedMime];
-        $storagePath = "{$subPath}/".Str::uuid().".{$extension}";
-        Storage::disk('local')->put($storagePath, file_get_contents($file->getRealPath()));
-
-        return [
-            'path' => $storagePath,
-            'name' => $file->getClientOriginalName(),
-            'file_type' => $extension === 'pdf' ? 'pdf' : 'image',
-        ];
     }
 }
