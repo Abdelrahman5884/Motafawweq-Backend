@@ -5,6 +5,7 @@ namespace App\Services\V1\Student;
 use App\Enums\AttendanceStatus;
 use App\Enums\DayOfWeek;
 use App\Enums\EnrollmentStatus;
+use App\Enums\JoinMethod;
 use App\Models\GroupAttendanceRecord;
 use App\Models\GroupEnrollment;
 use App\Models\GroupScheduleSlot;
@@ -57,6 +58,12 @@ class StudentGroupScheduleService extends BaseService
                 ? $enrollment->status->value
                 : (string) $enrollment->status;
             $isEnrolled = $status === EnrollmentStatus::ENROLLED->value;
+            $joinMethodEnum = $enrollment->join_method instanceof JoinMethod
+                ? $enrollment->join_method
+                : JoinMethod::tryFrom((string) $enrollment->join_method);
+            $joinMethodValue = $joinMethodEnum?->value ?? (string) $enrollment->join_method;
+            $isTeacherInvite = $status === EnrollmentStatus::PENDING->value
+                && $joinMethodValue === JoinMethod::TEACHER_INVITE->value;
 
             return [
                 'enrollmentId' => $enrollment->uuid,
@@ -80,6 +87,9 @@ class StudentGroupScheduleService extends BaseService
                 'teacherNameAr' => $group?->teacher?->name ?? '',
                 'teacherNameEn' => $group?->teacher?->name ?? '',
                 'enrollmentStatus' => $status,
+                'joinMethod' => $joinMethodValue,
+                'joinMethodLabelAr' => $joinMethodEnum?->labelAr() ?? 'كود الانضمام',
+                'isTeacherInvite' => $isTeacherInvite,
                 'studentBarcode' => $isEnrolled ? $enrollment->student_barcode : null,
                 'studentPasscode' => $isEnrolled ? $enrollment->student_passcode : null,
                 'attendanceRate' => (int) $enrollment->attendance_rate,

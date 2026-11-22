@@ -361,18 +361,32 @@ class TeacherStudentRosterTest extends TestCase
 
         $enrollmentUuid = $inviteManual->json('data.id');
 
+        // Teacher CANNOT accept their own teacher_invite — must be accepted by the student
+        $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$enrollmentUuid}/accept")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['enrollment']);
+
+        // Student-initiated join_code request CAN be accepted by teacher idempotently
+        $joinReq = GroupEnrollment::create([
+            'study_group_id' => $group->id,
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::PENDING->value,
+            'join_method' => JoinMethod::JOIN_CODE->value,
+            'requested_at' => now(),
+        ]);
+
         // Accept first time
-        $accept1 = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$enrollmentUuid}/accept");
+        $accept1 = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$joinReq->uuid}/accept");
         $accept1->assertOk();
         $barcode1 = $accept1->json('data.studentBarcode');
 
         // Re-accepting is idempotent and preserves existing barcode
-        $accept2 = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$enrollmentUuid}/accept");
+        $accept2 = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$joinReq->uuid}/accept");
         $accept2->assertOk()
             ->assertJsonPath('data.studentBarcode', $barcode1);
 
         // Rejecting an already enrolled student is rejected with 422
-        $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$enrollmentUuid}/reject")
+        $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$joinReq->uuid}/reject")
             ->assertUnprocessable();
 
         // Inviting with a phone number belonging to a non-student account returns 422 (never 500)
@@ -381,5 +395,79 @@ class TeacherStudentRosterTest extends TestCase
             'phone' => $teacher->phone,
         ])->assertUnprocessable()
             ->assertJsonValidationErrors(['phone']);
+    }
+
+    public function test_teacher_invite_must_be_accepted_or_declined_by_student_not_teacher(): void
+    {
+        $teacher = $this->createTeacher('teacher.invite.flow@motafawweq.com');
+        $group = $this->createGroup($teacher);
+        $studentA = $this->createStudent('ياسين وليد', 'yassin.invite@motafawweq.com');
+        $studentB = $this->createStudent('مروان خالد', 'marwan.invite@motafawweq.com');
+
+        // 1. Teacher invites Student A and Student B
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+        $inviteA = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/invite", [
+            'student_id' => (string) $studentA->id,
+        ])->assertCreated();
+        $inviteAUuid = $inviteA->json('data.id');
+
+        $inviteB = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/invite", [
+            'student_id' => (string) $studentB->id,
+        ])->assertCreated();
+        $inviteBUuid = $inviteB->json('data.id');
+
+        // 2. Teacher CANNOT accept their own invitation
+        $this->postJson("/api/v1/teacher/groups/{$group->uuid}/enrollments/{$inviteAUuid}/accept")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['enrollment']);
+
+        // 3. Student A sees invitation in /api/v1/student/groups with isTeacherInvite = true
+        Sanctum::actingAs($studentA, [TokenType::ACCESS->value]);
+        $this->getJson('/api/v1/student/groups')
+            ->assertOk()
+            ->assertJsonPath('data.0.enrollmentId', $inviteAUuid)
+            ->assertJsonPath('data.0.enrollmentStatus', 'pending')
+            ->assertJsonPath('data.0.joinMethod', 'teacher_invite')
+            ->assertJsonPath('data.0.isTeacherInvite', true);
+
+        // 4. Student A CANNOT accept Student B's invitation (403 IDOR)
+        $this->postJson("/api/v1/student/groups/invitations/{$inviteBUuid}/accept")
+            ->assertForbidden();
+
+        // 5. Student A accepts own invitation -> becomes enrolled with barcode & passcode
+        $acceptRes = $this->postJson("/api/v1/student/groups/invitations/{$inviteAUuid}/accept")
+            ->assertOk()
+            ->assertJsonPath('data.enrollmentStatus', 'enrolled');
+        $this->assertNotNull($acceptRes->json('data.studentBarcode'));
+        $this->assertNotNull($acceptRes->json('data.studentPasscode'));
+
+        // Re-accepting is idempotent
+        $this->postJson("/api/v1/student/groups/invitations/{$inviteAUuid}/accept")
+            ->assertOk()
+            ->assertJsonPath('data.studentBarcode', $acceptRes->json('data.studentBarcode'));
+
+        // 6. Student B declines invitation -> status becomes rejected
+        Sanctum::actingAs($studentB, [TokenType::ACCESS->value]);
+        $this->postJson("/api/v1/student/groups/invitations/{$inviteBUuid}/decline")
+            ->assertOk();
+
+        $this->assertDatabaseHas('group_enrollments', [
+            'uuid' => $inviteBUuid,
+            'status' => EnrollmentStatus::REJECTED->value,
+        ]);
+
+        // 7. Student CANNOT self-accept a student-initiated join_code request
+        $studentC = $this->createStudent('ندى شريف', 'nada.code@motafawweq.com');
+        $joinCodeEnrollment = GroupEnrollment::create([
+            'study_group_id' => $group->id,
+            'student_id' => $studentC->id,
+            'status' => EnrollmentStatus::PENDING->value,
+            'join_method' => JoinMethod::JOIN_CODE->value,
+            'requested_at' => now(),
+        ]);
+        Sanctum::actingAs($studentC, [TokenType::ACCESS->value]);
+        $this->postJson("/api/v1/student/groups/invitations/{$joinCodeEnrollment->uuid}/accept")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['invitation']);
     }
 }

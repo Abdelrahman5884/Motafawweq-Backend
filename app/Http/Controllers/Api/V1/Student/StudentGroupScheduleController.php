@@ -58,6 +58,38 @@ class StudentGroupScheduleController extends BaseApiController
     }
 
     /**
+     * POST /api/v1/student/groups/invitations/{enrollmentUuid}/accept
+     */
+    public function acceptInvitation(string $enrollmentUuid): JsonResponse
+    {
+        $enrollment = $this->rosterService->studentAcceptInvitation(
+            $this->authenticatedUser(),
+            $enrollmentUuid
+        );
+
+        return $this->successResponse([
+            'enrollmentId' => $enrollment->uuid,
+            'groupId' => $enrollment->group?->uuid,
+            'enrollmentStatus' => $enrollment->status?->value ?? (string) $enrollment->status,
+            'studentBarcode' => $enrollment->student_barcode,
+            'studentPasscode' => $enrollment->student_passcode,
+        ], 'تم قبول دعوة المعلم والانضمام للمجموعة بنجاح!');
+    }
+
+    /**
+     * POST /api/v1/student/groups/invitations/{enrollmentUuid}/decline
+     */
+    public function declineInvitation(string $enrollmentUuid): JsonResponse
+    {
+        $this->rosterService->studentDeclineInvitation(
+            $this->authenticatedUser(),
+            $enrollmentUuid
+        );
+
+        return $this->successResponse(null, 'تم رفض دعوة الانضمام للمجموعة.');
+    }
+
+    /**
      * GET /api/v1/student/schedule
      */
     public function schedule(): JsonResponse

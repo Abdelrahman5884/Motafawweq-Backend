@@ -176,6 +176,12 @@ Route::prefix('v1')->group(function () {
                 Route::delete('/groups/{uuid}/leave', [StudentGroupScheduleController::class, 'leave'])
                     ->whereUuid('uuid')
                     ->middleware('throttle:student-write');
+                Route::post('/groups/invitations/{enrollmentUuid}/accept', [StudentGroupScheduleController::class, 'acceptInvitation'])
+                    ->whereUuid('enrollmentUuid')
+                    ->middleware(['throttle:student-write', 'idempotent']);
+                Route::post('/groups/invitations/{enrollmentUuid}/decline', [StudentGroupScheduleController::class, 'declineInvitation'])
+                    ->whereUuid('enrollmentUuid')
+                    ->middleware(['throttle:student-write', 'idempotent']);
 
                 Route::get('/schedule', [StudentGroupScheduleController::class, 'schedule'])
                     ->middleware('throttle:student-read');

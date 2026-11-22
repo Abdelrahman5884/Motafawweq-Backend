@@ -19,6 +19,8 @@ use App\Models\User;
 use App\Repositories\Contracts\GroupEnrollmentRepositoryInterface;
 use App\Repositories\Contracts\StudyGroupRepositoryInterface;
 use App\Services\BaseService;
+use App\Services\V1\Student\StudentAccessService;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -31,7 +33,8 @@ class TeacherRosterService extends BaseService
     public function __construct(
         protected StudyGroupRepositoryInterface $groupRepository,
         protected GroupEnrollmentRepositoryInterface $enrollmentRepository,
-        protected TeacherBillingService $billingService
+        protected TeacherBillingService $billingService,
+        protected StudentAccessService $studentAccessService
     ) {}
 
     /**
@@ -275,6 +278,13 @@ class TeacherRosterService extends BaseService
             ]);
         }
 
+        // Teacher-initiated invitations MUST be accepted by the invited student, never self-accepted by the teacher
+        if ($enrollment->join_method === JoinMethod::TEACHER_INVITE) {
+            throw ValidationException::withMessages([
+                'enrollment' => ['تم إرسال هذه الدعوة من قِبل المعلم، ويجب على الطالب قبولها من حسابه للانضمام للمجموعة.'],
+            ]);
+        }
+
         // Check group capacity
         $currentEnrolled = $this->enrollmentRepository->countEnrolledInGroup($group->id);
         if ($currentEnrolled >= $group->max_students) {
@@ -466,6 +476,145 @@ class TeacherRosterService extends BaseService
             ], 'info', $enrollment);
 
             return $enrollment->load(['student', 'group']);
+        });
+    }
+
+    /**
+     * Allow the invited student to accept a teacher-initiated group invitation.
+     */
+    public function studentAcceptInvitation(User $student, string $enrollmentUuid): GroupEnrollment
+    {
+        /** @var GroupEnrollment|null $enrollment */
+        $enrollment = GroupEnrollment::query()
+            ->where('uuid', $enrollmentUuid)
+            ->with(['group', 'student'])
+            ->first();
+
+        if (! $enrollment) {
+            throw (new ModelNotFoundException)->setModel(GroupEnrollment::class, [$enrollmentUuid]);
+        }
+
+        if ((int) $enrollment->student_id !== (int) $student->id) {
+            $this->logSecurityEvent('student.idor_attempt_blocked', [
+                'attempted_by_user_id' => $student->id,
+                'resource_owner_id' => $enrollment->student_id,
+                'resource_type' => GroupEnrollment::class,
+                'resource_uuid' => $enrollment->uuid,
+            ], 'warning', $enrollment);
+
+            throw new AuthorizationException(__('messages.forbidden_resource_owner'));
+        }
+
+        // Idempotent if already enrolled
+        if ($enrollment->status === EnrollmentStatus::ENROLLED) {
+            return $enrollment;
+        }
+
+        if ($enrollment->status !== EnrollmentStatus::PENDING) {
+            throw ValidationException::withMessages([
+                'invitation' => ['هذه الدعوة لم تعد متاحة للقبول.'],
+            ]);
+        }
+
+        if ($enrollment->join_method !== JoinMethod::TEACHER_INVITE) {
+            throw ValidationException::withMessages([
+                'invitation' => ['هذا طلب انضمام أرسلته أنت وينتظر موافقة المعلم.'],
+            ]);
+        }
+
+        $group = $enrollment->group;
+        if (! $group || $group->status !== 'active') {
+            throw ValidationException::withMessages([
+                'invitation' => ['المجموعة الدراسية غير متاحة حالياً.'],
+            ]);
+        }
+
+        // Enforce group capacity
+        $currentEnrolled = $this->enrollmentRepository->countEnrolledInGroup($group->id);
+        if ($currentEnrolled >= $group->max_students) {
+            throw ValidationException::withMessages([
+                'group' => [__('messages.group_capacity_reached', ['max' => $group->max_students])],
+            ]);
+        }
+
+        // Enforce teacher active plan student quota
+        $groupTeacher = User::find($group->teacher_id);
+        if ($groupTeacher) {
+            $this->assertTeacherPlanStudentQuota($groupTeacher);
+        }
+
+        return $this->transaction(function () use ($student, $group, $enrollment) {
+            $barcode = $enrollment->student_barcode ?: GroupEnrollment::generateUniqueBarcode($group->id, $enrollment->student_id);
+            $passcode = $enrollment->student_passcode ?: GroupEnrollment::generatePasscode();
+
+            $enrollment->update([
+                'status' => EnrollmentStatus::ENROLLED,
+                'student_barcode' => $barcode,
+                'student_passcode' => $passcode,
+                'enrolled_at' => now(),
+                'attendance_rate' => 100,
+                'attended_sessions' => 0,
+                'total_sessions' => 0,
+                'academic_status' => AcademicStatus::GOOD,
+            ]);
+
+            $this->studentAccessService->clearCache($student);
+
+            $this->logSecurityEvent('student.group_invitation.accepted', [
+                'group_uuid' => $group->uuid,
+                'enrollment_uuid' => $enrollment->uuid,
+                'student_barcode' => $barcode,
+            ], 'info', $enrollment);
+
+            return $enrollment->fresh(['student', 'group']);
+        });
+    }
+
+    /**
+     * Allow the invited student to decline a teacher-initiated group invitation.
+     */
+    public function studentDeclineInvitation(User $student, string $enrollmentUuid): GroupEnrollment
+    {
+        /** @var GroupEnrollment|null $enrollment */
+        $enrollment = GroupEnrollment::query()
+            ->where('uuid', $enrollmentUuid)
+            ->with(['group', 'student'])
+            ->first();
+
+        if (! $enrollment) {
+            throw (new ModelNotFoundException)->setModel(GroupEnrollment::class, [$enrollmentUuid]);
+        }
+
+        if ((int) $enrollment->student_id !== (int) $student->id) {
+            $this->logSecurityEvent('student.idor_attempt_blocked', [
+                'attempted_by_user_id' => $student->id,
+                'resource_owner_id' => $enrollment->student_id,
+                'resource_type' => GroupEnrollment::class,
+                'resource_uuid' => $enrollment->uuid,
+            ], 'warning', $enrollment);
+
+            throw new AuthorizationException(__('messages.forbidden_resource_owner'));
+        }
+
+        if ($enrollment->status !== EnrollmentStatus::PENDING || $enrollment->join_method !== JoinMethod::TEACHER_INVITE) {
+            throw ValidationException::withMessages([
+                'invitation' => ['يمكن رفض الدعوات المعلقة المرسلة من المعلم فقط.'],
+            ]);
+        }
+
+        return $this->transaction(function () use ($student, $enrollment) {
+            $enrollment->update([
+                'status' => EnrollmentStatus::REJECTED,
+            ]);
+
+            $this->studentAccessService->clearCache($student);
+
+            $this->logSecurityEvent('student.group_invitation.declined', [
+                'group_uuid' => $enrollment->group?->uuid,
+                'enrollment_uuid' => $enrollment->uuid,
+            ], 'info', $enrollment);
+
+            return $enrollment->fresh(['student', 'group']);
         });
     }
 
