@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\Student\StudentExamTakingController;
 use App\Http\Controllers\Api\V1\Student\StudentGamificationController;
 use App\Http\Controllers\Api\V1\Student\StudentGroupScheduleController;
 use App\Http\Controllers\Api\V1\Student\StudentHomeworkController;
+use App\Http\Controllers\Api\V1\Student\StudentMinistryController;
 use App\Http\Controllers\Api\V1\Student\StudentProfileController;
 use App\Http\Controllers\Api\V1\Teacher\LessonWorkspaceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherAnalyticsController;
@@ -235,6 +236,26 @@ Route::prefix('v1')->group(function () {
                     ->middleware(['throttle:exam-submit', 'idempotent']);
                 Route::get('/mistake-bank', [StudentExamTakingController::class, 'mistakeBank'])
                     ->middleware(['throttle:student-read', 'student.plan:weak_areas']);
+
+                // Official Egyptian Ministry of Education Curricula & Guided Practice Exams
+                Route::prefix('ministry')->group(function () {
+                    Route::get('/curricula', [StudentMinistryController::class, 'curricula'])
+                        ->middleware('throttle:student-read');
+                    Route::post('/curricula/{code}/units/{unitIndex}/toggle', [StudentMinistryController::class, 'toggleUnit'])
+                        ->where(['code' => '[a-z0-9\-]+', 'unitIndex' => '[0-9]+'])
+                        ->middleware('throttle:student-write');
+                    Route::get('/exams', [StudentMinistryController::class, 'exams'])
+                        ->middleware('throttle:student-read');
+                    Route::post('/exams/{code}/start', [StudentMinistryController::class, 'startExam'])
+                        ->where('code', '[a-z0-9\-]+')
+                        ->middleware(['throttle:exam-submit', 'idempotent']);
+                    Route::post('/exams/{code}/submit', [StudentMinistryController::class, 'submitExam'])
+                        ->where('code', '[a-z0-9\-]+')
+                        ->middleware(['throttle:exam-submit', 'idempotent']);
+                    Route::get('/exams/{code}/result', [StudentMinistryController::class, 'examResult'])
+                        ->where('code', '[a-z0-9\-]+')
+                        ->middleware('throttle:student-read');
+                });
 
                 // Phase 6: Homeworks & Secure Attachment Streaming
                 Route::get('/homeworks', [StudentHomeworkController::class, 'index'])
