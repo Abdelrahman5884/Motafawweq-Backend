@@ -11,6 +11,7 @@ use App\Traits\HasSecurityAudit;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class TeacherCertificateService
 {
@@ -25,36 +26,58 @@ class TeacherCertificateService
         return $this->certificateRepository->getForTeacher($teacher->id, $filters, $perPage);
     }
 
+    /**
+     * @return array{total: int, verifiedCount: int, revokedCount: int, averageGrade: float}
+     */
+    public function getStats(User $teacher): array
+    {
+        return $this->certificateRepository->getTeacherStats($teacher->id);
+    }
+
     public function issueCertificate(User $teacher, array $data): CourseCertificate
     {
-        $courseId = null;
+        $course = null;
         if (! empty($data['course_id'])) {
+            $rawCourseId = trim((string) $data['course_id']);
             $course = Course::where('teacher_id', $teacher->id)
-                ->where(function ($q) use ($data) {
-                    $q->where('id', $data['course_id'])
-                        ->orWhere('uuid', $data['course_id']);
+                ->where(function ($q) use ($rawCourseId) {
+                    if (is_numeric($rawCourseId)) {
+                        $q->where('id', (int) $rawCourseId);
+                    } else {
+                        $q->where('uuid', $rawCourseId);
+                    }
                 })->first();
-
-            $courseId = $course?->id;
         }
+        $courseId = $course?->id;
 
-        $studentId = null;
+        /** @var User|null $student */
+        $student = null;
         if (! empty($data['student_id'])) {
             $rawStudentId = trim((string) $data['student_id']);
-            $student = is_numeric($rawStudentId)
+            $candidate = is_numeric($rawStudentId)
                 ? User::find((int) $rawStudentId)
-                : User::where('uuid', $rawStudentId)->first();
-            $studentId = $student?->id;
-        }
-        $rawEmail = trim((string) ($data['student_email'] ?? $data['studentEmail'] ?? ''));
-        if ($studentId === null && $rawEmail !== '') {
-            $studentId = User::whereRaw('LOWER(email) = ?', [strtolower($rawEmail)])->value('id');
+                : User::where('uuid', $rawStudentId)
+                    ->orWhere('student_code', $rawStudentId)
+                    ->first();
+
+            if ($candidate && $candidate->isStudent()) {
+                $student = $candidate;
+            }
         }
 
+        $rawEmail = trim((string) ($data['student_email'] ?? $data['studentEmail'] ?? ''));
+        if ($student === null && $rawEmail !== '') {
+            $candidate = User::whereRaw('LOWER(email) = ?', [strtolower($rawEmail)])->first();
+            if ($candidate && $candidate->isStudent()) {
+                $student = $candidate;
+            }
+        }
+        $studentId = $student?->id;
+
         $certNumber = CourseCertificate::generateUniqueCertNumber();
-        $studentNameAr = trim((string) ($data['student_name_ar'] ?? $data['studentNameAr'] ?? ''));
-        $gradePercent = (float) ($data['grade_percent'] ?? $data['gradePercent'] ?? 100.0);
-        $issueDate = ! empty($data['issue_date']) ? (string) $data['issue_date'] : now()->toDateString();
+        $studentNameAr = trim((string) ($data['student_name_ar'] ?? $data['studentNameAr'] ?? $student?->name ?? ''));
+        $gradePercent = round(min(100.0, max(0.0, (float) ($data['grade_percent'] ?? $data['gradePercent'] ?? 100.0))), 2);
+        $issueDate = ! empty($data['issue_date']) ? substr(trim((string) $data['issue_date']), 0, 10) : now()->toDateString();
 
         $signatureHash = CourseCertificate::computeSignatureHash(
             $certNumber,
@@ -73,16 +96,17 @@ class TeacherCertificateService
             'course_id' => $courseId,
             'student_name_ar' => $studentNameAr,
             'student_name_en' => $data['student_name_en'] ?? $data['studentNameEn'] ?? null,
-            'student_email' => $data['student_email'] ?? $data['studentEmail'] ?? null,
-            'student_phone' => $data['student_phone'] ?? $data['studentPhone'] ?? null,
-            'course_name_ar' => trim((string) ($data['course_name_ar'] ?? $data['courseNameAr'] ?? 'المقرر الدراسي المعتمد')),
-            'course_name_en' => $data['course_name_en'] ?? $data['courseNameEn'] ?? null,
-            'grade_ar' => $data['grade_ar'] ?? $data['gradeAr'] ?? 'الصف الثالث الثانوي',
+            'student_email' => ($rawEmail !== '' ? $rawEmail : null) ?? $student?->email,
+            'student_phone' => ($data['student_phone'] ?? $data['studentPhone'] ?? null) ?: $student?->phone,
+            'course_name_ar' => trim((string) ($data['course_name_ar'] ?? $data['courseNameAr'] ?? $course?->title_ar ?? 'المقرر الدراسي المعتمد')),
+            'course_name_en' => ($data['course_name_en'] ?? $data['courseNameEn'] ?? null) ?: $course?->title_en,
+            'grade_ar' => ($data['grade_ar'] ?? $data['gradeAr'] ?? null) ?: ($course?->grade_ar ?? 'الصف الثالث الثانوي'),
             'grade_percent' => $gradePercent,
             'honors_title_ar' => trim((string) ($data['honors_title_ar'] ?? $data['honorsTitleAr'] ?? 'شهادة تميز وتفوق بالدرجة النهائية (Full Mark)')),
             'honors_title_en' => $data['honors_title_en'] ?? $data['honorsTitleEn'] ?? 'Certificate of Academic Excellence',
             'issue_date' => $issueDate,
             'status' => CertificateStatus::VERIFIED,
+            'issuer_type' => 'teacher',
         ]);
 
         $this->logSecurityEvent(
@@ -97,17 +121,20 @@ class TeacherCertificateService
             $certificate
         );
 
-        return $certificate;
+        return $certificate->load(['teacher.teacherProfile', 'student', 'course']);
     }
 
     public function bulkIssueCertificates(User $teacher, array $data): array
     {
         $students = $data['students'] ?? [];
+        $sharedData = $data;
+        unset($sharedData['students']);
+
         $issuedCertificates = [];
 
-        DB::transaction(function () use ($teacher, $data, $students, &$issuedCertificates) {
+        DB::transaction(function () use ($teacher, $sharedData, $students, &$issuedCertificates) {
             foreach ($students as $studentData) {
-                $merged = array_merge($data, $studentData);
+                $merged = array_merge($sharedData, $studentData);
                 $issuedCertificates[] = $this->issueCertificate($teacher, $merged);
             }
         });
@@ -134,10 +161,16 @@ class TeacherCertificateService
             throw (new ModelNotFoundException)->setModel(CourseCertificate::class, [$uuid]);
         }
 
+        if ($cert->status === CertificateStatus::REVOKED) {
+            throw ValidationException::withMessages([
+                'certificate' => ['هذه الشهادة ملغاة بالفعل.'],
+            ]);
+        }
+
         $cert->update([
             'status' => CertificateStatus::REVOKED,
             'revoked_at' => now(),
-            'revocation_reason' => $reason ?: 'تم إلغاء الشهادة بواسطة المعلم المسؤول',
+            'revocation_reason' => trim((string) $reason) ?: 'تم إلغاء الشهادة بواسطة المعلم المسؤول',
         ]);
 
         $this->logSecurityEvent(
@@ -151,7 +184,7 @@ class TeacherCertificateService
             $cert
         );
 
-        return $cert;
+        return $cert->fresh(['teacher.teacherProfile', 'student', 'course']);
     }
 
     public function verifyCertificatePublic(string $certNumber): array

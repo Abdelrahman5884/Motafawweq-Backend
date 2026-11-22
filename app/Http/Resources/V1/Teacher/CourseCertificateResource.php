@@ -21,13 +21,18 @@ class CourseCertificateResource extends JsonResource
         $teacherTitleAr = $teacherProfile?->title_ar ?: 'معلم معتمد على منصة متفوّق';
         $teacherTitleEn = $teacherProfile?->title_en ?: 'Certified Motafawweq Educator';
 
+        $gradePercent = (float) $this->grade_percent;
+        $scoreLabel = fmod($gradePercent, 1.0) === 0.0
+            ? sprintf('%d%%', (int) $gradePercent)
+            : sprintf('%.1f%%', $gradePercent);
+
         return [
             'id' => $this->uuid,
             'uuid' => $this->uuid,
             'certNumber' => $serial,
             'serialId' => $serial,
-            'issuerType' => 'teacher',
-            'category' => 'teacher',
+            'issuerType' => $this->issuer_type ?: 'teacher',
+            'category' => $this->issuer_type ?: 'teacher',
             'issuerNameAr' => $teacherNameAr,
             'issuerNameEn' => $teacherNameEn,
             'instructorAr' => $teacherNameAr,
@@ -35,6 +40,8 @@ class CourseCertificateResource extends JsonResource
             'instructorTitleAr' => $teacherTitleAr,
             'instructorTitleEn' => $teacherTitleEn,
             'studentId' => $this->student_id ? (string) $this->student_id : null,
+            'studentCode' => $this->student?->student_code,
+            'studentAvatar' => $this->student?->avatar,
             'studentNameAr' => $this->student_name_ar,
             'studentNameEn' => $this->student_name_en ?: $this->student_name_ar,
             'studentEmail' => $this->student_email,
@@ -43,9 +50,9 @@ class CourseCertificateResource extends JsonResource
             'courseNameAr' => $this->course_name_ar,
             'courseNameEn' => $this->course_name_en ?: $this->course_name_ar,
             'gradeAr' => $this->grade_ar,
-            'gradePercent' => (float) $this->grade_percent,
-            'score' => "{$this->grade_percent}%",
-            'scoreEn' => "{$this->grade_percent}%",
+            'gradePercent' => $gradePercent,
+            'score' => $scoreLabel,
+            'scoreEn' => $scoreLabel,
             'honorsTitleAr' => $this->honors_title_ar,
             'honorsTitleEn' => $this->honors_title_en ?: 'Certificate of Academic Excellence',
             'issueDate' => $this->issue_date?->format('Y-m-d'),

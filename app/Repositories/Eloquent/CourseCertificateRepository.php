@@ -2,6 +2,7 @@
 
 namespace App\Repositories\Eloquent;
 
+use App\Enums\CertificateStatus;
 use App\Models\CourseCertificate;
 use App\Repositories\Contracts\CourseCertificateRepositoryInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -15,9 +16,11 @@ class CourseCertificateRepository extends BaseRepository implements CourseCertif
 
     public function getForTeacher(int $teacherId, array $filters = [], int $perPage = 25): LengthAwarePaginator
     {
+        $safePerPage = min(100, max(1, $perPage));
+
         $query = $this->model->newQuery()
             ->where('teacher_id', $teacherId)
-            ->with(['student', 'course'])
+            ->with(['student', 'course', 'teacher.teacherProfile'])
             ->orderByDesc('issue_date')
             ->orderByDesc('id');
 
@@ -27,14 +30,21 @@ class CourseCertificateRepository extends BaseRepository implements CourseCertif
                 $q->where('student_name_ar', 'like', "%{$s}%")
                     ->orWhere('student_name_en', 'like', "%{$s}%")
                     ->orWhere('certificate_number', 'like', "%{$s}%")
-                    ->orWhere('student_email', 'like', "%{$s}%");
+                    ->orWhere('student_email', 'like', "%{$s}%")
+                    ->orWhere('student_phone', 'like', "%{$s}%")
+                    ->orWhere('course_name_ar', 'like', "%{$s}%")
+                    ->orWhere('honors_title_ar', 'like', "%{$s}%");
             });
         }
 
         if (! empty($filters['course_id']) && $filters['course_id'] !== 'all') {
-            $query->where(function ($q) use ($filters) {
-                $q->where('course_id', $filters['course_id'])
-                    ->orWhere('course_name_ar', 'like', '%'.$filters['course_id'].'%');
+            $courseFilter = trim((string) $filters['course_id']);
+            $query->where(function ($q) use ($courseFilter) {
+                if (is_numeric($courseFilter)) {
+                    $q->where('course_id', (int) $courseFilter);
+                }
+                $q->orWhereHas('course', fn ($c) => $c->where('uuid', $courseFilter))
+                    ->orWhere('course_name_ar', 'like', "%{$courseFilter}%");
             });
         }
 
@@ -42,7 +52,25 @@ class CourseCertificateRepository extends BaseRepository implements CourseCertif
             $query->where('status', $filters['status']);
         }
 
-        return $query->paginate($perPage);
+        return $query->paginate($safePerPage);
+    }
+
+    public function getTeacherStats(int $teacherId): array
+    {
+        $row = $this->model->newQuery()
+            ->where('teacher_id', $teacherId)
+            ->selectRaw('COUNT(*) as total_count')
+            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as verified_count', [CertificateStatus::VERIFIED->value])
+            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as revoked_count', [CertificateStatus::REVOKED->value])
+            ->selectRaw('AVG(CASE WHEN status = ? THEN grade_percent ELSE NULL END) as avg_grade', [CertificateStatus::VERIFIED->value])
+            ->first();
+
+        return [
+            'total' => (int) ($row?->total_count ?? 0),
+            'verifiedCount' => (int) ($row?->verified_count ?? 0),
+            'revokedCount' => (int) ($row?->revoked_count ?? 0),
+            'averageGrade' => $row?->avg_grade !== null ? round((float) $row->avg_grade, 1) : 0.0,
+        ];
     }
 
     public function findByCertNumber(string $certNumber): ?CourseCertificate
@@ -58,6 +86,7 @@ class CourseCertificateRepository extends BaseRepository implements CourseCertif
         return $this->model->newQuery()
             ->where('uuid', $uuid)
             ->where('teacher_id', $teacherId)
+            ->with(['student', 'course', 'teacher.teacherProfile'])
             ->first();
     }
 }

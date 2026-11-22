@@ -10,6 +10,7 @@ use App\Enums\TeacherPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
+use App\Models\Course;
 use App\Models\CourseCertificate;
 use App\Models\DiscountCoupon;
 use App\Models\StudentDirectPayment;
@@ -199,6 +200,65 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
         $this->assertDatabaseHas('security_audit_logs', [
             'event' => 'teacher.idor_attempt_blocked',
         ]);
+    }
+
+    public function test_teacher_can_bulk_issue_filter_with_stats_and_cannot_double_revoke(): void
+    {
+        $teacher = $this->createTeacher('cert.bulk@motafawweq.com');
+        $course = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'كورس الفيزياء الحديثة',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
+        ]);
+        $std1 = $this->createStudent('ياسمين علي', 'yasmin.cert@motafawweq.com');
+        $std2 = $this->createStudent('خالد حسن', 'khaled.cert@motafawweq.com');
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        // Bulk issue with string IDs
+        $bulkRes = $this->postJson('/api/v1/teacher/certificates/bulk-issue', [
+            'course_id' => $course->uuid,
+            'course_name_ar' => $course->title_ar,
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'honors_title_ar' => 'شهادة إتمام الكورس بمرتبة الشرف',
+            'students' => [
+                [
+                    'student_id' => (string) $std1->id,
+                    'student_name_ar' => $std1->name,
+                    'grade_percent' => 100,
+                ],
+                [
+                    'student_id' => (string) $std2->id,
+                    'student_name_ar' => $std2->name,
+                    'grade_percent' => 94,
+                ],
+            ],
+        ]);
+
+        $bulkRes->assertCreated()
+            ->assertJsonCount(2, 'data');
+
+        $firstUuid = $bulkRes->json('data.0.id');
+
+        // Revoke first certificate
+        $this->patchJson("/api/v1/teacher/certificates/{$firstUuid}/revoke", [
+            'reason' => 'تصحيح خطأ في الدرجة',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'revoked');
+
+        // Re-revoking already revoked certificate must return 422
+        $this->patchJson("/api/v1/teacher/certificates/{$firstUuid}/revoke", [
+            'reason' => 'محاولة تكرار',
+        ])->assertUnprocessable();
+
+        // List with stats & course UUID filter
+        $listRes = $this->getJson("/api/v1/teacher/certificates?course_id={$course->uuid}&status=verified");
+        $listRes->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('meta.stats.total', 2)
+            ->assertJsonPath('meta.stats.verifiedCount', 1)
+            ->assertJsonPath('meta.stats.revokedCount', 1);
     }
 
     /* ----------------------------------------------------------------- */

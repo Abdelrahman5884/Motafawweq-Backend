@@ -28,16 +28,22 @@ class TeacherCertificateController extends Controller
             'status' => $request->query('status'),
         ];
 
-        $paginator = $this->certificateService->listCertificates(
-            $request->user(),
-            $filters,
-            (int) $request->query('per_page', 25)
-        );
+        $teacher = $request->user();
+        $perPage = min(100, max(1, (int) $request->query('per_page', 25)));
+        $paginator = $this->certificateService->listCertificates($teacher, $filters, $perPage);
+        $stats = $this->certificateService->getStats($teacher);
 
-        return $this->paginated(
-            $paginator,
-            CourseCertificateResource::class,
-            __('messages.certificates.retrieved')
+        return $this->successResponse(
+            CourseCertificateResource::collection($paginator->items()),
+            __('messages.certificates.retrieved'),
+            meta: [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+                'has_more' => $paginator->hasMorePages(),
+                'stats' => $stats,
+            ]
         );
     }
 
