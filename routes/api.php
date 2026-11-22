@@ -375,10 +375,11 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('uuid');
                 });
 
-                // Stage 5: Recording Studio & Secure Media / Attachments (without AI)
+                // Stage 5: Recording Studio & Secure Media / Attachments (Quota-gated on creation; AI gated to Pro)
                 Route::prefix('lessons')->group(function () {
                     Route::get('/', [TeacherStudioController::class, 'index']);
-                    Route::post('/', [TeacherStudioController::class, 'store']);
+                    Route::post('/', [TeacherStudioController::class, 'store'])
+                        ->middleware('teacher.quota:lessons');
                     Route::get('/{uuid}', [TeacherStudioController::class, 'show'])
                         ->whereUuid('uuid');
                     Route::put('/{uuid}', [TeacherStudioController::class, 'update'])
@@ -401,7 +402,7 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid(['uuid', 'attachmentUuid']);
                 });
 
-                // Stage 6: Lesson Workspace, Chapters, Transcripts & Concept Graphs (without AI)
+                // Stage 6: Lesson Workspace, Chapters, Transcripts & Concept Graphs (AI tabs gated to Pro)
                 Route::prefix('workspace')->group(function () {
                     Route::get('/', [LessonWorkspaceController::class, 'index']);
                     Route::get('/lessons/{uuid}', [LessonWorkspaceController::class, 'show'])
@@ -409,15 +410,18 @@ Route::prefix('v1')->group(function () {
                     Route::put('/lessons/{uuid}/chapters', [LessonWorkspaceController::class, 'syncChapters'])
                         ->whereUuid('uuid');
                     Route::put('/lessons/{uuid}/transcript', [LessonWorkspaceController::class, 'syncTranscript'])
-                        ->whereUuid('uuid');
+                        ->whereUuid('uuid')
+                        ->middleware('teacher.plan:ai');
                     Route::put('/lessons/{uuid}/concept-graph', [LessonWorkspaceController::class, 'saveConceptGraph'])
-                        ->whereUuid('uuid');
+                        ->whereUuid('uuid')
+                        ->middleware('teacher.plan:ai');
                 });
 
                 // Stage 7 & 8: Study Groups, Schedule & Student Roster
                 Route::prefix('groups')->group(function () {
                     Route::get('/', [TeacherStudyGroupController::class, 'index']);
-                    Route::post('/', [TeacherStudyGroupController::class, 'store']);
+                    Route::post('/', [TeacherStudyGroupController::class, 'store'])
+                        ->middleware('teacher.quota:groups');
                     Route::get('/{uuid}', [TeacherStudyGroupController::class, 'show'])
                         ->whereUuid('uuid');
                     Route::put('/{uuid}', [TeacherStudyGroupController::class, 'update'])
@@ -459,7 +463,7 @@ Route::prefix('v1')->group(function () {
 
                 Route::get('/students/search', [TeacherRosterController::class, 'search']);
 
-                Route::prefix('schedule')->group(function () {
+                Route::prefix('schedule')->middleware('teacher.plan:schedule')->group(function () {
                     Route::get('/', [TeacherScheduleController::class, 'index']);
                     Route::post('/notes', [TeacherScheduleController::class, 'storeNote']);
                     Route::patch('/notes/{uuid}/toggle', [TeacherScheduleController::class, 'toggleNote'])
@@ -468,8 +472,8 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('uuid');
                 });
 
-                // Stage 10: Question Bank & Bubble Sheet Exams
-                Route::prefix('exams')->group(function () {
+                // Stage 10: Question Bank & Bubble Sheet Exams (Plus & Pro)
+                Route::prefix('exams')->middleware('teacher.plan:exams')->group(function () {
                     Route::get('/', [TeacherExamController::class, 'index']);
                     Route::post('/', [TeacherExamController::class, 'store']);
                     Route::get('/{uuid}', [TeacherExamController::class, 'show'])
@@ -496,8 +500,8 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('submissionUuid');
                 });
 
-                // Stage 12: Homework Management & Grading Workflow
-                Route::prefix('homeworks')->group(function () {
+                // Stage 12: Homework Management & Grading Workflow (Plus & Pro)
+                Route::prefix('homeworks')->middleware('teacher.plan:homework')->group(function () {
                     Route::get('/', [TeacherHomeworkController::class, 'index']);
                     Route::post('/', [TeacherHomeworkController::class, 'store'])
                         ->middleware('throttle:teacher-uploads');
@@ -521,8 +525,8 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('submissionUuid');
                 });
 
-                // Stage 13: Course Leagues, XP & Leaderboards
-                Route::prefix('leagues')->group(function () {
+                // Stage 13: Course Leagues, XP & Leaderboards (Plus & Pro)
+                Route::prefix('leagues')->middleware('teacher.plan:leagues')->group(function () {
                     Route::get('/', [TeacherLeagueController::class, 'index']);
                     Route::post('/', [TeacherLeagueController::class, 'store']);
                     Route::get('/{uuid}', [TeacherLeagueController::class, 'show'])
@@ -557,7 +561,7 @@ Route::prefix('v1')->group(function () {
                 });
 
                 // Stage 15: Certificates, Direct Payments & Teacher Billing
-                Route::prefix('certificates')->group(function () {
+                Route::prefix('certificates')->middleware('teacher.plan:certificates')->group(function () {
                     Route::get('/', [TeacherCertificateController::class, 'index']);
                     Route::get('/eligibility-context', [TeacherCertificateController::class, 'eligibilityContext']);
                     Route::post('/', [TeacherCertificateController::class, 'store']);
@@ -566,7 +570,7 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('uuid');
                 });
 
-                Route::prefix('financials')->group(function () {
+                Route::prefix('financials')->middleware('teacher.plan:financials')->group(function () {
                     Route::get('/', [TeacherFinancialController::class, 'index']);
                     Route::post('/payments/{uuid}/confirm', [TeacherFinancialController::class, 'confirm'])
                         ->whereUuid('uuid');
@@ -578,6 +582,7 @@ Route::prefix('v1')->group(function () {
                     Route::get('/', [TeacherBillingController::class, 'index']);
                     Route::post('/validate-coupon', [TeacherBillingController::class, 'validateCoupon']);
                     Route::post('/subscribe', [TeacherBillingController::class, 'subscribe']);
+                    Route::post('/cancel', [TeacherBillingController::class, 'cancel']);
                 });
             });
         });

@@ -5,12 +5,14 @@ namespace Tests\Feature\Student;
 use App\Enums\EnrollmentStatus;
 use App\Enums\HomeworkSubmissionStatus;
 use App\Enums\HomeworkType;
+use App\Enums\TeacherPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\GroupEnrollment;
 use App\Models\Homework;
 use App\Models\StudyGroup;
+use App\Models\TeacherProfile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -30,13 +32,20 @@ class StudentHomeworkWorkspaceTest extends TestCase
 
     private function createTeacher(string $email = 'teacher.shw@motafawweq.com'): User
     {
-        return User::factory()->create([
+        $teacher = User::factory()->create([
             'name' => 'أ. سامح عبد الرحمن',
             'email' => $email,
             'role' => UserRole::TEACHER,
             'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
+
+        TeacherProfile::create([
+            'user_id' => $teacher->id,
+            'name_ar' => $teacher->name,
+        ])->forceFill(['plan_tier' => TeacherPlanTier::PLUS])->save();
+
+        return $teacher;
     }
 
     private function createStudent(string $email = 'student.shw@motafawweq.com'): User

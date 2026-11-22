@@ -23,7 +23,9 @@ class TeacherInvoice extends Model
         'base_amount_egp',
         'discount_amount_egp',
         'final_amount_egp',
+        'coupon_code',
         'payment_method',
+        'sender_reference',
         'status',
         'paid_at',
     ];

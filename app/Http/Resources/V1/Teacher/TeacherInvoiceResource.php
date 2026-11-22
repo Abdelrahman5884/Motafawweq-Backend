@@ -13,18 +13,24 @@ class TeacherInvoiceResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $finalAmount = (float) $this->final_amount_egp;
+
         return [
-            'id' => $this->uuid,
+            'id' => $this->invoice_number,
             'uuid' => $this->uuid,
             'invoiceNumber' => $this->invoice_number,
             'date' => $this->paid_at ? $this->paid_at->format('Y-m-d') : $this->created_at->format('Y-m-d'),
             'descriptionAr' => $this->description_ar,
-            'descriptionEn' => $this->description_en,
+            'descriptionEn' => $this->description_en ?: $this->description_ar,
             'baseAmount' => (float) $this->base_amount_egp,
+            'baseAmountEgp' => (float) $this->base_amount_egp,
             'discountAmount' => (float) $this->discount_amount_egp,
-            'finalAmount' => (float) $this->final_amount_egp,
-            'amount' => "{$this->final_amount_egp} ج.م",
-            'amountEn' => "{$this->final_amount_egp} EGP",
+            'discountAmountEgp' => (float) $this->discount_amount_egp,
+            'finalAmount' => $finalAmount,
+            'amountEgp' => $finalAmount,
+            'amount' => "{$finalAmount} ج.م",
+            'amountEn' => "{$finalAmount} EGP",
+            'couponCode' => $this->coupon_code,
             'method' => $this->payment_method?->value ?? 'vodafone',
             'methodAr' => $this->payment_method?->label() ?? 'فودافون كاش ومحافظ المحمول',
             'methodEn' => ucfirst($this->payment_method?->value ?? 'vodafone'),

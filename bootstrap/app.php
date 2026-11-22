@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\CheckRole;
 use App\Http\Middleware\CheckStudentPlan;
+use App\Http\Middleware\CheckTeacherPlan;
 use App\Http\Middleware\CheckTeacherPlanQuota;
 use App\Http\Middleware\EnsureAccountIsActive;
 use App\Http\Middleware\EnsureEmailIsVerified;
@@ -53,6 +54,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'email.verified' => EnsureEmailIsVerified::class,
             'account.active' => EnsureAccountIsActive::class,
             'teacher.quota' => CheckTeacherPlanQuota::class,
+            'teacher.plan' => CheckTeacherPlan::class,
             'student.plan' => CheckStudentPlan::class,
             'idempotent' => EnsureIdempotency::class,
         ]);

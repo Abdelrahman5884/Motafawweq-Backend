@@ -5,7 +5,6 @@ namespace App\Services\V1\Teacher;
 use App\Enums\CourseStatus;
 use App\Enums\DirectPaymentStatus;
 use App\Enums\EnrollmentStatus;
-use App\Enums\TeacherPlanTier;
 use App\Models\Course;
 use App\Models\GroupEnrollment;
 use App\Models\Lesson;
@@ -21,7 +20,8 @@ class TeacherCourseService extends BaseService
 {
     public function __construct(
         protected CourseRepositoryInterface $courseRepository,
-        protected TeacherProfileRepositoryInterface $profileRepository
+        protected TeacherProfileRepositoryInterface $profileRepository,
+        protected TeacherBillingService $billingService
     ) {}
 
     /**
@@ -42,7 +42,7 @@ class TeacherCourseService extends BaseService
     public function getCoursesMeta(User $teacher, int $filteredTotal): array
     {
         $profile = $this->profileRepository->firstOrCreateForTeacher($teacher);
-        $planTier = $profile->plan_tier ?? TeacherPlanTier::PLUS;
+        $planTier = $this->billingService->resolveActivePlanTier($teacher);
         $activeCoursesCount = $this->courseRepository->countActiveForTeacher($teacher->id);
 
         return [

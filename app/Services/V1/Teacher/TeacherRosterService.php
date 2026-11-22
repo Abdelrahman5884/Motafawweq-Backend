@@ -7,7 +7,6 @@ use App\Enums\AttendanceStatus;
 use App\Enums\EnrollmentStatus;
 use App\Enums\ExamSubmissionStatus;
 use App\Enums\JoinMethod;
-use App\Enums\TeacherPlanTier;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\ExamSubmission;
@@ -16,7 +15,6 @@ use App\Models\GroupAttendanceSession;
 use App\Models\GroupEnrollment;
 use App\Models\StudentProfile;
 use App\Models\StudyGroup;
-use App\Models\TeacherProfile;
 use App\Models\User;
 use App\Repositories\Contracts\GroupEnrollmentRepositoryInterface;
 use App\Repositories\Contracts\StudyGroupRepositoryInterface;
@@ -32,7 +30,8 @@ class TeacherRosterService extends BaseService
 {
     public function __construct(
         protected StudyGroupRepositoryInterface $groupRepository,
-        protected GroupEnrollmentRepositoryInterface $enrollmentRepository
+        protected GroupEnrollmentRepositoryInterface $enrollmentRepository,
+        protected TeacherBillingService $billingService
     ) {}
 
     /**
@@ -421,6 +420,12 @@ class TeacherRosterService extends BaseService
                 ]);
             }
 
+            // Enforce teacher's active plan student capacity limit
+            $groupTeacher = User::find($group->teacher_id);
+            if ($groupTeacher) {
+                $this->assertTeacherPlanStudentQuota($groupTeacher);
+            }
+
             if ($existing) {
                 if ($existing->trashed()) {
                     $existing->restore();
@@ -533,8 +538,7 @@ class TeacherRosterService extends BaseService
      */
     protected function assertTeacherPlanStudentQuota(User $teacher): void
     {
-        $profile = TeacherProfile::where('user_id', $teacher->id)->first();
-        $tier = $profile?->plan_tier ?? TeacherPlanTier::PLUS;
+        $tier = $this->billingService->resolveActivePlanTier($teacher);
 
         $maxStudents = $tier->maxStudents();
         if ($maxStudents === null) {
@@ -544,6 +548,7 @@ class TeacherRosterService extends BaseService
         $totalEnrolled = GroupEnrollment::query()
             ->join('study_groups', 'study_groups.id', '=', 'group_enrollments.study_group_id')
             ->whereNull('study_groups.deleted_at')
+            ->whereNull('group_enrollments.deleted_at')
             ->where('study_groups.teacher_id', $teacher->id)
             ->where('group_enrollments.status', EnrollmentStatus::ENROLLED->value)
             ->count();

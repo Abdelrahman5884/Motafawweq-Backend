@@ -3,7 +3,9 @@
 namespace App\Http\Resources\V1\Teacher;
 
 use App\Enums\StageType;
+use App\Enums\TeacherPlanTier;
 use App\Http\Resources\BaseJsonResource;
+use App\Services\V1\Teacher\TeacherBillingService;
 use Illuminate\Http\Request;
 
 class TeacherSettingsResource extends BaseJsonResource
@@ -18,6 +20,9 @@ class TeacherSettingsResource extends BaseJsonResource
         $user = $this->user;
         $payoutAccounts = $user?->teacherPayoutAccounts ?? collect();
         $defaultAccount = $payoutAccounts->firstWhere('is_default', true) ?? $payoutAccounts->first();
+        $resolvedTier = $user
+            ? app(TeacherBillingService::class)->resolveActivePlanTier($user)
+            : ($this->plan_tier ?? TeacherPlanTier::FREE);
 
         return [
             'id' => $this->uuid,
@@ -38,8 +43,10 @@ class TeacherSettingsResource extends BaseJsonResource
             'avatarUrl' => $user?->avatar ?? 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80',
             'avatar_url' => $user?->avatar ?? 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80',
             'isVerifiedEducator' => (bool) $this->is_verified_educator,
-            'planTier' => $this->plan_tier?->value ?? 'plus',
-            'planLabel' => $this->plan_tier?->label(),
+            'planTier' => $resolvedTier->value,
+            'planLabel' => $resolvedTier->label(),
+            'planQuotas' => $resolvedTier->quotas(),
+            'unlockedFeatures' => $resolvedTier->unlockedFeatures(),
             'rating' => $this->rating,
             'reviewsCount' => $this->reviews_count,
 

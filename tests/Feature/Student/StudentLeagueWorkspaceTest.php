@@ -10,6 +10,7 @@ use App\Enums\ExamStatus;
 use App\Enums\LeagueDuration;
 use App\Enums\LessonStatus;
 use App\Enums\StudentPlanTier;
+use App\Enums\TeacherPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
@@ -24,6 +25,7 @@ use App\Models\Lesson;
 use App\Models\StudentProfile;
 use App\Models\StudentSubscription;
 use App\Models\StudyGroup;
+use App\Models\TeacherProfile;
 use App\Models\User;
 use App\Services\V1\LeagueRulesService;
 use Carbon\Carbon;
@@ -43,13 +45,20 @@ class StudentLeagueWorkspaceTest extends TestCase
 
     private function createTeacher(string $email = 'teacher.lg@motafawweq.com'): User
     {
-        return User::factory()->create([
+        $teacher = User::factory()->create([
             'name' => 'أ. خالد السعدني',
             'email' => $email,
             'role' => UserRole::TEACHER,
             'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
+
+        TeacherProfile::create([
+            'user_id' => $teacher->id,
+            'name_ar' => $teacher->name,
+        ])->forceFill(['plan_tier' => TeacherPlanTier::PLUS])->save();
+
+        return $teacher;
     }
 
     private function createStudent(string $name, string $email): User

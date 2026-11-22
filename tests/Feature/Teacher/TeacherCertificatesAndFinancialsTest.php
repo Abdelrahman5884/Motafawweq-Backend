@@ -31,8 +31,10 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
 {
     use RefreshDatabase;
 
-    protected function createTeacher(string $email = 'teacher.cert@motafawweq.com'): User
-    {
+    protected function createTeacher(
+        string $email = 'teacher.cert@motafawweq.com',
+        TeacherPlanTier $planTier = TeacherPlanTier::PLUS
+    ): User {
         $teacher = User::factory()->create([
             'email' => $email,
             'role' => UserRole::TEACHER,
@@ -40,13 +42,14 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
             'email_verified_at' => now(),
         ]);
 
-        TeacherProfile::create([
+        $profile = TeacherProfile::create([
             'user_id' => $teacher->id,
             'name_ar' => $teacher->name,
             'name_en' => 'Dr. Teacher Example',
             'title_ar' => 'كبير معلمي الأحياء ومؤلف سلسلة التفوق',
             'subject_ar' => 'الأحياء',
         ]);
+        $profile->forceFill(['plan_tier' => $planTier])->save();
 
         return $teacher;
     }
@@ -589,32 +592,32 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
 
     public function test_teacher_can_upgrade_plan_with_coupon_generating_official_invoice(): void
     {
-        $teacher = $this->createTeacher();
+        $teacher = $this->createTeacher('free.upgrade@motafawweq.com', TeacherPlanTier::FREE);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
         $payload = [
             'plan_tier' => TeacherPlanTier::PRO->value,
-            'billing_period' => BillingPeriod::TERM->value, // 880 EGP base
+            'billing_period' => BillingPeriod::TERM->value, // 600 EGP base (150/mo * 5 - 20%)
             'payment_method' => PaymentMethod::VODAFONE->value,
-            'coupon_code' => 'TEACHER2026', // 25% discount -> 660 EGP
+            'coupon_code' => 'TEACHER2026', // 25% discount -> 450 EGP
         ];
 
         $response = $this->postJson('/api/v1/teacher/billing/subscribe', $payload);
 
         $response->assertOk()
             ->assertJsonPath('data.activeSub.planTier', 'pro')
-            ->assertJsonPath('data.activeSub.amountEgp', 660)
-            ->assertJsonPath('data.invoice.baseAmount', 880)
-            ->assertJsonPath('data.invoice.discountAmount', 220)
-            ->assertJsonPath('data.invoice.finalAmount', 660)
+            ->assertJsonPath('data.activeSub.amountEgp', 450)
+            ->assertJsonPath('data.invoice.baseAmount', 600)
+            ->assertJsonPath('data.invoice.discountAmount', 150)
+            ->assertJsonPath('data.invoice.finalAmount', 450)
             ->assertJsonPath('data.invoice.status', 'paid');
 
         $this->assertDatabaseHas('teacher_subscriptions', [
             'teacher_id' => $teacher->id,
             'plan_tier' => TeacherPlanTier::PRO->value,
             'status' => 'active',
-            'amount_egp' => 660,
+            'amount_egp' => 450,
         ]);
 
         $this->assertDatabaseHas('teacher_profiles', [
@@ -624,7 +627,7 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
 
         $this->assertDatabaseHas('teacher_invoices', [
             'teacher_id' => $teacher->id,
-            'final_amount_egp' => 660,
+            'final_amount_egp' => 450,
             'status' => 'paid',
         ]);
 

@@ -32,15 +32,16 @@ class TeacherStudioController extends BaseApiController
      */
     public function index(Request $request): JsonResponse
     {
+        $teacher = $this->authenticatedUser();
         $lessons = $this->studioService->listLessons(
-            $this->authenticatedUser(),
+            $teacher,
             $request->only(['course_id', 'course_uuid', 'status', 'search', 'q'])
         );
 
         return $this->successResponse(
             TeacherLessonResource::collection($lessons),
             __('messages.lessons_fetched'),
-            meta: ['total' => $lessons->count()]
+            meta: $this->studioService->getLessonsMeta($teacher, $lessons->count())
         );
     }
 

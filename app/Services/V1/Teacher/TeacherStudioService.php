@@ -5,7 +5,6 @@ namespace App\Services\V1\Teacher;
 use App\Enums\LessonAttachmentType;
 use App\Enums\LessonMediaMode;
 use App\Enums\LessonStatus;
-use App\Enums\TeacherPlanTier;
 use App\Models\Course;
 use App\Models\Lesson;
 use App\Models\LessonAttachment;
@@ -27,12 +26,32 @@ class TeacherStudioService extends BaseService
 {
     public function __construct(
         protected LessonRepositoryInterface $lessonRepository,
-        protected CourseRepositoryInterface $courseRepository
+        protected CourseRepositoryInterface $courseRepository,
+        protected TeacherBillingService $billingService
     ) {}
 
     public function listLessons(User $teacher, array $filters = []): Collection
     {
         return $this->lessonRepository->getForTeacher($teacher->id, $filters);
+    }
+
+    /**
+     * Return plan quota & AI capability metadata for the studio header and upload limits.
+     *
+     * @return array<string, mixed>
+     */
+    public function getLessonsMeta(User $teacher, int $filteredTotal): array
+    {
+        $planTier = $this->billingService->resolveActivePlanTier($teacher);
+        $activeLessonsCount = Lesson::where('teacher_id', $teacher->id)->count();
+
+        return [
+            'total' => $filteredTotal,
+            'activeLessonsCount' => $activeLessonsCount,
+            'maxLessons' => $planTier->maxLessons(),
+            'planTier' => $planTier->value,
+            'allowsAi' => $planTier->allowsAiFeatures(),
+        ];
     }
 
     public function getLesson(User $teacher, string $uuid): Lesson
@@ -757,12 +776,7 @@ class TeacherStudioService extends BaseService
 
     protected function teacherCanUseAi(User $teacher): bool
     {
-        $tier = $teacher->teacherProfile?->plan_tier;
-        if ($tier instanceof TeacherPlanTier) {
-            return $tier->allowsAiFeatures();
-        }
-
-        return $tier === TeacherPlanTier::PRO->value;
+        return $this->billingService->resolveActivePlanTier($teacher)->allowsAiFeatures();
     }
 
     protected function syncCourseLessonsCount(?int $courseId): void

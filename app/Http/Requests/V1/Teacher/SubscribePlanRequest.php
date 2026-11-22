@@ -22,6 +22,9 @@ class SubscribePlanRequest extends FormRequest
             'billing_period' => ['required', new Enum(BillingPeriod::class)],
             'payment_method' => ['required', new Enum(PaymentMethod::class)],
             'coupon_code' => ['nullable', 'string', 'max:50'],
+            'sender_phone' => ['nullable', 'string', 'max:40'],
+            'sender_ipa' => ['nullable', 'string', 'max:120'],
+            'transaction_ref' => ['nullable', 'string', 'max:120'],
         ];
     }
 }

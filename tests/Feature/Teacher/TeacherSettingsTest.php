@@ -117,7 +117,7 @@ class TeacherSettingsTest extends TestCase
             ->assertJsonPath('data.notifyNewEnrollment', false)
             ->assertJsonPath('data.preferredTheme', 'dark')
             ->assertJsonPath('data.preferredLang', 'en')
-            ->assertJsonPath('data.planTier', TeacherPlanTier::PLUS->value)
+            ->assertJsonPath('data.planTier', TeacherPlanTier::FREE->value)
             ->assertJsonPath('data.reviewsCount', 0);
 
         // User table synced

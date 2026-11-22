@@ -23,6 +23,7 @@ class TeacherSubscription extends Model
         'amount_egp',
         'starts_at',
         'renews_at',
+        'cancelled_at',
         'status',
     ];
 
@@ -34,6 +35,7 @@ class TeacherSubscription extends Model
             'amount_egp' => 'float',
             'starts_at' => 'datetime',
             'renews_at' => 'datetime',
+            'cancelled_at' => 'datetime',
         ];
     }
 

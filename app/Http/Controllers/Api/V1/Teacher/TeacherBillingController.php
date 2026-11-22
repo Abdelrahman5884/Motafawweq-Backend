@@ -51,17 +51,20 @@ class TeacherBillingController extends Controller
         );
 
         return $this->success([
-            'activeSub' => [
-                'planTier' => $result['subscription']->plan_tier->value,
-                'planNameAr' => $result['subscription']->plan_name_ar,
-                'planNameEn' => $result['subscription']->plan_name_en,
-                'billingPeriod' => $result['subscription']->billing_period->value,
-                'status' => $result['subscription']->status,
-                'renewalDate' => $result['subscription']->renews_at->toDateString(),
-                'daysRemaining' => $result['daysRemaining'],
-                'amountEgp' => $result['subscription']->amount_egp,
-            ],
+            'activeSub' => $result['activeSub'],
+            'usage' => $result['usage'],
             'invoice' => new TeacherInvoiceResource($result['invoice']),
+        ], $result['messageAr']);
+    }
+
+    public function cancel(Request $request): JsonResponse
+    {
+        $result = $this->billingService->cancelSubscription($request->user());
+
+        return $this->success([
+            'activeSub' => $result['activeSub'],
+            'usage' => $result['usage'],
+            'previousPlan' => $result['previousPlan'],
         ], $result['messageAr']);
     }
 }

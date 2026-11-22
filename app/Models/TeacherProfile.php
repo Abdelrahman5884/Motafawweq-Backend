@@ -62,6 +62,9 @@ class TeacherProfile extends Model
             if (empty($profile->uuid)) {
                 $profile->uuid = (string) Str::uuid();
             }
+            if (empty($profile->plan_tier)) {
+                $profile->plan_tier = TeacherPlanTier::FREE;
+            }
         });
     }
 

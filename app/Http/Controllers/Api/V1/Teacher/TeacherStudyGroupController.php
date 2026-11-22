@@ -24,15 +24,16 @@ class TeacherStudyGroupController extends BaseApiController
      */
     public function index(Request $request): JsonResponse
     {
+        $teacher = $this->authenticatedUser();
         $groups = $this->groupService->listGroups(
-            $this->authenticatedUser(),
+            $teacher,
             $request->only(['search', 'q', 'center_name', 'status'])
         );
 
         return $this->successResponse(
             StudyGroupResource::collection($groups),
             __('messages.groups_fetched'),
-            meta: ['total' => $groups->count()]
+            meta: $this->groupService->getGroupsMeta($teacher, $groups->count())
         );
     }
 

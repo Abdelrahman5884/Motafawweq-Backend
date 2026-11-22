@@ -19,7 +19,8 @@ use Illuminate\Validation\ValidationException;
 class TeacherStudyGroupService extends BaseService
 {
     public function __construct(
-        protected StudyGroupRepositoryInterface $groupRepository
+        protected StudyGroupRepositoryInterface $groupRepository,
+        protected TeacherBillingService $billingService
     ) {}
 
     /**
@@ -28,6 +29,26 @@ class TeacherStudyGroupService extends BaseService
     public function listGroups(User $teacher, array $filters = []): Collection
     {
         return $this->groupRepository->getForTeacher($teacher->id, $filters);
+    }
+
+    /**
+     * Return plan quota & feature metadata for the study groups view.
+     *
+     * @return array<string, mixed>
+     */
+    public function getGroupsMeta(User $teacher, int $filteredTotal): array
+    {
+        $planTier = $this->billingService->resolveActivePlanTier($teacher);
+        $activeGroupsCount = StudyGroup::where('teacher_id', $teacher->id)->count();
+
+        return [
+            'total' => $filteredTotal,
+            'activeGroupsCount' => $activeGroupsCount,
+            'maxGroups' => $planTier->maxGroups(),
+            'maxStudentsPerGroup' => $planTier->maxStudentsPerGroup(),
+            'planTier' => $planTier->value,
+            'allowsSchedule' => $planTier->allowsSchedule(),
+        ];
     }
 
     /**
@@ -56,6 +77,7 @@ class TeacherStudyGroupService extends BaseService
             $scheduleEn = trim(strip_tags((string) ($data['schedule_en'] ?? $data['scheduleEn'] ?? $scheduleAr)));
 
             $maxStudents = max(1, (int) ($data['max_students'] ?? $data['maxStudents'] ?? 50));
+            $this->assertGroupMaxStudentsWithinPlan($teacher, $maxStudents);
             $priceEgp = max(0.0, (float) ($data['price_egp'] ?? $data['priceEgp'] ?? 0.0));
 
             // Determine join code
@@ -166,7 +188,9 @@ class TeacherStudyGroupService extends BaseService
                 $fillableData['schedule_en'] = trim(strip_tags((string) ($data['schedule_en'] ?? $data['scheduleEn'])));
             }
             if (isset($data['max_students']) || isset($data['maxStudents'])) {
-                $fillableData['max_students'] = max(1, (int) ($data['max_students'] ?? $data['maxStudents']));
+                $requestedMax = max(1, (int) ($data['max_students'] ?? $data['maxStudents']));
+                $this->assertGroupMaxStudentsWithinPlan($teacher, $requestedMax);
+                $fillableData['max_students'] = $requestedMax;
             }
             if (isset($data['price_egp']) || isset($data['priceEgp'])) {
                 $fillableData['price_egp'] = max(0.0, (float) ($data['price_egp'] ?? $data['priceEgp']));
@@ -666,5 +690,25 @@ class TeacherStudyGroupService extends BaseService
         );
 
         return $announcement;
+    }
+
+    /**
+     * Ensure requested study group student capacity does not exceed the teacher's active plan limit.
+     *
+     * @throws ValidationException
+     */
+    protected function assertGroupMaxStudentsWithinPlan(User $teacher, int $requestedMaxStudents): void
+    {
+        $tier = $this->billingService->resolveActivePlanTier($teacher);
+        $maxPerGroup = $tier->maxStudentsPerGroup();
+
+        if ($maxPerGroup !== null && $requestedMaxStudents > $maxPerGroup) {
+            throw ValidationException::withMessages([
+                'max_students' => [__('messages.quota_group_max_students_exceeded', [
+                    'max' => $maxPerGroup,
+                    'plan' => $tier->label(),
+                ])],
+            ]);
+        }
     }
 }

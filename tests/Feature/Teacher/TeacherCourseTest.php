@@ -348,7 +348,7 @@ class TeacherCourseTest extends TestCase
         $listRes->assertOk()
             ->assertJsonPath('meta.total', 1)
             ->assertJsonPath('meta.activeCoursesCount', 1)
-            ->assertJsonPath('meta.maxCourses', 10)
+            ->assertJsonPath('meta.maxCourses', null)
             ->assertJsonPath('meta.planTier', 'plus')
             ->assertJsonPath('meta.defaultSubjectAr', 'الفيزياء')
             ->assertJsonPath('data.0.studentsCount', 1)

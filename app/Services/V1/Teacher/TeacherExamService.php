@@ -5,12 +5,10 @@ namespace App\Services\V1\Teacher;
 use App\Enums\ExamQuestionType;
 use App\Enums\ExamStatus;
 use App\Enums\ExamSubmissionStatus;
-use App\Enums\TeacherPlanTier;
 use App\Models\Course;
 use App\Models\Exam;
 use App\Models\ExamQuestion;
 use App\Models\ExamSubmissionAnswer;
-use App\Models\TeacherProfile;
 use App\Models\User;
 use App\Repositories\Contracts\ExamRepositoryInterface;
 use App\Services\BaseService;
@@ -22,7 +20,8 @@ use Illuminate\Validation\ValidationException;
 class TeacherExamService extends BaseService
 {
     public function __construct(
-        protected ExamRepositoryInterface $examRepository
+        protected ExamRepositoryInterface $examRepository,
+        protected TeacherBillingService $billingService
     ) {}
 
     /**
@@ -444,8 +443,7 @@ class TeacherExamService extends BaseService
      */
     protected function assertQuestionBankQuota(User $teacher, int $questionsCount): void
     {
-        $profile = TeacherProfile::where('user_id', $teacher->id)->first();
-        $tier = $profile?->plan_tier ?? TeacherPlanTier::PLUS;
+        $tier = $this->billingService->resolveActivePlanTier($teacher);
 
         $max = $tier->maxQuestionsBank();
         if ($max !== null && $questionsCount > $max) {

@@ -4,11 +4,13 @@ namespace Tests\Feature\Teacher;
 
 use App\Enums\ExamQuestionType;
 use App\Enums\ExamStatus;
+use App\Enums\TeacherPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\Exam;
 use App\Models\ExamQuestion;
+use App\Models\TeacherProfile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -20,12 +22,19 @@ class TeacherExamTest extends TestCase
 
     protected function createTeacher(string $email = 'teacher.exams@motafawweq.com'): User
     {
-        return User::factory()->create([
+        $teacher = User::factory()->create([
             'email' => $email,
             'role' => UserRole::TEACHER,
             'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
+
+        TeacherProfile::create([
+            'user_id' => $teacher->id,
+            'name_ar' => $teacher->name,
+        ])->forceFill(['plan_tier' => TeacherPlanTier::PLUS])->save();
+
+        return $teacher;
     }
 
     public function test_teacher_can_create_exam_with_mcq_true_false_and_essay_questions(): void

@@ -6,6 +6,7 @@ use App\Enums\EnrollmentStatus;
 use App\Enums\ExamQuestionType;
 use App\Enums\ExamStatus;
 use App\Enums\ExamSubmissionStatus;
+use App\Enums\TeacherPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
@@ -14,6 +15,7 @@ use App\Models\ExamQuestion;
 use App\Models\ExamSubmission;
 use App\Models\GroupEnrollment;
 use App\Models\StudyGroup;
+use App\Models\TeacherProfile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -25,12 +27,19 @@ class TeacherExamGradingTest extends TestCase
 
     protected function createTeacher(string $email = 'teacher.grading@motafawweq.com'): User
     {
-        return User::factory()->create([
+        $teacher = User::factory()->create([
             'email' => $email,
             'role' => UserRole::TEACHER,
             'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
+
+        TeacherProfile::create([
+            'user_id' => $teacher->id,
+            'name_ar' => $teacher->name,
+        ])->forceFill(['plan_tier' => TeacherPlanTier::PLUS])->save();
+
+        return $teacher;
     }
 
     protected function createStudent(string $email = 'student.tester@motafawweq.com'): User

@@ -105,11 +105,31 @@ class TeacherSecurityFoundationTest extends TestCase
     public function test_teacher_plan_tiers_and_stage_catalog_rules(): void
     {
         $this->assertEquals(1, TeacherPlanTier::FREE->maxCourses());
-        $this->assertEquals(10, TeacherPlanTier::PLUS->maxCourses());
-        $this->assertNull(TeacherPlanTier::PRO->maxCourses());
+        $this->assertEquals(3, TeacherPlanTier::FREE->maxLessons());
+        $this->assertEquals(1, TeacherPlanTier::FREE->maxGroups());
+        $this->assertEquals(50, TeacherPlanTier::FREE->maxStudentsPerGroup());
+        $this->assertEquals(50, TeacherPlanTier::FREE->maxStudents());
 
+        $this->assertNull(TeacherPlanTier::PLUS->maxCourses());
+        $this->assertNull(TeacherPlanTier::PLUS->maxLessons());
+        $this->assertEquals(12, TeacherPlanTier::PLUS->maxGroups());
+        $this->assertNull(TeacherPlanTier::PLUS->maxStudents());
+
+        $this->assertNull(TeacherPlanTier::PRO->maxCourses());
+        $this->assertNull(TeacherPlanTier::PRO->maxLessons());
+        $this->assertNull(TeacherPlanTier::PRO->maxGroups());
+        $this->assertNull(TeacherPlanTier::PRO->maxStudents());
+
+        $this->assertFalse(TeacherPlanTier::FREE->allowsSchedule());
         $this->assertFalse(TeacherPlanTier::FREE->allowsCertificates());
+        $this->assertFalse(TeacherPlanTier::FREE->allowsAiFeatures());
+
+        $this->assertTrue(TeacherPlanTier::PLUS->allowsSchedule());
         $this->assertTrue(TeacherPlanTier::PLUS->allowsCertificates());
+        $this->assertTrue(TeacherPlanTier::PLUS->allowsWhatsappParentAlerts());
+        $this->assertFalse(TeacherPlanTier::PLUS->allowsAiFeatures());
+
+        $this->assertTrue(TeacherPlanTier::PRO->allowsAiFeatures());
         $this->assertTrue(TeacherPlanTier::PRO->allowsWhatsappParentAlerts());
 
         $this->assertCount(4, StageType::catalog());

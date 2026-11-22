@@ -3,9 +3,11 @@
 namespace App\Http\Resources\V1;
 
 use App\Enums\StudentPlanTier;
+use App\Enums\TeacherPlanTier;
 use App\Enums\UserRole;
 use App\Http\Resources\BaseJsonResource;
 use App\Services\V1\Student\StudentBillingService;
+use App\Services\V1\Teacher\TeacherBillingService;
 use Illuminate\Http\Request;
 
 class UserResource extends BaseJsonResource
@@ -21,6 +23,12 @@ class UserResource extends BaseJsonResource
             ? app(StudentBillingService::class)->resolveActivePlanTier($this->resource)
             : null;
 
+        $teacherPlan = $this->role === UserRole::TEACHER
+            ? app(TeacherBillingService::class)->resolveActivePlanTier($this->resource)
+            : null;
+
+        $activePlan = $studentPlan ?? $teacherPlan;
+
         return [
             'id' => $this->id,
             'name' => $this->name,
@@ -34,10 +42,17 @@ class UserResource extends BaseJsonResource
             'phone' => $this->phone,
             'avatar' => $this->avatar,
             'student_code' => $this->when($this->role === UserRole::STUDENT || $this->student_code !== null, $this->student_code),
-            'plan_tier' => $this->when($studentPlan instanceof StudentPlanTier, fn () => $studentPlan->value),
-            'plan_name_ar' => $this->when($studentPlan instanceof StudentPlanTier, fn () => $studentPlan->labelAr()),
-            'plan_name_en' => $this->when($studentPlan instanceof StudentPlanTier, fn () => $studentPlan->labelEn()),
-            'unlocked_features' => $this->when($studentPlan instanceof StudentPlanTier, fn () => $studentPlan->unlockedFeatures()),
+            'plan_tier' => $this->when($activePlan !== null, fn () => $activePlan->value),
+            'plan_name_ar' => $this->when($activePlan !== null, fn () => $activePlan->labelAr()),
+            'plan_name_en' => $this->when($activePlan !== null, fn () => $activePlan->labelEn()),
+            'unlocked_features' => $this->when(
+                $activePlan instanceof StudentPlanTier || $activePlan instanceof TeacherPlanTier,
+                fn () => $activePlan->unlockedFeatures()
+            ),
+            'plan_quotas' => $this->when(
+                $teacherPlan instanceof TeacherPlanTier,
+                fn () => $teacherPlan->quotas()
+            ),
             'linked_children' => $this->when(
                 $this->role === UserRole::PARENT,
                 fn () => $this->children()->get(['users.id', 'users.name', 'users.email', 'users.student_code', 'users.avatar'])->map(fn ($child) => [
