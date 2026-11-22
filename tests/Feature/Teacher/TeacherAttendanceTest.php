@@ -282,4 +282,50 @@ class TeacherAttendanceTest extends TestCase
             'level' => 'warning',
         ]);
     }
+
+    public function test_roster_hydrates_date_attendance_and_scan_works_by_student_code_and_custom_date(): void
+    {
+        $teacher = $this->createTeacher('teacher.date.attend@motafawweq.com');
+        $group = $this->createGroup($teacher);
+        $studentA = $this->createStudent('كريم وليد', 'karim.attend@motafawweq.com');
+        $studentB = $this->createStudent('مريم خالد', 'mariam.attend@motafawweq.com');
+        $enrollA = $this->enrollStudent($group, $studentA, 'BC-KARIM-01', '1122');
+        $enrollB = $this->enrollStudent($group, $studentB, 'BC-MARIAM-02', '3344');
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        $targetDate = '2026-11-20';
+
+        // Scan Student A using user student_code on custom date
+        $scanRes = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/attendance/scan", [
+            'code' => $studentA->student_code,
+            'method' => AttendanceRecordMethod::BARCODE_INPUT->value,
+            'date' => $targetDate,
+        ]);
+        $scanRes->assertOk()
+            ->assertJsonPath('data.alreadyRecorded', false)
+            ->assertJsonPath('data.record.status', AttendanceStatus::PRESENT->value);
+
+        // Mark Student B absent on same date
+        $toggleRes = $this->postJson("/api/v1/teacher/groups/{$group->uuid}/attendance/toggle", [
+            'enrollment_id' => $enrollB->uuid,
+            'status' => AttendanceStatus::ABSENT->value,
+            'date' => $targetDate,
+        ]);
+        $toggleRes->assertOk()
+            ->assertJsonPath('data.status', AttendanceStatus::ABSENT->value);
+        $this->assertEquals(0, $enrollB->fresh()->streak_days);
+
+        // Roster for that date returns live per-student attendance status and counts
+        $rosterRes = $this->getJson("/api/v1/teacher/groups/{$group->uuid}/roster?date={$targetDate}");
+        $rosterRes->assertOk()
+            ->assertJsonPath('data.stats.attendanceDate', $targetDate)
+            ->assertJsonPath('data.stats.todayPresentCount', 1)
+            ->assertJsonPath('data.stats.todayAbsentCount', 1)
+            ->assertJsonPath('data.stats.todayUnmarkedCount', 0);
+
+        $enrolledByUuid = collect($rosterRes->json('data.enrolled'))->keyBy('id');
+        $this->assertEquals('present', $enrolledByUuid[$enrollA->uuid]['todayAttendanceStatus']);
+        $this->assertEquals('absent', $enrolledByUuid[$enrollB->uuid]['todayAttendanceStatus']);
+    }
 }

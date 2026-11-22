@@ -93,6 +93,14 @@ class StoreStudyGroupRequest extends BaseApiRequest
             'scheduleSlots.*.startTime' => ['required_with:scheduleSlots', 'string', 'regex:/^\d{1,2}:\d{2}$/'],
             'scheduleSlots.*.endTime' => ['required_with:scheduleSlots', 'string', 'regex:/^\d{1,2}:\d{2}$/'],
             'scheduleSlots.*.hall' => ['nullable', 'string', 'max:100'],
+            'slots.*.day_of_week' => ['required_without:slots.*.day', 'nullable', 'string', Rule::in(DayOfWeek::values())],
+            'slots.*.day' => ['required_without:slots.*.day_of_week', 'nullable', 'string', Rule::in(DayOfWeek::values())],
+            'slots.*.start_time' => ['required_without:slots.*.startTime', 'nullable', 'string', 'regex:/^\d{1,2}:\d{2}$/'],
+            'slots.*.startTime' => ['required_without:slots.*.start_time', 'nullable', 'string', 'regex:/^\d{1,2}:\d{2}$/'],
+            'slots.*.end_time' => ['required_without:slots.*.endTime', 'nullable', 'string', 'regex:/^\d{1,2}:\d{2}$/'],
+            'slots.*.endTime' => ['required_without:slots.*.end_time', 'nullable', 'string', 'regex:/^\d{1,2}:\d{2}$/'],
+            'slots.*.hall_name' => ['nullable', 'string', 'max:100'],
+            'slots.*.hall' => ['nullable', 'string', 'max:100'],
         ];
     }
 }

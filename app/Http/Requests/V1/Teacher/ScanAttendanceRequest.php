@@ -17,6 +17,7 @@ class ScanAttendanceRequest extends BaseApiRequest
     {
         $code = $this->input('code') ?? $this->input('barcode') ?? $this->input('token') ?? $this->input('passcode');
         $method = $this->input('method') ?? 'qr_scan';
+        $date = $this->input('date');
         $notes = $this->input('notes');
 
         $merged = [];
@@ -25,6 +26,9 @@ class ScanAttendanceRequest extends BaseApiRequest
         }
         if ($method !== null) {
             $merged['method'] = strtolower(trim((string) $method));
+        }
+        if ($date !== null && trim((string) $date) !== '') {
+            $merged['date'] = trim((string) $date);
         }
         if ($notes !== null) {
             $merged['notes'] = trim(strip_tags((string) $notes));
@@ -40,6 +44,7 @@ class ScanAttendanceRequest extends BaseApiRequest
         return [
             'code' => ['required', 'string', 'min:1', 'max:255'],
             'method' => ['nullable', 'string', Rule::in(AttendanceRecordMethod::values())],
+            'date' => ['nullable', 'date_format:Y-m-d'],
             'notes' => ['nullable', 'string', 'max:255'],
         ];
     }

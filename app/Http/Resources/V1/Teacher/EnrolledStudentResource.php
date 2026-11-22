@@ -54,6 +54,8 @@ class EnrolledStudentResource extends BaseJsonResource
             'statusLabelAr' => $academicEnum->labelAr(),
             'studentBarcode' => $this->student_barcode,
             'studentPasscode' => $this->student_passcode,
+            'todayAttendanceStatus' => $this->getAttribute('today_attendance_status'),
+            'todayScannedAt' => $this->formatDate($this->getAttribute('today_scanned_at')),
             'avatar' => $student?->avatar ?: null,
             'enrolledAt' => $this->formatDate($this->enrolled_at),
         ];

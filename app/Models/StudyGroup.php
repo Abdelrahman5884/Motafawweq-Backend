@@ -106,7 +106,7 @@ class StudyGroup extends Model
         do {
             $suffix = random_int(1000, 9999);
             $code = "{$cleanPrefix}-{$suffix}";
-        } while (static::where('join_code', $code)->exists());
+        } while (static::withTrashed()->where('join_code', $code)->exists());
 
         return $code;
     }

@@ -27,7 +27,8 @@ class TeacherAttendanceController extends BaseApiController
             $groupUuid,
             $request->validated('code'),
             $request->validated('method') ?? 'qr_scan',
-            $request->validated('notes')
+            $request->validated('notes'),
+            $request->validated('date')
         );
 
         return $this->successResponse(

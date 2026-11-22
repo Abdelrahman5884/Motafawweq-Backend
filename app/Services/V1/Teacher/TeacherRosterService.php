@@ -3,6 +3,7 @@
 namespace App\Services\V1\Teacher;
 
 use App\Enums\AcademicStatus;
+use App\Enums\AttendanceStatus;
 use App\Enums\EnrollmentStatus;
 use App\Enums\ExamSubmissionStatus;
 use App\Enums\JoinMethod;
@@ -10,6 +11,8 @@ use App\Enums\TeacherPlanTier;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\ExamSubmission;
+use App\Models\GroupAttendanceRecord;
+use App\Models\GroupAttendanceSession;
 use App\Models\GroupEnrollment;
 use App\Models\StudentProfile;
 use App\Models\StudyGroup;
@@ -38,12 +41,26 @@ class TeacherRosterService extends BaseService
      *
      * @return array{group: StudyGroup, enrolled: Collection, pending: Collection, stats: array<string, mixed>}
      */
-    public function getRoster(User $teacher, string $groupUuid, ?string $search = null): array
+    public function getRoster(User $teacher, string $groupUuid, ?string $search = null, ?string $attendanceDate = null): array
     {
         $group = $this->groupRepository->findByUuidForTeacher($groupUuid, $teacher);
 
         $enrolled = $this->enrollmentRepository->getEnrolledForGroup($group->id, $search);
         $pending = $this->enrollmentRepository->getPendingForGroup($group->id, $search);
+
+        $targetDate = $attendanceDate ?: now()->toDateString();
+        $dateSession = GroupAttendanceSession::where('study_group_id', $group->id)
+            ->whereDate('session_date', $targetDate)
+            ->first();
+
+        $dateRecordsByEnrollment = $dateSession
+            ? GroupAttendanceRecord::where('attendance_session_id', $dateSession->id)
+                ->get(['group_enrollment_id', 'status', 'scanned_at'])
+                ->keyBy('group_enrollment_id')
+            : collect();
+
+        $todayPresentCount = 0;
+        $todayAbsentCount = 0;
 
         $studentIds = $enrolled->pluck('student_id')->filter()->unique()->values()->all();
         if (! empty($studentIds)) {
@@ -81,10 +98,23 @@ class TeacherRosterService extends BaseService
                     default => ($item->academic_status instanceof AcademicStatus ? $item->academic_status->value : AcademicStatus::GOOD->value),
                 };
 
+                $dateRec = $dateRecordsByEnrollment->get($item->id);
+                $todayStatusVal = $dateRec
+                    ? ($dateRec->status instanceof AttendanceStatus ? $dateRec->status->value : (string) $dateRec->status)
+                    : null;
+
+                if (in_array($todayStatusVal, [AttendanceStatus::PRESENT->value, AttendanceStatus::LATE->value], true)) {
+                    $todayPresentCount++;
+                } elseif (in_array($todayStatusVal, [AttendanceStatus::ABSENT->value, AttendanceStatus::EXCUSED->value], true)) {
+                    $todayAbsentCount++;
+                }
+
                 $item->setAttribute('live_streak_days', $liveStreak);
                 $item->setAttribute('live_avg_quiz_score', $liveAvgQuiz);
                 $item->setAttribute('live_graded_exams_count', $gradedCount);
                 $item->setAttribute('live_academic_status', $liveStatus);
+                $item->setAttribute('today_attendance_status', $todayStatusVal);
+                $item->setAttribute('today_scanned_at', $dateRec?->scanned_at);
             }
         }
 
@@ -103,6 +133,10 @@ class TeacherRosterService extends BaseService
                 'maxStudents' => (int) $group->max_students,
                 'isFull' => $totalEnrolled >= $group->max_students,
                 'avgAttendanceRate' => $avgAttendance,
+                'attendanceDate' => $targetDate,
+                'todayPresentCount' => $todayPresentCount,
+                'todayAbsentCount' => $todayAbsentCount,
+                'todayUnmarkedCount' => max(0, $totalEnrolled - $todayPresentCount - $todayAbsentCount),
             ],
         ];
     }

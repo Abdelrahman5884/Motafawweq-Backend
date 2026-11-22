@@ -62,7 +62,7 @@ class TeacherStudyGroupService extends BaseService
             $joinCode = null;
             if (! empty($data['join_code']) || ! empty($data['joinCode'])) {
                 $rawCode = strtoupper(trim((string) ($data['join_code'] ?? $data['joinCode'])));
-                if (! StudyGroup::where('join_code', $rawCode)->exists()) {
+                if (! StudyGroup::withTrashed()->where('join_code', $rawCode)->exists()) {
                     $joinCode = $rawCode;
                 }
             }
@@ -199,7 +199,10 @@ class TeacherStudyGroupService extends BaseService
                 'changes' => array_keys($fillableData),
             ], 'info', $group);
 
-            return $group->fresh(['scheduleSlots']);
+            return $group->fresh(['scheduleSlots'])?->loadCount([
+                'enrolledEnrollments as enrolled_count',
+                'pendingEnrollments as pending_count',
+            ]) ?? $group;
         });
     }
 
@@ -244,7 +247,10 @@ class TeacherStudyGroupService extends BaseService
                 'new_code' => $newCode,
             ], 'info', $group);
 
-            return $group->fresh(['scheduleSlots']);
+            return $group->fresh(['scheduleSlots'])?->loadCount([
+                'enrolledEnrollments as enrolled_count',
+                'pendingEnrollments as pending_count',
+            ]) ?? $group;
         });
     }
 
@@ -440,7 +446,11 @@ class TeacherStudyGroupService extends BaseService
     {
         $groupsQuery = StudyGroup::forTeacher($teacher->id)
             ->where('status', 'active')
-            ->with(['scheduleSlots']);
+            ->with(['scheduleSlots'])
+            ->withCount([
+                'enrolledEnrollments as enrolled_count',
+                'pendingEnrollments as pending_count',
+            ]);
 
         if ($centerFilter && $centerFilter !== 'all') {
             $groupsQuery->where('center_name', $centerFilter);
@@ -472,7 +482,7 @@ class TeacherStudyGroupService extends BaseService
             5 => 'friday',
             6 => 'saturday',
         ];
-        $todayKey = $todayDayMap[date('w')];
+        $todayKey = $todayDayMap[now()->dayOfWeek] ?? 'saturday';
 
         $days = [];
         $totalSessions = 0;
@@ -497,6 +507,8 @@ class TeacherStudyGroupService extends BaseService
                             'startTime' => $slot->start_time,
                             'endTime' => $slot->end_time,
                             'joinCode' => $group->join_code,
+                            'enrolledCount' => (int) ($group->enrolled_count ?? 0),
+                            'pendingCount' => (int) ($group->pending_count ?? 0),
                         ];
                     }
                 }

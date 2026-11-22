@@ -33,7 +33,8 @@ class TeacherAttendanceService extends BaseService
         string $groupUuid,
         string $codeOrToken,
         string $method = 'qr_scan',
-        ?string $notes = null
+        ?string $notes = null,
+        ?string $date = null
     ): array {
         // Enforce ownership BEFORE opening transaction
         $group = $this->groupRepository->findByUuidForTeacher($groupUuid, $teacher);
@@ -45,8 +46,8 @@ class TeacherAttendanceService extends BaseService
             ]);
         }
 
-        $today = now()->toDateString();
-        $session = $this->getOrCreateSessionForGroup($group, $teacher, $today);
+        $targetDate = $date ? Carbon::parse($date)->toDateString() : now()->toDateString();
+        $session = $this->getOrCreateSessionForGroup($group, $teacher, $targetDate);
 
         return $this->transaction(function () use ($teacher, $group, $session, $enrollment, $method, $notes) {
             /** @var GroupAttendanceRecord|null $existingRecord */
@@ -115,8 +116,13 @@ class TeacherAttendanceService extends BaseService
 
         /** @var GroupEnrollment|null $enrollment */
         $enrollment = GroupEnrollment::where('study_group_id', $group->id)
-            ->where('uuid', $enrollmentUuid)
             ->where('status', EnrollmentStatus::ENROLLED->value)
+            ->where(function ($q) use ($enrollmentUuid) {
+                $q->where('uuid', $enrollmentUuid);
+                if (is_numeric($enrollmentUuid)) {
+                    $q->orWhere('student_id', (int) $enrollmentUuid);
+                }
+            })
             ->first();
 
         if (! $enrollment) {
@@ -359,23 +365,26 @@ class TeacherAttendanceService extends BaseService
             return $this->resolveEnrollmentByCode($group, $subCode);
         }
 
-        // 5. Match by student_code on User model
+        // 5. Match by student_code or phone on User model / enrollment override
         $enrollment = GroupEnrollment::where('study_group_id', $group->id)
             ->where('status', EnrollmentStatus::ENROLLED->value)
-            ->whereHas('student', function ($sq) use ($clean) {
-                $sq->where('student_code', $clean)
-                    ->orWhere('phone', $clean);
+            ->where(function ($q) use ($clean, $trimmed) {
+                $q->where('student_phone_override', $trimmed)
+                    ->orWhereHas('student', function ($sq) use ($clean, $trimmed) {
+                        $sq->whereRaw('UPPER(student_code) = ?', [$clean])
+                            ->orWhere('phone', $trimmed);
+                    });
             })
             ->first();
         if ($enrollment) {
             return $enrollment;
         }
 
-        // 6. Match by enrollment UUID or student ID
+        // 6. Match by enrollment UUID (case-insensitive) or student ID
         return GroupEnrollment::where('study_group_id', $group->id)
             ->where('status', EnrollmentStatus::ENROLLED->value)
-            ->where(function ($q) use ($clean) {
-                $q->where('uuid', $clean)
+            ->where(function ($q) use ($trimmed, $clean) {
+                $q->where('uuid', strtolower($trimmed))
                     ->orWhere('student_id', is_numeric($clean) ? (int) $clean : 0);
             })
             ->first();
@@ -420,7 +429,7 @@ class TeacherAttendanceService extends BaseService
             'attended_sessions' => $attendedCount,
             'total_sessions' => $totalSessionsCount,
             'attendance_rate' => min(100, max(0, $rate)),
-            'streak_days' => max(1, $streak),
+            'streak_days' => $streak,
         ]);
     }
 }

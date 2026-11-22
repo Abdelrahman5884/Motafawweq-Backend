@@ -25,10 +25,16 @@ class TeacherRosterController extends BaseApiController
      */
     public function show(Request $request, string $groupUuid): JsonResponse
     {
+        $dateParam = $request->query('date');
+        $cleanDate = is_string($dateParam) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($dateParam))
+            ? trim($dateParam)
+            : null;
+
         $roster = $this->rosterService->getRoster(
             $this->authenticatedUser(),
             $groupUuid,
-            $request->query('q') ?? $request->query('search')
+            $request->query('q') ?? $request->query('search'),
+            $cleanDate
         );
 
         return $this->successResponse(
