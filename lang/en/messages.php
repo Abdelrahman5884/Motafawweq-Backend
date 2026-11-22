@@ -104,8 +104,9 @@ return [
     'teacher_settings_fetched' => 'Teacher profile and settings retrieved successfully.',
     'teacher_settings_updated' => 'All teacher profile changes and settings updated successfully.',
     'teacher_stages_updated' => 'Curriculum stages and grades updated successfully.',
-    'teacher_preferences_updated' => 'Appearance, language, and alert preferences updated successfully.',
+    'teacher_preferences_updated' => 'Appearance and language preferences updated successfully.',
     'teacher_avatar_updated' => 'Verified educator portrait updated successfully.',
+    'teacher_avatar_deleted' => 'Profile picture removed successfully.',
     'invalid_image_signature' => 'The uploaded file is not a valid image or its signature is unsupported.',
 
     // Stage 3: Encrypted Payout Accounts

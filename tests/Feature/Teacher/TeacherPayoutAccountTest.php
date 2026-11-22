@@ -3,11 +3,13 @@
 namespace Tests\Feature\Teacher;
 
 use App\Enums\PayoutAccountType;
+use App\Enums\TeacherPlanTier;
 use App\Enums\TokenType;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\SecurityAuditLog;
 use App\Models\TeacherPayoutAccount;
+use App\Models\TeacherProfile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +29,11 @@ class TeacherPayoutAccountTest extends TestCase
             'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
+
+        TeacherProfile::create([
+            'user_id' => $teacher->id,
+            'name_ar' => $teacher->name,
+        ])->forceFill(['plan_tier' => TeacherPlanTier::PLUS])->save();
 
         $token = $teacher->createToken('test-device', [TokenType::ACCESS->value])->plainTextToken;
 

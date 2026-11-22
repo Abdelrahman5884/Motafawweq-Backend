@@ -44,6 +44,9 @@ class TeacherSettingsTest extends TestCase
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.nameAr', 'د. سلمى السيد')
             ->assertJsonPath('data.email', 'salma.biology@motafawweq.me')
+            ->assertJsonPath('data.emailVerified', true)
+            ->assertJsonPath('data.avatar', null)
+            ->assertJsonCount(0, 'data.payoutMethods')
             ->assertJsonCount(4, 'data.stagesCatalog')
             ->assertJsonCount(4, 'data.stagesTaught');
 
@@ -51,6 +54,7 @@ class TeacherSettingsTest extends TestCase
             'user_id' => $teacher->id,
             'name_ar' => 'د. سلمى السيد',
         ]);
+        $this->assertDatabaseCount('teacher_payout_accounts', 0);
     }
 
     public function test_student_or_pending_teacher_cannot_access_teacher_settings(): void
@@ -184,5 +188,44 @@ class TeacherSettingsTest extends TestCase
                 'avatar' => $fakeScript,
             ])
             ->assertStatus(422);
+
+        // Teacher can delete uploaded avatar and revert to null (initials fallback)
+        $deleteRes = $this->withHeader('Authorization', "Bearer {$token}")
+            ->deleteJson('/api/v1/teacher/settings/avatar');
+
+        $deleteRes->assertStatus(200)
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.avatar', null);
+
+        $this->assertNull($teacher->fresh()->avatar);
+        $this->assertTrue(
+            SecurityAuditLog::where('user_id', $teacher->id)
+                ->where('event', 'teacher.avatar.deleted')
+                ->exists()
+        );
+    }
+
+    public function test_teacher_can_update_theme_and_language_preferences_and_clear_nullable_fields(): void
+    {
+        [$teacher, $token] = $this->createAuthenticatedTeacher();
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->putJson('/api/v1/teacher/settings/preferences', [
+                'preferred_theme' => 'dark',
+                'preferred_lang' => 'en',
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('data.preferredTheme', 'dark')
+            ->assertJsonPath('data.preferredLang', 'en');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->putJson('/api/v1/teacher/settings/profile', [
+                'name_ar' => 'د. سلمى السيد',
+                'bio_ar' => '',
+                'phone' => '',
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('data.bioAr', null)
+            ->assertJsonPath('data.phone', null);
     }
 }

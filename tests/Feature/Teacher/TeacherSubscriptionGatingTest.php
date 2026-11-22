@@ -182,6 +182,7 @@ class TeacherSubscriptionGatingTest extends TestCase
             '/api/v1/teacher/leagues',
             '/api/v1/teacher/certificates',
             '/api/v1/teacher/financials',
+            '/api/v1/teacher/payout-accounts',
         ] as $endpoint) {
             $this->getJson($endpoint)
                 ->assertForbidden()

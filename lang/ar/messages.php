@@ -104,8 +104,9 @@ return [
     'teacher_settings_fetched' => 'تم جلب إعدادات وملف المعلم بنجاح',
     'teacher_settings_updated' => 'تم حفظ كافة تعديلات ملف المعلم وتحديث الإعدادات بنجاح',
     'teacher_stages_updated' => 'تم تحديث المراحل والصفوف الدراسية المعتمدة بنجاح',
-    'teacher_preferences_updated' => 'تم تحديث تفضيلات المظهر واللغة والتنبيهات بنجاح',
+    'teacher_preferences_updated' => 'تم تحديث تفضيلات المظهر واللغة بنجاح',
     'teacher_avatar_updated' => 'تم تحديث الصورة الشخصية المعتمدة بنجاح',
+    'teacher_avatar_deleted' => 'تم حذف الصورة الشخصية بنجاح',
     'invalid_image_signature' => 'الملف المرفوع ليس صورة صالحة أو أن صيغته غير مدعومة.',
 
     // Stage 3: Encrypted Payout Accounts

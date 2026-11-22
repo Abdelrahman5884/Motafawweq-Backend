@@ -18,11 +18,13 @@ class TeacherSettingsResource extends BaseJsonResource
     public function toArray(Request $request): array
     {
         $user = $this->user;
-        $payoutAccounts = $user?->teacherPayoutAccounts ?? collect();
-        $defaultAccount = $payoutAccounts->firstWhere('is_default', true) ?? $payoutAccounts->first();
         $resolvedTier = $user
             ? app(TeacherBillingService::class)->resolveActivePlanTier($user)
             : ($this->plan_tier ?? TeacherPlanTier::FREE);
+        $allowsFinancials = $resolvedTier->allowsFinancials();
+        $payoutAccounts = $allowsFinancials ? ($user?->teacherPayoutAccounts ?? collect()) : collect();
+        $defaultAccount = $payoutAccounts->firstWhere('is_default', true) ?? $payoutAccounts->first();
+        $avatar = $user?->avatar ?: null;
 
         return [
             'id' => $this->uuid,
@@ -36,12 +38,13 @@ class TeacherSettingsResource extends BaseJsonResource
             'subjectAr' => $this->subject_ar,
             'subjectEn' => $this->subject_en,
             'email' => $user?->email,
+            'emailVerified' => $user?->email_verified_at !== null,
             'phone' => $this->whatsapp_phone ?? $user?->phone,
             'bioAr' => $this->bio_ar,
             'bioEn' => $this->bio_en,
-            'avatar' => $user?->avatar ?? 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80',
-            'avatarUrl' => $user?->avatar ?? 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80',
-            'avatar_url' => $user?->avatar ?? 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80',
+            'avatar' => $avatar,
+            'avatarUrl' => $avatar,
+            'avatar_url' => $avatar,
             'isVerifiedEducator' => (bool) $this->is_verified_educator,
             'planTier' => $resolvedTier->value,
             'planLabel' => $resolvedTier->label(),
@@ -54,11 +57,11 @@ class TeacherSettingsResource extends BaseJsonResource
             'stagesTaught' => $this->stages_taught ?? [],
             'stagesCatalog' => StageType::catalog(),
 
-            // Direct Student Receiving Accounts (Encrypted at Rest)
+            // Direct Student Receiving Accounts (Encrypted at Rest — Plus & Pro)
             'defaultPayout' => $defaultAccount?->uuid,
             'payoutMethods' => TeacherPayoutAccountResource::collection($payoutAccounts)->resolve($request),
 
-            // Security & Preferences
+            // Preferences
             'twoFactorEnabled' => (bool) $this->two_factor_enabled,
             'notifyWhatsappIntervention' => (bool) $this->notify_whatsapp_intervention,
             'notifyNewEnrollment' => (bool) $this->notify_new_enrollment,

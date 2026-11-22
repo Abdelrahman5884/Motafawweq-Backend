@@ -23,6 +23,7 @@ class TeacherPayoutAccountResource extends BaseJsonResource
 
         return array_filter([
             'id' => $this->uuid,
+            'uuid' => $this->uuid,
             'type' => $type?->value ?? (string) $this->type,
             'labelAr' => $this->label_ar,
             'labelEn' => $this->label_en,

@@ -345,10 +345,11 @@ Route::prefix('v1')->group(function () {
                     Route::put('/preferences', [TeacherSettingsController::class, 'updatePreferences']);
                     Route::post('/avatar', [TeacherSettingsController::class, 'uploadAvatar'])
                         ->middleware('throttle:teacher-uploads');
+                    Route::delete('/avatar', [TeacherSettingsController::class, 'deleteAvatar']);
                 });
 
-                // Stage 3: Encrypted Payout & Direct Receiving Accounts
-                Route::prefix('payout-accounts')->group(function () {
+                // Stage 3: Encrypted Payout & Direct Receiving Accounts (Plus & Pro)
+                Route::prefix('payout-accounts')->middleware('teacher.plan:financials')->group(function () {
                     Route::get('/', [TeacherPayoutAccountController::class, 'index']);
 
                     Route::middleware('throttle:financial-mutation')->group(function () {

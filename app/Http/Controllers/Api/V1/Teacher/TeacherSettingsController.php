@@ -99,4 +99,18 @@ class TeacherSettingsController extends BaseApiController
             __('messages.teacher_avatar_updated')
         );
     }
+
+    /**
+     * DELETE /api/v1/teacher/settings/avatar
+     * Remove the teacher's uploaded portrait so the UI reverts to initials.
+     */
+    public function deleteAvatar(): JsonResponse
+    {
+        $profile = $this->settingsService->deleteAvatar($this->authenticatedUser());
+
+        return $this->successResponse(
+            new TeacherSettingsResource($profile),
+            __('messages.teacher_avatar_deleted')
+        );
+    }
 }

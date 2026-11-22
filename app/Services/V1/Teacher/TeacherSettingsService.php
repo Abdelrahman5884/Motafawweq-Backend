@@ -6,7 +6,6 @@ use App\Enums\StageType;
 use App\Models\StoredFile;
 use App\Models\TeacherProfile;
 use App\Models\User;
-use App\Repositories\Contracts\TeacherPayoutAccountRepositoryInterface;
 use App\Repositories\Contracts\TeacherProfileRepositoryInterface;
 use App\Services\BaseService;
 use finfo;
@@ -14,12 +13,12 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class TeacherSettingsService extends BaseService
 {
     public function __construct(
-        protected TeacherProfileRepositoryInterface $profileRepository,
-        protected TeacherPayoutAccountRepositoryInterface $payoutRepository
+        protected TeacherProfileRepositoryInterface $profileRepository
     ) {}
 
     /**
@@ -28,13 +27,12 @@ class TeacherSettingsService extends BaseService
     public function getSettings(User $teacher): TeacherProfile
     {
         $profile = $this->profileRepository->firstOrCreateForTeacher($teacher);
-        $this->payoutRepository->seedDefaultsIfEmpty($teacher);
 
         return $profile->load(['user.teacherPayoutAccounts']);
     }
 
     /**
-     * Update full or partial teacher settings (profile, stages, preferences, security toggles).
+     * Update full or partial teacher settings (profile, stages, preferences).
      * Accepts both camelCase (frontend state) and snake_case keys.
      */
     public function updateSettings(User $teacher, array $data): TeacherProfile
@@ -48,42 +46,34 @@ class TeacherSettingsService extends BaseService
             // 1. Personal & Academic Identity
             if (array_key_exists('nameAr', $data) || array_key_exists('name_ar', $data)) {
                 $nameAr = trim((string) ($data['nameAr'] ?? $data['name_ar']));
-                $profileUpdates['name_ar'] = $nameAr;
-                $userUpdates['name'] = $nameAr;
+                if ($nameAr !== '') {
+                    $profileUpdates['name_ar'] = $nameAr;
+                    $userUpdates['name'] = $nameAr;
+                }
             }
 
-            if (array_key_exists('nameEn', $data) || array_key_exists('name_en', $data)) {
-                $profileUpdates['name_en'] = trim((string) ($data['nameEn'] ?? $data['name_en']));
-            }
+            $nullableStringFields = [
+                'name_en' => ['nameEn', 'name_en'],
+                'title_ar' => ['titleAr', 'title_ar'],
+                'title_en' => ['titleEn', 'title_en'],
+                'subject_ar' => ['subjectAr', 'subject_ar'],
+                'subject_en' => ['subjectEn', 'subject_en'],
+                'bio_ar' => ['bioAr', 'bio_ar'],
+                'bio_en' => ['bioEn', 'bio_en'],
+            ];
 
-            if (array_key_exists('titleAr', $data) || array_key_exists('title_ar', $data)) {
-                $profileUpdates['title_ar'] = trim((string) ($data['titleAr'] ?? $data['title_ar']));
-            }
-
-            if (array_key_exists('titleEn', $data) || array_key_exists('title_en', $data)) {
-                $profileUpdates['title_en'] = trim((string) ($data['titleEn'] ?? $data['title_en']));
-            }
-
-            if (array_key_exists('subjectAr', $data) || array_key_exists('subject_ar', $data)) {
-                $profileUpdates['subject_ar'] = trim((string) ($data['subjectAr'] ?? $data['subject_ar']));
-            }
-
-            if (array_key_exists('subjectEn', $data) || array_key_exists('subject_en', $data)) {
-                $profileUpdates['subject_en'] = trim((string) ($data['subjectEn'] ?? $data['subject_en']));
-            }
-
-            if (array_key_exists('bioAr', $data) || array_key_exists('bio_ar', $data)) {
-                $profileUpdates['bio_ar'] = trim((string) ($data['bioAr'] ?? $data['bio_ar']));
-            }
-
-            if (array_key_exists('bioEn', $data) || array_key_exists('bio_en', $data)) {
-                $profileUpdates['bio_en'] = trim((string) ($data['bioEn'] ?? $data['bio_en']));
+            foreach ($nullableStringFields as $column => [$camelKey, $snakeKey]) {
+                if (array_key_exists($camelKey, $data) || array_key_exists($snakeKey, $data)) {
+                    $val = trim((string) ($data[$camelKey] ?? $data[$snakeKey] ?? ''));
+                    $profileUpdates[$column] = $val !== '' ? $val : null;
+                }
             }
 
             if (array_key_exists('phone', $data) || array_key_exists('whatsapp_phone', $data)) {
-                $phone = trim((string) ($data['phone'] ?? $data['whatsapp_phone']));
-                $profileUpdates['whatsapp_phone'] = $phone;
-                $userUpdates['phone'] = $phone;
+                $phone = trim((string) ($data['phone'] ?? $data['whatsapp_phone'] ?? ''));
+                $normalizedPhone = $phone !== '' ? $phone : null;
+                $profileUpdates['whatsapp_phone'] = $normalizedPhone;
+                $userUpdates['phone'] = $normalizedPhone;
             }
 
             if (array_key_exists('email', $data)) {
@@ -153,7 +143,7 @@ class TeacherSettingsService extends BaseService
                 $profile
             );
 
-            return $profile->fresh(['user']);
+            return $profile->fresh(['user.teacherPayoutAccounts']);
         });
     }
 
@@ -166,7 +156,7 @@ class TeacherSettingsService extends BaseService
     }
 
     /**
-     * Update only interface & alert preferences.
+     * Update only interface preferences.
      */
     public function updatePreferences(User $teacher, array $preferences): TeacherProfile
     {
@@ -199,15 +189,33 @@ class TeacherSettingsService extends BaseService
             $profile = $this->profileRepository->firstOrCreateForTeacher($teacher);
 
             $extension = $allowedMimes[$detectedMime];
+            $binary = file_get_contents($file->getRealPath());
             $disk = $this->getAvatarDisk();
             $filename = ($disk === 'supabase')
                 ? 'users/profiles/'.$teacher->id.'_'.Str::uuid().'.'.$extension
                 : 'avatars/teachers/'.Str::uuid().'.'.$extension;
 
-            Storage::disk($disk)->put($filename, file_get_contents($file->getRealPath()));
+            $stored = false;
+            try {
+                $stored = (bool) Storage::disk($disk)->put($filename, $binary);
+            } catch (Throwable) {
+                $stored = false;
+            }
 
-            // Clean up previous local avatar if it was stored on public disk
-            $this->deleteOldLocalAvatar($teacher->avatar);
+            // Graceful fallback to local public disk if remote storage fails
+            if (! $stored && $disk === 'supabase') {
+                $disk = 'public';
+                $filename = 'avatars/teachers/'.Str::uuid().'.'.$extension;
+                $stored = (bool) Storage::disk('public')->put($filename, $binary);
+            }
+
+            if (! $stored) {
+                throw ValidationException::withMessages([
+                    'avatar' => [__('messages.general_error')],
+                ]);
+            }
+
+            $this->cleanupExistingAvatarFiles($teacher);
 
             $publicUrl = ($disk === 'supabase' && method_exists(Storage::disk($disk), 'temporaryUrl'))
                 ? Storage::disk($disk)->temporaryUrl($filename, now()->addDays(7))
@@ -234,13 +242,36 @@ class TeacherSettingsService extends BaseService
                 [
                     'mime_type' => $detectedMime,
                     'size' => $file->getSize(),
+                    'disk' => $disk,
                     'path' => $filename,
                 ],
                 'info',
                 $profile
             );
 
-            return $profile->fresh(['user']);
+            return $profile->fresh(['user.teacherPayoutAccounts']);
+        });
+    }
+
+    /**
+     * Remove the teacher's uploaded avatar image so the UI reverts to initials.
+     */
+    public function deleteAvatar(User $teacher): TeacherProfile
+    {
+        return $this->transaction(function () use ($teacher) {
+            $profile = $this->profileRepository->firstOrCreateForTeacher($teacher);
+
+            $this->cleanupExistingAvatarFiles($teacher);
+            $teacher->update(['avatar' => null]);
+
+            $this->logSecurityEvent(
+                'teacher.avatar.deleted',
+                [],
+                'info',
+                $profile
+            );
+
+            return $profile->fresh(['user.teacherPayoutAccounts']);
         });
     }
 
@@ -295,6 +326,27 @@ class TeacherSettingsService extends BaseService
         }
 
         return config('filesystems.disks.supabase.key') ? 'supabase' : 'public';
+    }
+
+    protected function cleanupExistingAvatarFiles(User $teacher): void
+    {
+        $this->deleteOldLocalAvatar($teacher->avatar);
+
+        $previousFiles = StoredFile::where('user_id', $teacher->id)
+            ->where('entity_type', 'user_avatar')
+            ->get();
+
+        foreach ($previousFiles as $storedFile) {
+            try {
+                if ($storedFile->storage_disk && $storedFile->storage_path) {
+                    Storage::disk($storedFile->storage_disk)->delete($storedFile->storage_path);
+                }
+            } catch (Throwable) {
+                // Ignore remote cleanup failures so profile update never blocks
+            }
+
+            $storedFile->delete();
+        }
     }
 
     protected function deleteOldLocalAvatar(?string $oldAvatarUrl): void
