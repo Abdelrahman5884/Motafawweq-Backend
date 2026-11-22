@@ -30,6 +30,12 @@ class TeacherLeagueService extends BaseService
      */
     public function listLeagues(User $teacher, array $filters = []): Collection
     {
+        CourseLeague::forTeacher($teacher->id)
+            ->where('is_active', true)
+            ->whereNotNull('ends_at')
+            ->where('ends_at', '<', Carbon::now())
+            ->update(['is_active' => false]);
+
         return $this->leagueRepository->getForTeacher($teacher->id, $filters);
     }
 
@@ -39,6 +45,10 @@ class TeacherLeagueService extends BaseService
     public function getLeague(User $teacher, string $uuid): CourseLeague
     {
         $league = $this->leagueRepository->findByUuidForTeacher($uuid, $teacher);
+
+        if ($league->is_active && $league->ends_at && $league->ends_at->isPast()) {
+            $league->update(['is_active' => false]);
+        }
 
         return $league->load(['course', 'studyGroup', 'participants.student']);
     }
@@ -56,10 +66,14 @@ class TeacherLeagueService extends BaseService
             $course = Course::where('uuid', $courseIdentifier)
                 ->orWhere('id', is_numeric($courseIdentifier) ? (int) $courseIdentifier : 0)
                 ->first();
-        }
 
-        if (! $course) {
-            // Fallback to teacher's first course if course_id is empty or was not found
+            if (! $course) {
+                throw ValidationException::withMessages([
+                    'course_id' => ['المقرر الدراسي المحدد غير موجود.'],
+                ]);
+            }
+        } else {
+            // Fallback to teacher's first course if course_id was omitted
             $course = Course::where('teacher_id', $teacher->id)->first();
         }
 
@@ -80,11 +94,15 @@ class TeacherLeagueService extends BaseService
                 ->orWhere('id', is_numeric($groupIdentifier) ? (int) $groupIdentifier : 0)
                 ->first();
 
-            if ($group) {
-                $group->assertOwnedBy($teacher);
-                $studyGroupId = $group->id;
-                $groupNameAr = $group->name_ar;
+            if (! $group) {
+                throw ValidationException::withMessages([
+                    'study_group_id' => ['المجموعة الدراسية المحددة غير موجودة.'],
+                ]);
             }
+
+            $group->assertOwnedBy($teacher);
+            $studyGroupId = $group->id;
+            $groupNameAr = $group->name_ar;
         }
 
         // 3. Compute duration and dates
@@ -119,12 +137,17 @@ class TeacherLeagueService extends BaseService
                 'ends_at' => $endsAt,
             ]);
 
-            // 4. Enroll participants from group/course enrollments
+            // 4. Enroll participants from matching group/course enrollments
             $enrollmentsQuery = GroupEnrollment::where('status', 'enrolled')
-                ->whereHas('group', function ($q) use ($teacher, $studyGroupId) {
+                ->whereHas('group', function ($q) use ($teacher, $studyGroupId, $course) {
                     $q->where('teacher_id', $teacher->id);
                     if ($studyGroupId) {
                         $q->where('id', $studyGroupId);
+                    } else {
+                        $q->where(function ($sub) use ($course) {
+                            $sub->where('course_id', $course->id)
+                                ->orWhereNull('course_id');
+                        });
                     }
                 })
                 ->with(['student', 'group']);
@@ -213,6 +236,11 @@ class TeacherLeagueService extends BaseService
             if (array_key_exists('ends_at', $data) && ! empty($data['ends_at'])) {
                 $endsAt = Carbon::parse($data['ends_at'])->endOfDay();
                 $startsAt = $league->starts_at ? Carbon::parse($league->starts_at) : Carbon::now();
+                if ($endsAt->lt($startsAt->copy()->startOfDay())) {
+                    throw ValidationException::withMessages([
+                        'ends_at' => ['تاريخ انتهاء الدوري يجب أن يكون بعد تاريخ بدايته.'],
+                    ]);
+                }
                 $updates['ends_at'] = $endsAt;
                 $updates['duration_days'] = max(1, (int) $startsAt->diffInDays($endsAt, false));
             }
@@ -253,16 +281,30 @@ class TeacherLeagueService extends BaseService
 
             if ($syncEnrollments) {
                 $enrollments = GroupEnrollment::where('status', 'enrolled')
-                    ->whereHas('group', function ($q) use ($teacher, $newStudyGroupId) {
+                    ->whereHas('group', function ($q) use ($teacher, $newStudyGroupId, $league) {
                         $q->where('teacher_id', $teacher->id);
                         if ($newStudyGroupId) {
                             $q->where('id', $newStudyGroupId);
+                        } elseif ($league->course_id) {
+                            $q->where(function ($sub) use ($league) {
+                                $sub->where('course_id', $league->course_id)
+                                    ->orWhereNull('course_id');
+                            });
                         }
                     })
                     ->with(['group'])
                     ->get();
 
-                $uniqueEnrollments = $enrollments->unique('student_id');
+                $existingStudentIds = LeagueParticipant::withTrashed()
+                    ->where('course_league_id', $league->id)
+                    ->pluck('student_id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+
+                $uniqueEnrollments = $enrollments
+                    ->unique('student_id')
+                    ->filter(fn (GroupEnrollment $e) => ! in_array((int) $e->student_id, $existingStudentIds, true));
+
                 $metricsMap = $this->leagueRulesService->computeMetricsForStudents(
                     $uniqueEnrollments->pluck('student_id')->all(),
                     $teacher->id,
@@ -275,27 +317,23 @@ class TeacherLeagueService extends BaseService
                     $m = $metricsMap[$enrollment->student_id] ?? null;
                     $streakDays = (int) ($m['streakDays'] ?? $enrollment->streak_days ?? 0);
 
-                    LeagueParticipant::firstOrCreate(
-                        [
-                            'course_league_id' => $league->id,
-                            'student_id' => $enrollment->student_id,
-                        ],
-                        [
-                            'rank' => 1,
-                            'previous_rank' => null,
-                            'xp_points' => 0,
-                            'streak_days' => $streakDays,
-                            'badge_title_ar' => 'منافس نشط',
-                            'tier' => LeagueTier::BRONZE->value,
-                            'movement' => 'same',
-                            'school_ar' => $m['schoolAr'] ?: null,
-                            'group_ar' => $enrollment->group?->name_ar ?? ($updates['group_name_ar'] ?? $league->group_name_ar),
-                            'perfect_exams_count' => (int) ($m['perfectExams'] ?? 0),
-                            'exams_solved_count' => (int) ($m['examsSolved'] ?? 0),
-                            'homework_rate' => (int) ($m['homeworkRate'] ?? 0),
-                            'attendance_rate' => (int) ($m['attendanceRate'] ?? $enrollment->attendance_rate ?? 0),
-                        ]
-                    );
+                    LeagueParticipant::create([
+                        'course_league_id' => $league->id,
+                        'student_id' => $enrollment->student_id,
+                        'rank' => 1,
+                        'previous_rank' => null,
+                        'xp_points' => 0,
+                        'streak_days' => $streakDays,
+                        'badge_title_ar' => 'منافس نشط',
+                        'tier' => LeagueTier::BRONZE->value,
+                        'movement' => 'same',
+                        'school_ar' => $m['schoolAr'] ?: null,
+                        'group_ar' => $enrollment->group?->name_ar ?? ($updates['group_name_ar'] ?? $league->group_name_ar),
+                        'perfect_exams_count' => (int) ($m['perfectExams'] ?? 0),
+                        'exams_solved_count' => (int) ($m['examsSolved'] ?? 0),
+                        'homework_rate' => (int) ($m['homeworkRate'] ?? 0),
+                        'attendance_rate' => (int) ($m['attendanceRate'] ?? $enrollment->attendance_rate ?? 0),
+                    ]);
                 }
             }
 
@@ -340,17 +378,19 @@ class TeacherLeagueService extends BaseService
             ]);
         }
 
-        $alreadyExists = LeagueParticipant::where('course_league_id', $league->id)
+        /** @var LeagueParticipant|null $existingParticipant */
+        $existingParticipant = LeagueParticipant::withTrashed()
+            ->where('course_league_id', $league->id)
             ->where('student_id', $student->id)
-            ->exists();
+            ->first();
 
-        if ($alreadyExists) {
+        if ($existingParticipant && ! $existingParticipant->trashed()) {
             throw ValidationException::withMessages([
                 'student_id' => ['هذا الطالب مشترك بالفعل في هذا الدوري.'],
             ]);
         }
 
-        return $this->transaction(function () use ($teacher, $league, $student, $data) {
+        return $this->transaction(function () use ($teacher, $league, $student, $data, $existingParticipant) {
             $metrics = $this->leagueRulesService->computeMetricsForStudents(
                 [$student->id],
                 $teacher->id,
@@ -373,9 +413,7 @@ class TeacherLeagueService extends BaseService
                 ? (string) $data['group_ar']
                 : ($enrollment?->group?->name_ar ?? $league->group_name_ar ?? 'جميع المجموعات');
 
-            LeagueParticipant::create([
-                'course_league_id' => $league->id,
-                'student_id' => $student->id,
+            $attributes = [
                 'rank' => 1,
                 'previous_rank' => null,
                 'xp_points' => $initialXp,
@@ -389,7 +427,17 @@ class TeacherLeagueService extends BaseService
                 'exams_solved_count' => (int) ($metrics['examsSolved'] ?? 0),
                 'homework_rate' => (int) ($metrics['homeworkRate'] ?? 0),
                 'attendance_rate' => (int) ($metrics['attendanceRate'] ?? $enrollment?->attendance_rate ?? 0),
-            ]);
+            ];
+
+            if ($existingParticipant && $existingParticipant->trashed()) {
+                $existingParticipant->restore();
+                $existingParticipant->update($attributes);
+            } else {
+                LeagueParticipant::create(array_merge([
+                    'course_league_id' => $league->id,
+                    'student_id' => $student->id,
+                ], $attributes));
+            }
 
             $league->recalculateRanksAndMetrics();
 
@@ -410,18 +458,70 @@ class TeacherLeagueService extends BaseService
     }
 
     /**
+     * Remove a participant from a league and recalculate ranks.
+     */
+    public function removeParticipant(User $teacher, string $leagueUuid, string $participantIdentifier): CourseLeague
+    {
+        $league = $this->leagueRepository->findByUuidForTeacher($leagueUuid, $teacher);
+
+        $identifier = trim($participantIdentifier);
+        /** @var LeagueParticipant|null $participant */
+        $participant = LeagueParticipant::where('course_league_id', $league->id)
+            ->where(function ($q) use ($identifier) {
+                $q->where('uuid', $identifier);
+                if (is_numeric($identifier)) {
+                    $q->orWhere('student_id', (int) $identifier);
+                } else {
+                    $q->orWhereHas('student', fn ($s) => $s->where('uuid', $identifier)->orWhere('student_code', $identifier));
+                }
+            })
+            ->first();
+
+        if (! $participant) {
+            throw ValidationException::withMessages([
+                'participant_id' => ['الطالب المحدد غير مشارك في هذا الدوري.'],
+            ]);
+        }
+
+        return $this->transaction(function () use ($teacher, $league, $participant) {
+            $studentId = $participant->student_id;
+            $participant->delete();
+            $league->recalculateRanksAndMetrics();
+
+            $this->logSecurityEvent(
+                'league_participant_removed',
+                [
+                    'teacher_id' => $teacher->id,
+                    'league_uuid' => $league->uuid,
+                    'student_id' => $studentId,
+                ],
+                'warning',
+                $league
+            );
+
+            return $league->fresh(['course', 'studyGroup', 'participants.student']);
+        });
+    }
+
+    /**
      * Award bonus XP to a participant inside the league and update leaderboard.
      */
     public function awardXp(User $teacher, string $leagueUuid, array $data): CourseLeague
     {
         $league = $this->leagueRepository->findByUuidForTeacher($leagueUuid, $teacher);
 
-        $studentIdentifier = $data['student_id'] ?? null;
+        $studentIdentifier = trim((string) ($data['student_id'] ?? ''));
         /** @var User|null $student */
-        $student = User::where('id', is_numeric($studentIdentifier) ? (int) $studentIdentifier : 0)
-            ->first();
+        $student = User::where(function ($q) use ($studentIdentifier) {
+            if (is_numeric($studentIdentifier)) {
+                $q->where('id', (int) $studentIdentifier);
+            } else {
+                $q->where('uuid', $studentIdentifier)
+                    ->orWhere('student_code', $studentIdentifier);
+            }
+        })->first();
 
-        if (! $student) {
+        if (! $student || ! $student->isStudent()) {
             throw ValidationException::withMessages([
                 'student_id' => [__('messages.student_not_found')],
             ]);
@@ -436,13 +536,23 @@ class TeacherLeagueService extends BaseService
                 $league->ends_at
             )[$student->id] ?? null;
 
-            /** @var LeagueParticipant $participant */
-            $participant = LeagueParticipant::firstOrCreate(
-                [
+            /** @var LeagueParticipant|null $participant */
+            $participant = LeagueParticipant::withTrashed()
+                ->where('course_league_id', $league->id)
+                ->where('student_id', $student->id)
+                ->first();
+
+            if ($participant && $participant->trashed()) {
+                $participant->restore();
+                $participant->update([
+                    'xp_points' => 0,
+                    'previous_rank' => null,
+                    'movement' => 'same',
+                ]);
+            } elseif (! $participant) {
+                $participant = LeagueParticipant::create([
                     'course_league_id' => $league->id,
                     'student_id' => $student->id,
-                ],
-                [
                     'rank' => 1,
                     'xp_points' => 0,
                     'streak_days' => (int) ($metrics['streakDays'] ?? 0),
@@ -455,8 +565,8 @@ class TeacherLeagueService extends BaseService
                     'exams_solved_count' => (int) ($metrics['examsSolved'] ?? 0),
                     'homework_rate' => (int) ($metrics['homeworkRate'] ?? 0),
                     'attendance_rate' => (int) ($metrics['attendanceRate'] ?? 0),
-                ]
-            );
+                ]);
+            }
 
             $xpToAdd = max(1, (int) ($data['xp_amount'] ?? 50));
             $participant->increment('xp_points', $xpToAdd);

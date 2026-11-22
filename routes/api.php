@@ -533,6 +533,8 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('uuid');
                     Route::post('/{uuid}/participants', [TeacherLeagueController::class, 'addParticipant'])
                         ->whereUuid('uuid');
+                    Route::delete('/{uuid}/participants/{participantId}', [TeacherLeagueController::class, 'removeParticipant'])
+                        ->whereUuid('uuid');
                     Route::post('/{uuid}/award-xp', [TeacherLeagueController::class, 'awardXp'])
                         ->whereUuid('uuid');
                     Route::post('/{uuid}/recalculate', [TeacherLeagueController::class, 'recalculate'])

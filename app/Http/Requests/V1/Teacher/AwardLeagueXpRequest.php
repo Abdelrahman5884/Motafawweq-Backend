@@ -15,8 +15,14 @@ class AwardLeagueXpRequest extends BaseApiRequest
     {
         parent::prepareForValidation();
 
-        $studentId = $this->input('student_id') ?? $this->input('studentId') ?? $this->input('studentUuid');
-        $xp = $this->input('xp_amount') ?? $this->input('xpAmount') ?? $this->input('xp') ?? $this->input('points') ?? 50;
+        $studentId = $this->input('student_id') ?? $this->input('studentId') ?? $this->input('studentUuid') ?? $this->input('student_code') ?? $this->input('studentCode');
+        $xp = $this->input('xp_amount')
+            ?? $this->input('xpAmount')
+            ?? $this->input('xp_points')
+            ?? $this->input('xpPoints')
+            ?? $this->input('xp')
+            ?? $this->input('points')
+            ?? 50;
         $reason = $this->input('reason_ar') ?? $this->input('reasonAr') ?? $this->input('reason');
 
         $merged = [

@@ -401,4 +401,117 @@ class TeacherLeagueTest extends TestCase
             'xp_points' => 1250,
         ]);
     }
+
+    public function test_teacher_can_remove_and_readd_participant_and_recalculate_does_not_reenroll(): void
+    {
+        $teacher = $this->createTeacher('teacher.rem@motafawweq.com');
+        $course = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'كورس الفيزياء',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
+        ]);
+
+        $group = StudyGroup::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'name_ar' => 'مجموعة الفيزياء',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'subject_ar' => 'الفيزياء',
+            'center_name' => 'سنتر النخبة',
+            'governorate' => 'القاهرة',
+            'area' => 'المعادي',
+            'join_code' => 'PHY-REM-01',
+            'max_capacity' => 50,
+            'enrolled_count' => 1,
+            'is_active' => true,
+        ]);
+
+        $student = $this->createStudent('أحمد سامي', 'ahmed.rem@motafawweq.com');
+        GroupEnrollment::create([
+            'study_group_id' => $group->id,
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::ENROLLED,
+        ]);
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        $createRes = $this->postJson('/api/v1/teacher/leagues', [
+            'course_id' => $course->uuid,
+            'study_group_id' => $group->uuid,
+            'duration' => 'monthly',
+        ]);
+        $createRes->assertCreated()
+            ->assertJsonPath('data.totalCompetitors', 1);
+
+        $leagueUuid = $createRes->json('data.id');
+        $participantUuid = $createRes->json('data.leaderboard.0.id');
+
+        // Remove participant
+        $removeRes = $this->deleteJson("/api/v1/teacher/leagues/{$leagueUuid}/participants/{$participantUuid}");
+        $removeRes->assertOk()
+            ->assertJsonPath('data.totalCompetitors', 0)
+            ->assertJsonCount(0, 'data.leaderboard');
+
+        // Recalculate must NOT re-enroll the manually removed student
+        $recalcRes = $this->postJson("/api/v1/teacher/leagues/{$leagueUuid}/recalculate");
+        $recalcRes->assertOk()
+            ->assertJsonPath('data.totalCompetitors', 0);
+
+        // Explicitly re-adding restores the participant cleanly without unique constraint collision
+        $readdRes = $this->postJson("/api/v1/teacher/leagues/{$leagueUuid}/participants", [
+            'student_id' => (string) $student->id,
+            'initial_xp' => 150,
+        ]);
+        $readdRes->assertCreated()
+            ->assertJsonPath('data.totalCompetitors', 1)
+            ->assertJsonPath('data.leaderboard.0.score', 150);
+    }
+
+    public function test_award_xp_supports_xp_points_alias_and_rejects_non_students(): void
+    {
+        $teacher = $this->createTeacher('teacher.xp@motafawweq.com');
+        $otherTeacher = $this->createTeacher('teacher.other@motafawweq.com');
+        $course = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'كورس الكيمياء',
+            'stage' => 'sec',
+            'grade_ar' => 'الصف الثالث الثانوي',
+        ]);
+
+        $league = CourseLeague::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $course->id,
+            'title_ar' => 'دوري الكيمياء',
+            'duration_type' => LeagueDuration::MONTHLY,
+            'duration_days' => 30,
+            'is_active' => true,
+        ]);
+
+        $student = $this->createStudent('ندى محمود', 'nada.xp@motafawweq.com');
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        // Award XP using xp_points + reason (exact payload from frontend teacherApi.js)
+        $res = $this->postJson("/api/v1/teacher/leagues/{$league->uuid}/award-xp", [
+            'student_id' => (string) $student->id,
+            'xp_points' => 180,
+            'reason' => 'مشاركة مميزة في الحصة',
+        ]);
+
+        $res->assertOk()
+            ->assertJsonPath('data.leaderboard.0.score', 180)
+            ->assertJsonPath('data.leaderboard.0.tier', 'Gold')
+            ->assertJsonStructure([
+                'data' => ['scoringRules', 'tiers'],
+            ]);
+
+        // Reject awarding XP to a non-student account
+        $nonStudentRes = $this->postJson("/api/v1/teacher/leagues/{$league->uuid}/award-xp", [
+            'student_id' => (string) $otherTeacher->id,
+            'xp_points' => 100,
+        ]);
+        $nonStudentRes->assertStatus(422);
+    }
 }

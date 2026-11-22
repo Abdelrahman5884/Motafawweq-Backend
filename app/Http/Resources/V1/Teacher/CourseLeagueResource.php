@@ -30,7 +30,9 @@ class CourseLeagueResource extends BaseJsonResource
             'durationLabelAr' => $durationLabel,
             'durationType' => $this->duration_type instanceof LeagueDuration ? $this->duration_type->value : (string) $this->duration_type,
             'durationDays' => (int) $this->duration_days,
-            'totalCompetitors' => (int) $this->total_competitors,
+            'totalCompetitors' => $this->participants_count !== null
+                ? (int) $this->participants_count
+                : (int) $this->total_competitors,
             'roundDaysRemaining' => $this->roundDaysRemaining(),
             'isActive' => (bool) $this->is_active,
             'startsAt' => $this->formatDate($this->starts_at),

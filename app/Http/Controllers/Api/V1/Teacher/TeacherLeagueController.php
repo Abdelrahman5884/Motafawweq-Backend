@@ -108,6 +108,24 @@ class TeacherLeagueController extends BaseApiController
     }
 
     /**
+     * DELETE /api/v1/teacher/leagues/{uuid}/participants/{participantId}
+     * Remove a student participant from a league.
+     */
+    public function removeParticipant(string $uuid, string $participantId): JsonResponse
+    {
+        $league = $this->leagueService->removeParticipant(
+            $this->authenticatedUser(),
+            $uuid,
+            $participantId
+        );
+
+        return $this->successResponse(
+            new CourseLeagueDetailResource($league),
+            'تمت إزالة الطالب من الدوري بنجاح.'
+        );
+    }
+
+    /**
      * POST /api/v1/teacher/leagues/{uuid}/award-xp
      * Award bonus XP to a participant inside the league.
      */

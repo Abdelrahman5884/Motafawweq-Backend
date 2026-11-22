@@ -644,9 +644,14 @@ class LeagueRulesService
             )[$student->id] ?? null;
 
             /** @var LeagueParticipant|null $participant */
-            $participant = LeagueParticipant::where('course_league_id', $league->id)
+            $participant = LeagueParticipant::withTrashed()
+                ->where('course_league_id', $league->id)
                 ->where('student_id', $student->id)
                 ->first();
+
+            if ($participant && $participant->trashed()) {
+                continue;
+            }
 
             if ($participant) {
                 $newXp = (int) $participant->xp_points + $xpDelta;
@@ -743,12 +748,19 @@ class LeagueRulesService
                     $q->where('teacher_id', $league->teacher_id);
                     if ($league->study_group_id) {
                         $q->where('id', $league->study_group_id);
+                    } elseif ($league->course_id) {
+                        $q->where(function ($sub) use ($league) {
+                            $sub->where('course_id', $league->course_id)
+                                ->orWhereNull('course_id');
+                        });
                     }
                 })
                 ->with('group:id,name_ar')
                 ->get();
 
-            $existingStudentIds = LeagueParticipant::where('course_league_id', $league->id)
+            // Include soft-deleted rows so students manually removed by the teacher are not re-enrolled
+            $existingStudentIds = LeagueParticipant::withTrashed()
+                ->where('course_league_id', $league->id)
                 ->pluck('student_id')
                 ->map(fn ($id) => (int) $id)
                 ->all();
