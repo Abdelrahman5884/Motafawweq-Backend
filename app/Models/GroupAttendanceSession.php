@@ -16,7 +16,9 @@ class GroupAttendanceSession extends Model
     protected $fillable = [
         'study_group_id',
         'teacher_id',
+        'center_id',
         'schedule_slot_id',
+        'center_room_id',
         'session_date',
         'title_ar',
         'status',

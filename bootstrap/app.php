@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\CheckCenterPlan;
+use App\Http\Middleware\CheckCenterPlanQuota;
 use App\Http\Middleware\CheckRole;
 use App\Http\Middleware\CheckStudentPlan;
 use App\Http\Middleware\CheckTeacherPlan;
@@ -56,6 +58,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'teacher.quota' => CheckTeacherPlanQuota::class,
             'teacher.plan' => CheckTeacherPlan::class,
             'student.plan' => CheckStudentPlan::class,
+            'center.plan' => CheckCenterPlan::class,
+            'center.quota' => CheckCenterPlanQuota::class,
             'idempotent' => EnsureIdempotency::class,
         ]);
     })

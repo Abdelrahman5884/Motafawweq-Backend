@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Repositories\Contracts\GroupEnrollmentRepositoryInterface;
 use App\Repositories\Contracts\StudyGroupRepositoryInterface;
 use App\Services\BaseService;
+use App\Services\V1\Center\CenterBillingService;
 use App\Services\V1\Student\StudentAccessService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
@@ -430,10 +431,17 @@ class TeacherRosterService extends BaseService
                 ]);
             }
 
-            // Enforce teacher's active plan student capacity limit
-            $groupTeacher = User::find($group->teacher_id);
-            if ($groupTeacher) {
-                $this->assertTeacherPlanStudentQuota($groupTeacher);
+            // Enforce owner's active plan student/user capacity limit (teacher or center)
+            if ($group->center_id !== null) {
+                $groupCenter = User::find($group->center_id);
+                if ($groupCenter && $groupCenter->isCenter()) {
+                    app(CenterBillingService::class)->assertUsersQuotaAvailable($groupCenter);
+                }
+            } else {
+                $groupTeacher = User::find($group->teacher_id);
+                if ($groupTeacher) {
+                    $this->assertTeacherPlanStudentQuota($groupTeacher);
+                }
             }
 
             if ($existing) {
@@ -537,10 +545,17 @@ class TeacherRosterService extends BaseService
             ]);
         }
 
-        // Enforce teacher active plan student quota
-        $groupTeacher = User::find($group->teacher_id);
-        if ($groupTeacher) {
-            $this->assertTeacherPlanStudentQuota($groupTeacher);
+        // Enforce owner's active plan student/user quota (teacher or center)
+        if ($group->center_id !== null) {
+            $groupCenter = User::find($group->center_id);
+            if ($groupCenter && $groupCenter->isCenter()) {
+                app(CenterBillingService::class)->assertUsersQuotaAvailable($groupCenter);
+            }
+        } else {
+            $groupTeacher = User::find($group->teacher_id);
+            if ($groupTeacher) {
+                $this->assertTeacherPlanStudentQuota($groupTeacher);
+            }
         }
 
         return $this->transaction(function () use ($student, $group, $enrollment) {

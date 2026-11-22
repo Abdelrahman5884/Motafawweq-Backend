@@ -188,5 +188,47 @@ class AppServiceProvider extends ServiceProvider
                 ->by('std-checkout:'.($request->user()?->id ?: $request->ip()))
                 ->response($tooMany('messages.rate_limit_financial'));
         });
+
+        // Center read endpoints: 120 per minute per center
+        RateLimiter::for('center-read', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(120)
+                ->by('ctr-read:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // Center write mutations: 45 per minute per center
+        RateLimiter::for('center-write', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(45)
+                ->by('ctr-write:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // High-speed Center QR / Barcode entrance gate scanner: 90 scans per minute
+        RateLimiter::for('center-qr-scan', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(90)
+                ->by('ctr-qr:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_qr_scan'));
+        });
+
+        // Center financial mutations, settlements & subscription checkout: 15 per minute
+        RateLimiter::for('center-financial', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(15)
+                ->by('ctr-fin:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_financial'));
+        });
+
+        // Center bulk data imports & cloud backups: 6 per minute
+        RateLimiter::for('center-import', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(6)
+                ->by('ctr-import:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // Center parent absence/payment alerts: 20 per minute
+        RateLimiter::for('center-alerts', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(20)
+                ->by('ctr-alerts:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
     }
 }

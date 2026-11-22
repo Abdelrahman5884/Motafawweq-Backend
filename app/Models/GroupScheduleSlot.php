@@ -19,6 +19,7 @@ class GroupScheduleSlot extends Model
         'start_time',
         'end_time',
         'hall_name',
+        'center_room_id',
     ];
 
     protected function casts(): array
@@ -36,5 +37,10 @@ class GroupScheduleSlot extends Model
     public function studyGroup(): BelongsTo
     {
         return $this->belongsTo(StudyGroup::class, 'study_group_id');
+    }
+
+    public function centerRoom(): BelongsTo
+    {
+        return $this->belongsTo(CenterRoom::class, 'center_room_id');
     }
 }

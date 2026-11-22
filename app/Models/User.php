@@ -214,6 +214,46 @@ class User extends Authenticatable
         return $this->hasMany(TeacherInvoice::class, 'teacher_id');
     }
 
+    public function centerProfile(): HasOne
+    {
+        return $this->hasOne(CenterProfile::class, 'user_id');
+    }
+
+    public function centerBranches(): HasMany
+    {
+        return $this->hasMany(CenterBranch::class, 'center_id');
+    }
+
+    public function centerRooms(): HasMany
+    {
+        return $this->hasMany(CenterRoom::class, 'center_id');
+    }
+
+    public function centerTeachers(): HasMany
+    {
+        return $this->hasMany(CenterTeacher::class, 'center_id');
+    }
+
+    public function centerStaff(): HasMany
+    {
+        return $this->hasMany(CenterStaff::class, 'center_id');
+    }
+
+    public function centerStudyGroups(): HasMany
+    {
+        return $this->hasMany(StudyGroup::class, 'center_id');
+    }
+
+    public function centerSubscriptions(): HasMany
+    {
+        return $this->hasMany(CenterSubscription::class, 'center_id');
+    }
+
+    public function centerInvoices(): HasMany
+    {
+        return $this->hasMany(CenterInvoice::class, 'center_id');
+    }
+
     /**
      * Students linked to this parent account.
      */
@@ -261,6 +301,11 @@ class User extends Authenticatable
     public function isParent(): bool
     {
         return $this->role === UserRole::PARENT;
+    }
+
+    public function isCenter(): bool
+    {
+        return $this->role === UserRole::CENTER;
     }
 
     /* ----------------------------------------------------------------- */

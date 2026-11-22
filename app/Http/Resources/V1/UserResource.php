@@ -2,10 +2,12 @@
 
 namespace App\Http\Resources\V1;
 
+use App\Enums\CenterPlanTier;
 use App\Enums\StudentPlanTier;
 use App\Enums\TeacherPlanTier;
 use App\Enums\UserRole;
 use App\Http\Resources\BaseJsonResource;
+use App\Services\V1\Center\CenterBillingService;
 use App\Services\V1\Student\StudentBillingService;
 use App\Services\V1\Teacher\TeacherBillingService;
 use Illuminate\Http\Request;
@@ -27,7 +29,11 @@ class UserResource extends BaseJsonResource
             ? app(TeacherBillingService::class)->resolveActivePlanTier($this->resource)
             : null;
 
-        $activePlan = $studentPlan ?? $teacherPlan;
+        $centerPlan = $this->role === UserRole::CENTER
+            ? app(CenterBillingService::class)->resolveActivePlanTier($this->resource)
+            : null;
+
+        $activePlan = $studentPlan ?? $teacherPlan ?? $centerPlan;
 
         return [
             'id' => $this->id,
@@ -46,12 +52,12 @@ class UserResource extends BaseJsonResource
             'plan_name_ar' => $this->when($activePlan !== null, fn () => $activePlan->labelAr()),
             'plan_name_en' => $this->when($activePlan !== null, fn () => $activePlan->labelEn()),
             'unlocked_features' => $this->when(
-                $activePlan instanceof StudentPlanTier || $activePlan instanceof TeacherPlanTier,
+                $activePlan instanceof StudentPlanTier || $activePlan instanceof TeacherPlanTier || $activePlan instanceof CenterPlanTier,
                 fn () => $activePlan->unlockedFeatures()
             ),
             'plan_quotas' => $this->when(
-                $teacherPlan instanceof TeacherPlanTier,
-                fn () => $teacherPlan->quotas()
+                $teacherPlan instanceof TeacherPlanTier || $centerPlan instanceof CenterPlanTier,
+                fn () => ($teacherPlan ?? $centerPlan)->quotas()
             ),
             'linked_children' => $this->when(
                 $this->role === UserRole::PARENT,

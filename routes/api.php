@@ -5,6 +5,16 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
+use App\Http\Controllers\Api\V1\Center\CenterAttendanceController;
+use App\Http\Controllers\Api\V1\Center\CenterBillingController;
+use App\Http\Controllers\Api\V1\Center\CenterBranchController;
+use App\Http\Controllers\Api\V1\Center\CenterDashboardController;
+use App\Http\Controllers\Api\V1\Center\CenterFinancialController;
+use App\Http\Controllers\Api\V1\Center\CenterGroupController;
+use App\Http\Controllers\Api\V1\Center\CenterRoomController;
+use App\Http\Controllers\Api\V1\Center\CenterSettingsController;
+use App\Http\Controllers\Api\V1\Center\CenterStaffController;
+use App\Http\Controllers\Api\V1\Center\CenterTeacherController;
 use App\Http\Controllers\Api\V1\Public\CertificateVerificationController;
 use App\Http\Controllers\Api\V1\Storage\StorageController;
 use App\Http\Controllers\Api\V1\Student\StudentBillingController;
@@ -611,6 +621,276 @@ Route::prefix('v1')->group(function () {
                     Route::post('/validate-coupon', [TeacherBillingController::class, 'validateCoupon']);
                     Route::post('/subscribe', [TeacherBillingController::class, 'subscribe']);
                     Route::post('/cancel', [TeacherBillingController::class, 'cancel']);
+                });
+            });
+
+            // Educational Center Portal area (strictly isolated to active, verified centers)
+            Route::prefix('center')->middleware('role:center')->group(function () {
+                // Dashboard, Live Daily Queue & Administrative Executive Report
+                Route::get('/dashboard', [CenterDashboardController::class, 'index'])
+                    ->middleware('throttle:center-read');
+                Route::prefix('queue')->middleware('throttle:center-write')->group(function () {
+                    Route::post('/complete', [CenterDashboardController::class, 'completeQueueItem']);
+                    Route::post('/restore', [CenterDashboardController::class, 'restoreQueueItem']);
+                    Route::post('/reset', [CenterDashboardController::class, 'resetQueue']);
+                });
+                Route::get('/reports/executive', [CenterDashboardController::class, 'executiveReport'])
+                    ->middleware('throttle:center-read');
+
+                // Branches CRUD & Export (Quota-gated on creation)
+                Route::prefix('branches')->group(function () {
+                    Route::get('/', [CenterBranchController::class, 'index'])
+                        ->middleware('throttle:center-read');
+                    Route::get('/export', [CenterBranchController::class, 'exportCsv'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/', [CenterBranchController::class, 'store'])
+                        ->middleware(['throttle:center-write', 'center.quota:branches']);
+                    Route::get('/{uuid}', [CenterBranchController::class, 'show'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-read');
+                    Route::put('/{uuid}', [CenterBranchController::class, 'update'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                    Route::delete('/{uuid}', [CenterBranchController::class, 'destroy'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                });
+
+                // Classrooms / Halls CRUD & Conflict-Free Master Schedule (Quota-gated on creation)
+                Route::prefix('rooms')->group(function () {
+                    Route::get('/', [CenterRoomController::class, 'index'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/', [CenterRoomController::class, 'store'])
+                        ->middleware(['throttle:center-write', 'center.quota:rooms']);
+                    Route::get('/{uuid}', [CenterRoomController::class, 'show'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-read');
+                    Route::put('/{uuid}', [CenterRoomController::class, 'update'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                    Route::delete('/{uuid}', [CenterRoomController::class, 'destroy'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                });
+
+                Route::prefix('schedule')->group(function () {
+                    Route::get('/', [CenterRoomController::class, 'masterSchedule'])
+                        ->middleware('throttle:center-read');
+                    Route::get('/availability', [CenterRoomController::class, 'slotAvailability'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/check-conflicts', [CenterRoomController::class, 'checkConflicts'])
+                        ->middleware('throttle:center-read');
+                });
+
+                // Certified Teachers Network & Motafawweq Connect (Quota-gated on creation)
+                Route::prefix('teachers')->group(function () {
+                    Route::get('/', [CenterTeacherController::class, 'index'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/', [CenterTeacherController::class, 'store'])
+                        ->middleware(['throttle:center-write', 'center.quota:teachers']);
+                    Route::get('/{uuid}', [CenterTeacherController::class, 'show'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-read');
+                    Route::put('/{uuid}', [CenterTeacherController::class, 'update'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                    Route::delete('/{uuid}', [CenterTeacherController::class, 'destroy'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                    Route::post('/{uuid}/resend-invite', [CenterTeacherController::class, 'resendInvite'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                });
+
+                Route::prefix('connect')->group(function () {
+                    Route::get('/search', [CenterTeacherController::class, 'searchGlobalUsers'])
+                        ->middleware('throttle:center-read');
+                    Route::get('/users', [CenterTeacherController::class, 'listConnectedUsers'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/users', [CenterTeacherController::class, 'connectUser'])
+                        ->middleware(['throttle:center-write', 'idempotent']);
+                    Route::delete('/users/{uuid}', [CenterTeacherController::class, 'disconnectUser'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                });
+
+                // Administrative Staff Roles & Immutable Tenant Audit Trail
+                Route::prefix('staff')->group(function () {
+                    Route::get('/', [CenterStaffController::class, 'index'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/', [CenterStaffController::class, 'store'])
+                        ->middleware(['throttle:center-write', 'center.quota:staff']);
+                    Route::put('/{uuid}', [CenterStaffController::class, 'update'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                    Route::delete('/{uuid}', [CenterStaffController::class, 'destroy'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                });
+
+                Route::get('/audit-logs', [CenterStaffController::class, 'auditLogs'])
+                    ->middleware('throttle:center-read');
+
+                // Study Groups, Cohorts, Rosters, Student Enrollment & Group Attendance
+                Route::get('/students/search', [CenterGroupController::class, 'searchStudents'])
+                    ->middleware('throttle:center-read');
+
+                Route::prefix('groups')->group(function () {
+                    Route::get('/', [CenterGroupController::class, 'index'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/', [CenterGroupController::class, 'store'])
+                        ->middleware('throttle:center-write');
+                    Route::get('/{uuid}', [CenterGroupController::class, 'show'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-read');
+                    Route::put('/{uuid}', [CenterGroupController::class, 'update'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                    Route::delete('/{uuid}', [CenterGroupController::class, 'destroy'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                    Route::post('/{uuid}/regenerate-code', [CenterGroupController::class, 'regenerateCode'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:join-code');
+
+                    Route::get('/{uuid}/roster', [CenterGroupController::class, 'roster'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-read');
+                    Route::post('/{uuid}/students', [CenterGroupController::class, 'enrollStudent'])
+                        ->whereUuid('uuid')
+                        ->middleware(['throttle:center-write', 'center.quota:users']);
+                    Route::post('/{uuid}/enrollments/{enrollmentUuid}/accept', [CenterGroupController::class, 'acceptPending'])
+                        ->whereUuid(['uuid', 'enrollmentUuid'])
+                        ->middleware(['throttle:center-write', 'center.quota:users']);
+                    Route::post('/{uuid}/enrollments/{enrollmentUuid}/reject', [CenterGroupController::class, 'rejectPending'])
+                        ->whereUuid(['uuid', 'enrollmentUuid'])
+                        ->middleware('throttle:center-write');
+                    Route::patch('/{uuid}/enrollments/{enrollmentUuid}/payment', [CenterGroupController::class, 'updatePayment'])
+                        ->whereUuid(['uuid', 'enrollmentUuid'])
+                        ->middleware('throttle:center-financial');
+                    Route::get('/{uuid}/enrollments/{enrollmentUuid}/card', [CenterGroupController::class, 'studentCard'])
+                        ->whereUuid(['uuid', 'enrollmentUuid'])
+                        ->middleware('throttle:center-read');
+                    Route::delete('/{uuid}/enrollments/{enrollmentUuid}', [CenterGroupController::class, 'removeStudent'])
+                        ->whereUuid(['uuid', 'enrollmentUuid'])
+                        ->middleware('throttle:center-write');
+
+                    // Group Attendance (QR Scan requires Plus+; Manual toggle works on all tiers)
+                    Route::prefix('/{uuid}/attendance')->whereUuid('uuid')->group(function () {
+                        Route::post('/scan', [CenterAttendanceController::class, 'scanInGroup'])
+                            ->middleware(['throttle:center-qr-scan', 'center.plan:qr_scanner']);
+                        Route::post('/toggle', [CenterAttendanceController::class, 'toggleInGroup'])
+                            ->middleware('throttle:center-write');
+                        Route::get('/sessions', [CenterAttendanceController::class, 'groupSessions'])
+                            ->middleware('throttle:center-read');
+                        Route::get('/sessions/{sessionUuid}', [CenterAttendanceController::class, 'groupSessionShow'])
+                            ->whereUuid('sessionUuid')
+                            ->middleware('throttle:center-read');
+                    });
+                });
+
+                // Smart Gate Attendance, Register, Absence Alerts & Export
+                Route::prefix('attendance')->group(function () {
+                    Route::post('/smart-scan', [CenterAttendanceController::class, 'smartGateScan'])
+                        ->middleware(['throttle:center-qr-scan', 'center.plan:qr_scanner']);
+                    Route::get('/records', [CenterAttendanceController::class, 'records'])
+                        ->middleware('throttle:center-read');
+                    Route::get('/export', [CenterAttendanceController::class, 'exportCsv'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/absence-alerts', [CenterAttendanceController::class, 'sendAbsenceAlert'])
+                        ->middleware(['throttle:center-alerts', 'center.plan:whatsapp_alerts']);
+                });
+
+                // Center Financials ERP: P&L, Expenses, Automated Teacher Settlements & Dues (Plus & Pro)
+                Route::prefix('financials')->middleware('center.plan:financials')->group(function () {
+                    Route::get('/overview', [CenterFinancialController::class, 'overview'])
+                        ->middleware('throttle:center-read');
+                    Route::get('/expenses', [CenterFinancialController::class, 'expenses'])
+                        ->middleware('throttle:center-read');
+                    Route::get('/expenses/export', [CenterFinancialController::class, 'exportExpensesCsv'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/expenses', [CenterFinancialController::class, 'storeExpense'])
+                        ->middleware('throttle:center-financial');
+                    Route::delete('/expenses/{uuid}', [CenterFinancialController::class, 'destroyExpense'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-financial');
+
+                    Route::get('/settlements', [CenterFinancialController::class, 'settlements'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/settlements/{teacherUuid}/approve', [CenterFinancialController::class, 'approveSettlement'])
+                        ->whereUuid('teacherUuid')
+                        ->middleware(['throttle:center-financial', 'idempotent']);
+
+                    Route::get('/dues', [CenterFinancialController::class, 'dues'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/dues/{enrollmentUuid}/remind', [CenterFinancialController::class, 'remindDue'])
+                        ->whereUuid('enrollmentUuid')
+                        ->middleware('throttle:center-alerts');
+                    Route::post('/dues/{enrollmentUuid}/mark-paid', [CenterFinancialController::class, 'markDuePaid'])
+                        ->whereUuid('enrollmentUuid')
+                        ->middleware(['throttle:center-financial', 'idempotent']);
+                });
+
+                // Center 3-Tier Subscription Plans & Billing (Free / Plus / Pro)
+                Route::prefix('billing')->group(function () {
+                    Route::get('/', [CenterBillingController::class, 'index'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/validate-coupon', [CenterBillingController::class, 'validateCoupon'])
+                        ->middleware('throttle:center-financial');
+                    Route::post('/subscribe', [CenterBillingController::class, 'subscribe'])
+                        ->middleware(['throttle:center-financial', 'idempotent']);
+                    Route::post('/cancel', [CenterBillingController::class, 'cancel'])
+                        ->middleware('throttle:center-financial');
+                });
+
+                // Center Settings, Policies, Custom KPIs, Daily Tasks, Memos, Import & Cloud Backups
+                Route::prefix('settings')->group(function () {
+                    Route::get('/', [CenterSettingsController::class, 'show'])
+                        ->middleware('throttle:center-read');
+                    Route::put('/', [CenterSettingsController::class, 'update'])
+                        ->middleware('throttle:center-write');
+                    Route::put('/kpis', [CenterSettingsController::class, 'updateKpis'])
+                        ->middleware('throttle:center-write');
+                });
+
+                Route::prefix('tasks')->group(function () {
+                    Route::get('/', [CenterSettingsController::class, 'tasks'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/', [CenterSettingsController::class, 'storeTask'])
+                        ->middleware('throttle:center-write');
+                    Route::put('/{uuid}', [CenterSettingsController::class, 'updateTask'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                    Route::patch('/{uuid}/toggle', [CenterSettingsController::class, 'toggleTask'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                    Route::delete('/{uuid}', [CenterSettingsController::class, 'destroyTask'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                });
+
+                Route::prefix('announcements')->group(function () {
+                    Route::get('/', [CenterSettingsController::class, 'announcements'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/', [CenterSettingsController::class, 'storeAnnouncement'])
+                        ->middleware('throttle:center-write');
+                    Route::delete('/{uuid}', [CenterSettingsController::class, 'destroyAnnouncement'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:center-write');
+                });
+
+                Route::prefix('import')->group(function () {
+                    Route::get('/template', [CenterSettingsController::class, 'importTemplate'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/students', [CenterSettingsController::class, 'importStudents'])
+                        ->middleware(['throttle:center-import', 'idempotent']);
+                });
+
+                Route::prefix('backups')->middleware('center.plan:cloud_backup')->group(function () {
+                    Route::get('/', [CenterSettingsController::class, 'backups'])
+                        ->middleware('throttle:center-read');
+                    Route::post('/', [CenterSettingsController::class, 'createBackup'])
+                        ->middleware(['throttle:center-import', 'idempotent']);
                 });
             });
         });

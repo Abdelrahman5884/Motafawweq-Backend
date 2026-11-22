@@ -34,6 +34,10 @@ class GroupEnrollment extends Model
         'avg_quiz_score',
         'streak_days',
         'academic_status',
+        'payment_status',
+        'due_amount_egp',
+        'payment_due_since',
+        'last_payment_reminder_at',
         'requested_at',
         'enrolled_at',
     ];
@@ -49,6 +53,9 @@ class GroupEnrollment extends Model
             'total_sessions' => 'integer',
             'avg_quiz_score' => 'integer',
             'streak_days' => 'integer',
+            'due_amount_egp' => 'float',
+            'payment_due_since' => 'date',
+            'last_payment_reminder_at' => 'datetime',
             'requested_at' => 'datetime',
             'enrolled_at' => 'datetime',
         ];
