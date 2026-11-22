@@ -243,4 +243,36 @@ class LessonWorkspaceTest extends TestCase
             'level' => 'warning',
         ]);
     }
+
+    public function test_teacher_can_clear_chapters_and_transcript_and_switch_lesson_to_embed_mode(): void
+    {
+        $teacher = $this->createTeacher('workspace.clear@motafawweq.com');
+        $course = $this->createCourse($teacher);
+        $lesson = $this->createLesson($teacher, $course, 'حصة صوتية', LessonMediaMode::AUDIO->value, 185);
+
+        Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
+
+        // Duration label dynamically reflects duration_seconds (185s => 03:05) rather than stale 60:00
+        $this->getJson("/api/v1/teacher/workspace/lessons/{$lesson->uuid}")
+            ->assertOk()
+            ->assertJsonPath('data.durationFormatted', '03:05');
+
+        // Clearing chapters & transcript with empty arrays succeeds (200)
+        $this->putJson("/api/v1/teacher/workspace/lessons/{$lesson->uuid}/chapters", [
+            'chapters' => [],
+        ])->assertOk()->assertJsonCount(0, 'data');
+
+        $this->putJson("/api/v1/teacher/workspace/lessons/{$lesson->uuid}/transcript", [
+            'transcript' => [],
+        ])->assertOk()->assertJsonCount(0, 'data');
+
+        // Adding a YouTube embed URL to an audio lesson switches media_mode to embed & mediaType to video
+        $this->putJson("/api/v1/teacher/lessons/{$lesson->uuid}", [
+            'embed_url' => 'https://youtu.be/dQw4w9WgXcQ',
+        ])->assertOk()
+            ->assertJsonPath('data.mode', 'embed')
+            ->assertJsonPath('data.mediaType', 'video')
+            ->assertJsonPath('data.embedUrl', 'https://www.youtube.com/embed/dQw4w9WgXcQ')
+            ->assertJsonPath('data.isYoutube', true);
+    }
 }

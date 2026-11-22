@@ -46,6 +46,17 @@ class TeacherLessonResource extends BaseJsonResource
         }
 
         $mediaType = in_array($mode, ['mic', 'audio'], true) ? 'audio' : 'video';
+        $durationSecs = (int) ($this->duration_seconds ?? 0);
+        if ($durationSecs > 0) {
+            $h = intdiv($durationSecs, 3600);
+            $m = intdiv($durationSecs % 3600, 60);
+            $s = $durationSecs % 60;
+            $resolvedDurationLabel = $h > 0
+                ? sprintf('%02d:%02d:%02d', $h, $m, $s)
+                : sprintf('%02d:%02d', $m, $s);
+        } else {
+            $resolvedDurationLabel = $this->duration_label ?: '00:00';
+        }
 
         return [
             'id' => $this->uuid,
@@ -65,6 +76,7 @@ class TeacherLessonResource extends BaseJsonResource
             'classGroup' => $this->target_group_code,
             'mode' => $mode,
             'mediaType' => $mediaType,
+            'mediaDisk' => $this->media_path ? ($this->media_disk ?: 'local') : null,
             'mediaOriginalName' => $this->media_original_name,
             'mediaMimeType' => $this->media_mime_type,
             'mediaSizeBytes' => $this->media_size_bytes,
@@ -72,9 +84,9 @@ class TeacherLessonResource extends BaseJsonResource
             'embedUrl' => $this->embed_url,
             'videoUrl' => $this->embed_url ?? $mediaStreamUrl,
             'isYoutube' => (bool) $this->is_youtube,
-            'durationSeconds' => (int) $this->duration_seconds,
-            'durationLabel' => $this->duration_label,
-            'durationFormatted' => $this->duration_label,
+            'durationSeconds' => $durationSecs,
+            'durationLabel' => $resolvedDurationLabel,
+            'durationFormatted' => $resolvedDurationLabel,
             'aiFeatures' => $this->ai_features_requested ?? [
                 'speechToText' => true,
                 'conceptGraph' => true,

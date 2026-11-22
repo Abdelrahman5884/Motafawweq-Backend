@@ -14,7 +14,7 @@ class SyncLessonChaptersRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'chapters' => ['required', 'array', 'max:100'],
+            'chapters' => ['present', 'array', 'max:100'],
             'chapters.*.title' => ['nullable', 'string', 'max:220'],
             'chapters.*.titleAr' => ['nullable', 'string', 'max:220'],
             'chapters.*.title_ar' => ['nullable', 'string', 'max:220'],

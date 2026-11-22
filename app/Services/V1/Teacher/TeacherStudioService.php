@@ -176,17 +176,28 @@ class TeacherStudioService extends BaseService
                 $updates['target_group_code'] = trim((string) ($data['target_group_code'] ?? $data['classGroup'] ?? $data['targetGroup']));
             }
 
+            $hasExplicitMode = array_key_exists('media_mode', $data) || array_key_exists('mode', $data);
+            if ($hasExplicitMode) {
+                $mode = LessonMediaMode::tryFrom((string) ($data['media_mode'] ?? $data['mode']));
+                if ($mode) {
+                    $updates['media_mode'] = $mode;
+                }
+            }
+
             if (array_key_exists('embed_url', $data) || array_key_exists('embedUrl', $data) || array_key_exists('videoUrl', $data)) {
                 $rawUrl = trim((string) ($data['embed_url'] ?? $data['embedUrl'] ?? $data['videoUrl']));
                 [$safeUrl, $isYoutube] = $this->sanitizeEmbedUrl($rawUrl);
                 $updates['embed_url'] = $safeUrl;
                 $updates['is_youtube'] = $isYoutube;
-            }
 
-            if (array_key_exists('media_mode', $data) || array_key_exists('mode', $data)) {
-                $mode = LessonMediaMode::tryFrom((string) ($data['media_mode'] ?? $data['mode']));
-                if ($mode) {
-                    $updates['media_mode'] = $mode;
+                if (! $hasExplicitMode) {
+                    if ($safeUrl) {
+                        $updates['media_mode'] = LessonMediaMode::EMBED;
+                    } elseif ($lesson->media_path) {
+                        $updates['media_mode'] = str_starts_with((string) $lesson->media_mime_type, 'audio/')
+                            ? LessonMediaMode::AUDIO
+                            : LessonMediaMode::VIDEO;
+                    }
                 }
             }
 
