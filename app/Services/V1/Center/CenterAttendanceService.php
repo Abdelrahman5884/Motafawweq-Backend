@@ -783,9 +783,20 @@ class CenterAttendanceService extends BaseService
             return null;
         }
 
-        // 5. Permanent Student Card QR: MOTAFAWWEQ:STUDENT:{code}
+        // 5. Permanent Student Card QR: MOTAFAWWEQ:STUDENT:{code} or multi-segment MOTAFAWWEQ:STUDENT:{id}:{passcode}:{barcode}
         if (str_starts_with($clean, 'MOTAFAWWEQ:STUDENT:')) {
-            $subCode = trim(substr($clean, strlen('MOTAFAWWEQ:STUDENT:')));
+            $subCode = trim(substr($trimmed, strlen('MOTAFAWWEQ:STUDENT:')));
+            if (str_contains($subCode, ':')) {
+                $segments = array_reverse(array_values(array_filter(array_map('trim', explode(':', $subCode)))));
+                foreach ($segments as $segment) {
+                    $hit = $this->resolveEnrollmentInGroup($group, $segment);
+                    if ($hit) {
+                        return $hit;
+                    }
+                }
+
+                return null;
+            }
 
             return $this->resolveEnrollmentInGroup($group, $subCode);
         }

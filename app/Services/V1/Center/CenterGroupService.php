@@ -99,11 +99,25 @@ class CenterGroupService extends BaseService
             $occupiedHalls = min($totalRoomsCount, $groups->pluck('hall_name')->filter()->unique()->count());
         }
 
+        $groupIds = $groups->pluck('id')->all();
+        $averageAttendanceRate = 0.0;
+        if (! empty($groupIds)) {
+            $hasSessions = GroupAttendanceSession::whereIn('study_group_id', $groupIds)->exists();
+            if ($hasSessions) {
+                $avg = GroupEnrollment::whereIn('study_group_id', $groupIds)
+                    ->where('status', EnrollmentStatus::ENROLLED->value)
+                    ->avg('attendance_rate');
+                $averageAttendanceRate = $avg !== null ? round((float) $avg, 1) : 0.0;
+            }
+        }
+
         return [
             'groups' => $groups->map(fn (StudyGroup $g) => $this->formatGroup($g))->values()->all(),
             'summary' => [
                 'totalGroups' => $groups->count(),
                 'totalEnrolledStudents' => (int) $groups->sum('enrolled_count'),
+                'pendingRequestsCount' => (int) $groups->sum('pending_count'),
+                'averageAttendanceRate' => $averageAttendanceRate,
                 'hallsInUse' => $occupiedHalls,
                 'totalRoomsCount' => $totalRoomsCount,
                 'totalCenterCapacity' => $totalRoomsCapacity,
@@ -161,7 +175,7 @@ class CenterGroupService extends BaseService
         }
 
         $profile = CenterProfile::where('user_id', $center->id)->first();
-        $centerName = $branch?->name_ar ?: ($profile?->name_ar ?: ($center->name ?: 'السنتر التعليمي'));
+        $centerName = $branch?->name_ar ?: ($profile?->name_ar ?: 'السنتر التعليمي');
         $hallName = $room?->name_ar ?: trim(strip_tags((string) ($data['hall_name'] ?? $data['hallName'] ?? 'القاعة الرئيسية')));
         $teacherNameAr = $centerTeacher?->name_ar
             ?: trim(strip_tags((string) ($data['teacher_name_ar'] ?? $data['teacherNameAr'] ?? 'معلم معتمد')));
@@ -825,7 +839,24 @@ class CenterGroupService extends BaseService
             'due_amount_egp' => $dueAmount,
         ], 'info', $enrollment);
 
-        return $this->formatEnrollment($enrollment->fresh(['student', 'student.studentProfile']), $group, 'absent', null);
+        $todaySession = GroupAttendanceSession::where('study_group_id', $group->id)
+            ->whereDate('session_date', now()->toDateString())
+            ->first();
+        $todayRec = $todaySession
+            ? GroupAttendanceRecord::where('attendance_session_id', $todaySession->id)
+                ->where('group_enrollment_id', $enrollment->id)
+                ->first()
+            : null;
+        $todayStatus = $todayRec
+            ? ($todayRec->status instanceof AttendanceStatus ? $todayRec->status->value : (string) $todayRec->status)
+            : 'absent';
+
+        return $this->formatEnrollment(
+            $enrollment->fresh(['student', 'student.studentProfile']),
+            $group,
+            $todayStatus,
+            $todayRec?->scanned_at?->toIso8601String()
+        );
     }
 
     /**

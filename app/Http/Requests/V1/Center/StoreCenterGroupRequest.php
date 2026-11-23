@@ -50,6 +50,8 @@ class StoreCenterGroupRequest extends BaseApiRequest
             'teacherId' => 'center_teacher_id',
             'teacher_id' => 'center_teacher_id',
             'teacherNameAr' => 'teacher_name_ar',
+            'teacher_name_override' => 'teacher_name_ar',
+            'teacherNameOverride' => 'teacher_name_ar',
             'hallName' => 'hall_name',
             'scheduleAr' => 'schedule_ar',
             'maxStudents' => 'max_students',

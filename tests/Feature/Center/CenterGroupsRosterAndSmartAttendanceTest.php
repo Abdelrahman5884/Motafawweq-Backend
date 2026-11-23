@@ -191,6 +191,40 @@ class CenterGroupsRosterAndSmartAttendanceTest extends TestCase
         $this->postJson("/api/v1/center/groups/{$groupOpen['id']}/enrollments/{$pendingEnrollmentUuid}/accept")
             ->assertOk()
             ->assertJsonPath('data.enrollmentId', $pendingEnrollmentUuid);
+
+        // 12. Teacher name override, code regeneration, payment status update preserving attendance, and multi-segment QR scan
+        $customTeacherGroup = $this->postJson('/api/v1/center/groups', [
+            'name_ar' => 'فيزياء متقدمة',
+            'subject_ar' => 'الفيزياء',
+            'teacher_name_override' => 'د. طارق منصور',
+            'room_id' => $roomId,
+            'schedule_slots' => [
+                ['day' => 'monday', 'start_time' => '16:00', 'end_time' => '18:00', 'room_id' => $roomId],
+            ],
+        ])->assertStatus(201)->json('data');
+
+        $this->assertSame('د. طارق منصور', $customTeacherGroup['teacherNameAr']);
+
+        $regen = $this->postJson("/api/v1/center/groups/{$customTeacherGroup['id']}/regenerate-code")
+            ->assertOk()
+            ->json('data');
+        $this->assertNotSame($customTeacherGroup['joinCode'], $regen['joinCode']);
+
+        // Update payment on enr1 (who was scanned present in step 6) and ensure todayStatus stays 'present'
+        $updatedPayment = $this->patchJson("/api/v1/center/groups/{$group['id']}/enrollments/{$enr1['enrollmentId']}/payment", [
+            'payment_status' => 'paid',
+            'due_amount_egp' => 0,
+        ])->assertOk()->json('data');
+
+        $this->assertSame('paid', $updatedPayment['paymentStatus']);
+        $this->assertSame('present', $updatedPayment['todayStatus']);
+
+        // Multi-segment MOTAFAWWEQ:STUDENT:{id}:{passcode}:{barcode} resolves in a single scan call
+        $multiSegmentQr = "MOTAFAWWEQ:STUDENT:{$enr2['enrollmentId']}:{$enr2['passcode']}:{$enr2['barcode']}";
+        $this->postJson("/api/v1/center/groups/{$group['id']}/attendance/scan", [
+            'code' => $multiSegmentQr,
+        ])->assertOk()
+            ->assertJsonPath('data.enrollmentId', $enr2['enrollmentId']);
     }
 
     public function test_dashboard_live_daily_queue_complete_restore_and_reset(): void
