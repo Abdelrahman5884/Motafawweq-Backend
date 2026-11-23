@@ -269,6 +269,7 @@ return [
         'white_label_requires_pro' => 'Custom domains and white-label branding require the Center Pro plan.',
         'quota_branches_exceeded' => 'You have reached the maximum branch limit (:max) on your :plan. Please upgrade to add more branches.',
         'quota_rooms_exceeded' => 'You have reached the maximum classroom limit (:max) on your :plan. Please upgrade to add more rooms.',
+        'quota_groups_exceeded' => 'You have reached the maximum study cohorts limit (:max) on your :plan. Please upgrade to create more cohorts.',
         'quota_teachers_exceeded' => 'You have reached the maximum teachers limit (:max) on your :plan. Please upgrade to add more teachers.',
         'quota_staff_exceeded' => 'You have reached the maximum staff accounts limit (:max) on your :plan. Please upgrade to add more staff.',
         'quota_users_exceeded' => 'You have reached the maximum active users capacity (:max) on your :plan. Please upgrade to onboard more users.',

@@ -51,8 +51,20 @@ enum CenterPlanTier: string
     public function maxUsers(): ?int
     {
         return match ($this) {
-            self::FREE => 100,
+            self::FREE => 20,
             self::PLUS => 500,
+            self::PRO => null,
+        };
+    }
+
+    /**
+     * Maximum active study groups / cohorts across the center, null = unlimited.
+     */
+    public function maxGroups(): ?int
+    {
+        return match ($this) {
+            self::FREE => 2,
+            self::PLUS => 20,
             self::PRO => null,
         };
     }
@@ -63,7 +75,7 @@ enum CenterPlanTier: string
     public function maxTeachers(): ?int
     {
         return match ($this) {
-            self::FREE => 3,
+            self::FREE => 2,
             self::PLUS => 12,
             self::PRO => null,
         };
@@ -75,7 +87,7 @@ enum CenterPlanTier: string
     public function maxRooms(): ?int
     {
         return match ($this) {
-            self::FREE => 2,
+            self::FREE => 1,
             self::PLUS => 8,
             self::PRO => null,
         };
@@ -99,7 +111,7 @@ enum CenterPlanTier: string
     public function maxStaff(): ?int
     {
         return match ($this) {
-            self::FREE => 3,
+            self::FREE => 0,
             self::PLUS => 15,
             self::PRO => null,
         };
@@ -110,9 +122,29 @@ enum CenterPlanTier: string
         return $this->meets(self::PLUS);
     }
 
+    public function allowsMasterSchedule(): bool
+    {
+        return $this->meets(self::PLUS);
+    }
+
+    public function allowsStaffManagement(): bool
+    {
+        return $this->meets(self::PLUS);
+    }
+
     public function allowsFinancials(): bool
     {
         return $this->meets(self::PLUS);
+    }
+
+    public function allowsAuditLogs(): bool
+    {
+        return $this->meets(self::PRO);
+    }
+
+    public function allowsExecutiveReports(): bool
+    {
+        return $this->meets(self::PRO);
     }
 
     public function allowsWhatsappAlerts(): bool
@@ -133,8 +165,8 @@ enum CenterPlanTier: string
     public static function requiredTierForFeature(string $feature): self
     {
         return match ($feature) {
-            'qr_scanner', 'financials', 'settlements', 'expenses' => self::PLUS,
-            'whatsapp_alerts', 'white_label', 'cloud_backup' => self::PRO,
+            'qr_scanner', 'master_schedule', 'staff_management', 'financials', 'settlements', 'expenses' => self::PLUS,
+            'audit_logs', 'executive_reports', 'whatsapp_alerts', 'white_label', 'cloud_backup' => self::PRO,
             default => self::FREE,
         };
     }
@@ -151,9 +183,13 @@ enum CenterPlanTier: string
     {
         return [
             'qr_scanner' => $this->allowsQrScanner(),
+            'master_schedule' => $this->allowsMasterSchedule(),
+            'staff_management' => $this->allowsStaffManagement(),
             'financials' => $this->allowsFinancials(),
             'settlements' => $this->allowsFinancials(),
             'expenses' => $this->allowsFinancials(),
+            'audit_logs' => $this->allowsAuditLogs(),
+            'executive_reports' => $this->allowsExecutiveReports(),
             'whatsapp_alerts' => $this->allowsWhatsappAlerts(),
             'white_label' => $this->allowsWhiteLabel(),
             'cloud_backup' => $this->allowsCloudBackup(),
@@ -167,6 +203,7 @@ enum CenterPlanTier: string
     {
         return [
             'maxUsers' => $this->maxUsers(),
+            'maxGroups' => $this->maxGroups(),
             'maxTeachers' => $this->maxTeachers(),
             'maxRooms' => $this->maxRooms(),
             'maxBranches' => $this->maxBranches(),

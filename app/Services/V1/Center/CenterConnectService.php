@@ -170,6 +170,22 @@ class CenterConnectService extends BaseService
             ]);
         }
 
+        // Enforce active users & teachers quota so Motafawweq Connect cannot bypass plan limits
+        $tier = $this->billingService->resolveActivePlanTier($center);
+        $usage = $this->billingService->getUsageStats($center);
+        if ($target->role === UserRole::TEACHER) {
+            $maxTeachers = $tier->maxTeachers();
+            if ($maxTeachers !== null && $usage['teachersCount'] >= $maxTeachers) {
+                throw ValidationException::withMessages([
+                    'quota' => [__('messages.center.quota_teachers_exceeded', [
+                        'max' => $maxTeachers,
+                        'plan' => $tier->label(),
+                    ])],
+                ]);
+            }
+        }
+        $this->billingService->assertUsersQuotaAvailable($center, 1);
+
         $branchId = null;
         if ($branchUuid && $branchUuid !== 'all') {
             $branchId = $this->branchService->findOwnedBranch($center, $branchUuid)->id;

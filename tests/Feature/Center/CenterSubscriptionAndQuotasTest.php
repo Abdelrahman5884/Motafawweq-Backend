@@ -34,11 +34,18 @@ class CenterSubscriptionAndQuotasTest extends TestCase
             ->assertJsonPath('data.role', 'center')
             ->assertJsonPath('data.plan_tier', 'free')
             ->assertJsonPath('data.unlocked_features.qr_scanner', false)
+            ->assertJsonPath('data.unlocked_features.master_schedule', false)
+            ->assertJsonPath('data.unlocked_features.staff_management', false)
             ->assertJsonPath('data.unlocked_features.financials', false)
+            ->assertJsonPath('data.unlocked_features.audit_logs', false)
+            ->assertJsonPath('data.unlocked_features.executive_reports', false)
             ->assertJsonPath('data.unlocked_features.cloud_backup', false)
+            ->assertJsonPath('data.plan_quotas.maxUsers', 20)
+            ->assertJsonPath('data.plan_quotas.maxGroups', 2)
             ->assertJsonPath('data.plan_quotas.maxBranches', 1)
-            ->assertJsonPath('data.plan_quotas.maxRooms', 2)
-            ->assertJsonPath('data.plan_quotas.maxTeachers', 3);
+            ->assertJsonPath('data.plan_quotas.maxRooms', 1)
+            ->assertJsonPath('data.plan_quotas.maxTeachers', 2)
+            ->assertJsonPath('data.plan_quotas.maxStaff', 0);
     }
 
     public function test_free_tier_enforces_quotas_and_blocks_paid_features(): void
@@ -56,15 +63,16 @@ class CenterSubscriptionAndQuotasTest extends TestCase
             ->assertJsonPath('error_code', 'PLAN_QUOTA_EXCEEDED')
             ->assertJsonPath('feature', 'branches');
 
-        // 2 rooms allowed on Free; 3rd blocked
-        $this->postJson('/api/v1/center/rooms', ['name_ar' => 'قاعة 1', 'branch_id' => $branchId, 'capacity' => 40])->assertStatus(201);
-        $this->postJson('/api/v1/center/rooms', ['name_ar' => 'قاعة 2', 'branch_id' => $branchId, 'capacity' => 40])->assertStatus(201);
-        $this->postJson('/api/v1/center/rooms', ['name_ar' => 'قاعة 3', 'branch_id' => $branchId, 'capacity' => 40])
+        // 1 room allowed on Free; 2nd blocked
+        $roomRes = $this->postJson('/api/v1/center/rooms', ['name_ar' => 'قاعة 1', 'branch_id' => $branchId, 'capacity' => 40])->assertStatus(201);
+        $roomId = $roomRes->json('data.id');
+        $this->postJson('/api/v1/center/rooms', ['name_ar' => 'قاعة 2', 'branch_id' => $branchId, 'capacity' => 40])
             ->assertStatus(403)
-            ->assertJsonPath('error_code', 'PLAN_QUOTA_EXCEEDED');
+            ->assertJsonPath('error_code', 'PLAN_QUOTA_EXCEEDED')
+            ->assertJsonPath('feature', 'rooms');
 
-        // 3 teachers allowed on Free; 4th blocked
-        for ($i = 1; $i <= 3; $i++) {
+        // 2 teachers allowed on Free; 3rd blocked
+        for ($i = 1; $i <= 2; $i++) {
             $this->postJson('/api/v1/center/teachers', [
                 'name_ar' => "مدرس {$i}",
                 'subject_ar' => 'رياضيات',
@@ -73,13 +81,67 @@ class CenterSubscriptionAndQuotasTest extends TestCase
             ])->assertStatus(201);
         }
         $this->postJson('/api/v1/center/teachers', [
-            'name_ar' => 'مدرس 4',
+            'name_ar' => 'مدرس 3',
             'subject_ar' => 'فيزياء',
-            'email' => 't4@center.test',
+            'email' => 't3@center.test',
             'branch_id' => $branchId,
         ])->assertStatus(403)->assertJsonPath('error_code', 'PLAN_QUOTA_EXCEEDED');
 
+        // 2 groups allowed on Free; 3rd blocked
+        $g1 = $this->postJson('/api/v1/center/groups', [
+            'name_ar' => 'مجموعة 1',
+            'subject_ar' => 'رياضيات',
+            'grade_ar' => '3 ثانوي',
+            'branch_id' => $branchId,
+            'room_id' => $roomId,
+            'slots' => [['day' => 'saturday', 'start_time' => '10:00', 'end_time' => '12:00']],
+        ])->assertStatus(201)->json('data.id');
+
+        $this->postJson('/api/v1/center/groups', [
+            'name_ar' => 'مجموعة 2',
+            'subject_ar' => 'فيزياء',
+            'grade_ar' => '3 ثانوي',
+            'branch_id' => $branchId,
+            'room_id' => $roomId,
+            'slots' => [['day' => 'sunday', 'start_time' => '10:00', 'end_time' => '12:00']],
+        ])->assertStatus(201);
+
+        $this->postJson('/api/v1/center/groups', [
+            'name_ar' => 'مجموعة 3',
+            'subject_ar' => 'كيمياء',
+            'grade_ar' => '3 ثانوي',
+            'branch_id' => $branchId,
+            'room_id' => $roomId,
+            'slots' => [['day' => 'monday', 'start_time' => '10:00', 'end_time' => '12:00']],
+        ])->assertStatus(403)
+            ->assertJsonPath('error_code', 'PLAN_QUOTA_EXCEEDED')
+            ->assertJsonPath('feature', 'groups');
+
+        // 20 active users max on Free (2 teachers already exist => 18 students allowed, 19th blocked)
+        for ($s = 1; $s <= 18; $s++) {
+            $this->postJson("/api/v1/center/groups/{$g1}/students", [
+                'name_ar' => "طالب {$s}",
+                'phone' => '0109900'.str_pad((string) $s, 4, '0', STR_PAD_LEFT),
+            ])->assertStatus(201);
+        }
+        $this->postJson("/api/v1/center/groups/{$g1}/students", [
+            'name_ar' => 'طالب 19 يتجاوز الحد',
+            'phone' => '01099009999',
+        ])->assertStatus(403)
+            ->assertJsonPath('error_code', 'PLAN_QUOTA_EXCEEDED')
+            ->assertJsonPath('feature', 'users');
+
         // Paid feature gates on Free tier
+        $this->getJson('/api/v1/center/schedule?day=saturday')
+            ->assertStatus(403)
+            ->assertJsonPath('error_code', 'SUBSCRIPTION_REQUIRED')
+            ->assertJsonPath('required_plan', 'plus');
+
+        $this->getJson('/api/v1/center/staff')
+            ->assertStatus(403)
+            ->assertJsonPath('error_code', 'SUBSCRIPTION_REQUIRED')
+            ->assertJsonPath('required_plan', 'plus');
+
         $this->getJson('/api/v1/center/financials/overview')
             ->assertStatus(403)
             ->assertJsonPath('error_code', 'SUBSCRIPTION_REQUIRED')
@@ -89,6 +151,16 @@ class CenterSubscriptionAndQuotasTest extends TestCase
             ->assertStatus(403)
             ->assertJsonPath('error_code', 'SUBSCRIPTION_REQUIRED')
             ->assertJsonPath('required_plan', 'plus');
+
+        $this->getJson('/api/v1/center/audit-logs')
+            ->assertStatus(403)
+            ->assertJsonPath('error_code', 'SUBSCRIPTION_REQUIRED')
+            ->assertJsonPath('required_plan', 'pro');
+
+        $this->getJson('/api/v1/center/reports/executive')
+            ->assertStatus(403)
+            ->assertJsonPath('error_code', 'SUBSCRIPTION_REQUIRED')
+            ->assertJsonPath('required_plan', 'pro');
 
         $this->postJson('/api/v1/center/backups')
             ->assertStatus(403)

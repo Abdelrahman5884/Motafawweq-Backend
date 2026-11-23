@@ -51,6 +51,11 @@ class CheckCenterPlanQuota
                 'current' => $usage['roomsCount'],
                 'key' => 'messages.center.quota_rooms_exceeded',
             ],
+            'groups' => [
+                'limit' => $tier->maxGroups(),
+                'current' => $usage['groupsCount'],
+                'key' => 'messages.center.quota_groups_exceeded',
+            ],
             'teachers' => [
                 'limit' => $tier->maxTeachers(),
                 'current' => $usage['teachersCount'],

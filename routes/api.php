@@ -647,7 +647,7 @@ Route::prefix('v1')->group(function () {
                     Route::post('/reset', [CenterDashboardController::class, 'resetQueue']);
                 });
                 Route::get('/reports/executive', [CenterDashboardController::class, 'executiveReport'])
-                    ->middleware('throttle:center-read');
+                    ->middleware(['throttle:center-read', 'center.plan:executive_reports']);
 
                 // Branches CRUD & Export (Quota-gated on creation)
                 Route::prefix('branches')->group(function () {
@@ -685,7 +685,7 @@ Route::prefix('v1')->group(function () {
                         ->middleware('throttle:center-write');
                 });
 
-                Route::prefix('schedule')->group(function () {
+                Route::prefix('schedule')->middleware('center.plan:master_schedule')->group(function () {
                     Route::get('/', [CenterRoomController::class, 'masterSchedule'])
                         ->middleware('throttle:center-read');
                     Route::get('/availability', [CenterRoomController::class, 'slotAvailability'])
@@ -727,7 +727,7 @@ Route::prefix('v1')->group(function () {
                 });
 
                 // Administrative Staff Roles & Immutable Tenant Audit Trail
-                Route::prefix('staff')->group(function () {
+                Route::prefix('staff')->middleware('center.plan:staff_management')->group(function () {
                     Route::get('/', [CenterStaffController::class, 'index'])
                         ->middleware('throttle:center-read');
                     Route::post('/', [CenterStaffController::class, 'store'])
@@ -741,7 +741,7 @@ Route::prefix('v1')->group(function () {
                 });
 
                 Route::get('/audit-logs', [CenterStaffController::class, 'auditLogs'])
-                    ->middleware('throttle:center-read');
+                    ->middleware(['throttle:center-read', 'center.plan:audit_logs']);
 
                 // Study Groups, Cohorts, Rosters, Student Enrollment & Group Attendance
                 Route::get('/students/search', [CenterGroupController::class, 'searchStudents'])
@@ -751,7 +751,7 @@ Route::prefix('v1')->group(function () {
                     Route::get('/', [CenterGroupController::class, 'index'])
                         ->middleware('throttle:center-read');
                     Route::post('/', [CenterGroupController::class, 'store'])
-                        ->middleware('throttle:center-write');
+                        ->middleware(['throttle:center-write', 'center.quota:groups']);
                     Route::get('/{uuid}', [CenterGroupController::class, 'show'])
                         ->whereUuid('uuid')
                         ->middleware('throttle:center-read');
