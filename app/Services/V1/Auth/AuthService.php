@@ -291,7 +291,7 @@ class AuthService extends BaseService
         }
 
         $this->transaction(function () use ($user) {
-            if ($user->avatar && preg_match('#/storage/(avatars/(?:students|teachers)/[a-zA-Z0-9\-]+\.(jpg|png|webp))$#', $user->avatar, $matches)) {
+            if ($user->avatar && preg_match('#/storage/(avatars/(?:students|teachers|centers)/[a-zA-Z0-9\-]+\.(jpg|png|webp))$#', $user->avatar, $matches)) {
                 Storage::disk('public')->delete($matches[1]);
             }
 

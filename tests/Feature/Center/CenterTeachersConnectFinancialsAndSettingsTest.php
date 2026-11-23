@@ -9,6 +9,8 @@ use App\Models\CenterProfile;
 use App\Models\CenterSubscription;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -286,5 +288,66 @@ class CenterTeachersConnectFinancialsAndSettingsTest extends TestCase
         $this->assertEquals(2, $backup['recordsSummary']['enrollments']);
 
         $this->getJson('/api/v1/center/backups')->assertOk()->assertJsonCount(1, 'data');
+    }
+
+    public function test_center_profile_manager_name_avatar_lifecycle_and_account_deletion(): void
+    {
+        Storage::fake('public');
+
+        $center = $this->createProCenter();
+        $center->forceFill([
+            'name' => 'أ. طارق منصور',
+            'password' => 'CenterPass@2026!',
+        ])->save();
+        Sanctum::actingAs($center, ['access']);
+
+        // 1. Update center identity, manager name & preferences
+        $updated = $this->putJson('/api/v1/center/settings', [
+            'name_ar' => 'سنتر النخبة التعليمي',
+            'name_en' => 'Elite Educational Center',
+            'manager_name' => 'م. طارق منصور',
+            'phone' => '01099887766',
+            'working_hours' => '09:00 ص - 09:00 م',
+            'address_ar' => 'الدقي، الجيزة',
+            'preferred_theme' => 'dark',
+            'preferred_lang' => 'ar',
+        ])->assertOk();
+
+        $updated->assertJsonPath('data.centerNameAr', 'سنتر النخبة التعليمي')
+            ->assertJsonPath('data.managerName', 'م. طارق منصور')
+            ->assertJsonPath('data.phone', '01099887766')
+            ->assertJsonPath('data.preferredTheme', 'dark');
+
+        $this->assertSame('م. طارق منصور', $center->fresh()->name);
+        $this->assertSame('01099887766', $center->fresh()->phone);
+
+        // 2. Upload & Delete Center Avatar (real 1x1 PNG magic bytes)
+        $pngBinary = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+        $tmpFile = UploadedFile::fake()->createWithContent('center-logo.png', $pngBinary);
+
+        $avatarRes = $this->post('/api/v1/center/settings/avatar', [
+            'avatar' => $tmpFile,
+        ], ['Accept' => 'application/json'])->assertOk();
+
+        $avatarUrl = $avatarRes->json('data.avatar');
+        $this->assertNotEmpty($avatarUrl);
+        $this->assertSame($avatarUrl, $center->fresh()->avatar);
+
+        $deleteAvatarRes = $this->deleteJson('/api/v1/center/settings/avatar')->assertOk();
+        $this->assertNull($deleteAvatarRes->json('data.avatar'));
+        $this->assertNull($center->fresh()->avatar);
+
+        // 3. Permanent Center Account Deletion (DELETE /api/v1/auth/account)
+        $centerId = $center->id;
+        $this->deleteJson('/api/v1/auth/account', [
+            'password' => 'WrongPass@123',
+        ])->assertStatus(422);
+
+        $this->deleteJson('/api/v1/auth/account', [
+            'password' => 'CenterPass@2026!',
+        ])->assertOk();
+
+        $this->assertDatabaseMissing('users', ['id' => $centerId]);
+        $this->assertDatabaseMissing('center_profiles', ['user_id' => $centerId]);
     }
 }

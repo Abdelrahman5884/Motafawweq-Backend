@@ -849,6 +849,10 @@ Route::prefix('v1')->group(function () {
                         ->middleware('throttle:center-read');
                     Route::put('/', [CenterSettingsController::class, 'update'])
                         ->middleware('throttle:center-write');
+                    Route::post('/avatar', [CenterSettingsController::class, 'uploadAvatar'])
+                        ->middleware('throttle:center-write');
+                    Route::delete('/avatar', [CenterSettingsController::class, 'deleteAvatar'])
+                        ->middleware('throttle:center-write');
                     Route::put('/kpis', [CenterSettingsController::class, 'updateKpis'])
                         ->middleware('throttle:center-write');
                 });

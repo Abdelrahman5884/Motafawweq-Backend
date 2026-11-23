@@ -13,6 +13,7 @@ class UpdateCenterSettingsRequest extends BaseApiRequest
         return [
             'name_ar' => ['sometimes', 'string', 'min:2', 'max:180'],
             'name_en' => ['nullable', 'string', 'max:180'],
+            'manager_name' => ['sometimes', 'nullable', 'string', 'min:2', 'max:150'],
             'phone' => ['nullable', 'string', 'max:40'],
             'address_ar' => ['nullable', 'string', 'max:255'],
             'address_en' => ['nullable', 'string', 'max:255'],
@@ -42,6 +43,7 @@ class UpdateCenterSettingsRequest extends BaseApiRequest
             'nameAr' => 'name_ar',
             'centerNameEn' => 'name_en',
             'nameEn' => 'name_en',
+            'managerName' => 'manager_name',
             'centerPhone' => 'phone',
             'centerAddress' => 'address_ar',
             'addressAr' => 'address_ar',

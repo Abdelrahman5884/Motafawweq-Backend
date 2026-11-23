@@ -16,11 +16,17 @@ use App\Models\CenterTeacher;
 use App\Models\GroupAttendanceRecord;
 use App\Models\GroupAttendanceSession;
 use App\Models\GroupEnrollment;
+use App\Models\StoredFile;
 use App\Models\StudyGroup;
 use App\Models\User;
 use App\Services\BaseService;
+use finfo;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class CenterSettingsService extends BaseService
 {
@@ -40,7 +46,7 @@ class CenterSettingsService extends BaseService
         $profile = $this->firstOrCreateProfile($center);
         $planTier = $this->billingService->resolveActivePlanTier($center);
 
-        return $this->formatProfile($profile, $planTier);
+        return $this->formatProfile($profile, $planTier, $center);
     }
 
     /**
@@ -53,8 +59,9 @@ class CenterSettingsService extends BaseService
         $profile = $this->firstOrCreateProfile($center);
         $planTier = $this->billingService->resolveActivePlanTier($center);
 
-        $updated = $this->transaction(function () use ($profile, $planTier, $data) {
+        $updated = $this->transaction(function () use ($center, $profile, $planTier, $data) {
             $payload = [];
+            $userUpdates = [];
 
             if (array_key_exists('name_ar', $data) || array_key_exists('centerNameAr', $data)) {
                 $payload['name_ar'] = trim(strip_tags((string) ($data['name_ar'] ?? $data['centerNameAr'])));
@@ -62,8 +69,16 @@ class CenterSettingsService extends BaseService
             if (array_key_exists('name_en', $data) || array_key_exists('centerNameEn', $data)) {
                 $payload['name_en'] = trim(strip_tags((string) ($data['name_en'] ?? $data['centerNameEn'])));
             }
+            if (array_key_exists('manager_name', $data) || array_key_exists('managerName', $data)) {
+                $managerName = trim(strip_tags((string) ($data['manager_name'] ?? $data['managerName'] ?? '')));
+                if ($managerName !== '') {
+                    $userUpdates['name'] = $managerName;
+                }
+            }
             if (array_key_exists('phone', $data) || array_key_exists('centerPhone', $data)) {
-                $payload['phone'] = trim(strip_tags((string) ($data['phone'] ?? $data['centerPhone'])));
+                $cleanPhone = trim(strip_tags((string) ($data['phone'] ?? $data['centerPhone'] ?? '')));
+                $payload['phone'] = $cleanPhone;
+                $userUpdates['phone'] = $cleanPhone !== '' ? $cleanPhone : null;
             }
             if (array_key_exists('address_ar', $data) || array_key_exists('centerAddress', $data)) {
                 $payload['address_ar'] = trim(strip_tags((string) ($data['address_ar'] ?? $data['centerAddress'])));
@@ -121,18 +136,140 @@ class CenterSettingsService extends BaseService
                 $payload['custom_domain'] = strtolower(trim(strip_tags((string) $data['custom_domain'])));
             }
 
+            if (! empty($userUpdates)) {
+                $center->update($userUpdates);
+            }
+
             if (! empty($payload)) {
                 $profile->update($payload);
             }
 
             $this->logSecurityEvent('center.settings.updated', [
-                'changes' => array_keys($payload),
+                'changes' => array_merge(array_keys($payload), array_keys($userUpdates)),
             ], 'info', $profile);
 
             return $profile->fresh();
         });
 
-        return $this->formatProfile($updated, $planTier);
+        return $this->formatProfile($updated, $planTier, $center->fresh());
+    }
+
+    /**
+     * Securely upload and replace the center's logo/avatar image.
+     *
+     * @return array<string, mixed>
+     */
+    public function uploadAvatar(User $center, UploadedFile $file): array
+    {
+        $realPath = $file->getRealPath();
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $detectedMime = $realPath ? $finfo->file($realPath) : $file->getMimeType();
+
+        $allowedMimes = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+        ];
+
+        if (! isset($allowedMimes[$detectedMime])) {
+            throw ValidationException::withMessages([
+                'avatar' => [__('messages.invalid_image_signature')],
+            ]);
+        }
+
+        $planTier = $this->billingService->resolveActivePlanTier($center);
+
+        $updated = $this->transaction(function () use ($center, $file, $allowedMimes, $detectedMime) {
+            $profile = $this->firstOrCreateProfile($center);
+
+            $extension = $allowedMimes[$detectedMime];
+            $binary = file_get_contents($file->getRealPath());
+            $disk = $this->getAvatarDisk();
+            $filename = ($disk === 'supabase')
+                ? 'users/profiles/'.$center->id.'_'.Str::uuid().'.'.$extension
+                : 'avatars/centers/'.Str::uuid().'.'.$extension;
+
+            $stored = false;
+            try {
+                $stored = (bool) Storage::disk($disk)->put($filename, $binary);
+            } catch (Throwable) {
+                $stored = false;
+            }
+
+            if (! $stored && $disk === 'supabase') {
+                $disk = 'public';
+                $filename = 'avatars/centers/'.Str::uuid().'.'.$extension;
+                $stored = (bool) Storage::disk('public')->put($filename, $binary);
+            }
+
+            if (! $stored) {
+                throw ValidationException::withMessages([
+                    'avatar' => [__('messages.general_error')],
+                ]);
+            }
+
+            $this->cleanupExistingAvatarFiles($center);
+
+            $publicUrl = ($disk === 'supabase' && method_exists(Storage::disk($disk), 'temporaryUrl'))
+                ? Storage::disk($disk)->temporaryUrl($filename, now()->addDays(7))
+                : Storage::disk($disk)->url($filename);
+
+            $center->update(['avatar' => $publicUrl]);
+            $profile->update(['logo_url' => $publicUrl]);
+
+            StoredFile::create([
+                'uuid' => (string) Str::uuid(),
+                'user_id' => $center->id,
+                'entity_type' => 'user_avatar',
+                'entity_id' => (string) $center->id,
+                'original_filename' => basename($file->getClientOriginalName()),
+                'storage_disk' => $disk,
+                'storage_path' => $filename,
+                'mime_type' => $detectedMime,
+                'file_size_bytes' => (int) $file->getSize(),
+                'storage_provider' => $disk === 'supabase' ? 'supabase' : 'local',
+                'upload_status' => 'completed',
+            ]);
+
+            $this->logSecurityEvent(
+                'center.avatar.uploaded',
+                [
+                    'mime_type' => $detectedMime,
+                    'size' => $file->getSize(),
+                    'disk' => $disk,
+                ],
+                'info',
+                $profile
+            );
+
+            return $profile->fresh();
+        });
+
+        return $this->formatProfile($updated, $planTier, $center->fresh());
+    }
+
+    /**
+     * Remove the center's uploaded logo/avatar image so the UI reverts to initials.
+     *
+     * @return array<string, mixed>
+     */
+    public function deleteAvatar(User $center): array
+    {
+        $planTier = $this->billingService->resolveActivePlanTier($center);
+
+        $updated = $this->transaction(function () use ($center) {
+            $profile = $this->firstOrCreateProfile($center);
+
+            $this->cleanupExistingAvatarFiles($center);
+            $center->update(['avatar' => null]);
+            $profile->update(['logo_url' => null]);
+
+            $this->logSecurityEvent('center.avatar.deleted', [], 'info', $profile);
+
+            return $profile->fresh();
+        });
+
+        return $this->formatProfile($updated, $planTier, $center->fresh());
     }
 
     /**
@@ -162,7 +299,7 @@ class CenterSettingsService extends BaseService
 
         $this->logSecurityEvent('center.settings.kpis_updated', $payload, 'info', $profile);
 
-        return $this->formatProfile($profile->fresh(), $planTier);
+        return $this->formatProfile($profile->fresh(), $planTier, $center);
     }
 
     /* =====================================================================
@@ -565,12 +702,55 @@ class CenterSettingsService extends BaseService
         return $this->branchService->findOwnedBranch($center, (string) $branchUuid)->id;
     }
 
+    protected function getAvatarDisk(): string
+    {
+        if (app()->environment('testing')) {
+            return 'public';
+        }
+
+        return config('filesystems.disks.supabase.key') ? 'supabase' : 'public';
+    }
+
+    protected function cleanupExistingAvatarFiles(User $center): void
+    {
+        $this->deleteOldLocalAvatar($center->avatar);
+
+        $previousFiles = StoredFile::where('user_id', $center->id)
+            ->where('entity_type', 'user_avatar')
+            ->get();
+
+        foreach ($previousFiles as $storedFile) {
+            try {
+                if ($storedFile->storage_disk && $storedFile->storage_path) {
+                    Storage::disk($storedFile->storage_disk)->delete($storedFile->storage_path);
+                }
+            } catch (Throwable) {
+                // Ignore remote cleanup failures so profile update never blocks
+            }
+
+            $storedFile->delete();
+        }
+    }
+
+    protected function deleteOldLocalAvatar(?string $oldAvatarUrl): void
+    {
+        if (! $oldAvatarUrl) {
+            return;
+        }
+
+        if (preg_match('#/storage/(avatars/centers/[a-zA-Z0-9\-]+\.(jpg|png|webp))$#', $oldAvatarUrl, $matches)) {
+            Storage::disk('public')->delete($matches[1]);
+        }
+    }
+
     /**
      * @return array<string, mixed>
      */
-    protected function formatProfile(CenterProfile $p, CenterPlanTier $tier): array
+    protected function formatProfile(CenterProfile $p, CenterPlanTier $tier, ?User $center = null): array
     {
+        $owner = $center ?? $p->user;
         $refundVal = $p->refund_policy instanceof CenterRefundPolicy ? $p->refund_policy->value : (string) $p->refund_policy;
+        $resolvedAvatar = $owner?->avatar ?: $p->logo_url;
 
         return [
             'id' => $p->uuid,
@@ -578,15 +758,19 @@ class CenterSettingsService extends BaseService
             'nameEn' => $p->name_en ?: $p->name_ar,
             'centerNameAr' => $p->name_ar,
             'centerNameEn' => $p->name_en ?: $p->name_ar,
-            'phone' => $p->phone ?? '',
-            'centerPhone' => $p->phone ?? '',
+            'managerName' => $owner?->name ?? '',
+            'email' => $owner?->email ?? '',
+            'emailVerified' => (bool) ($owner?->email_verified_at !== null),
+            'phone' => $p->phone ?? $owner?->phone ?? '',
+            'centerPhone' => $p->phone ?? $owner?->phone ?? '',
             'addressAr' => $p->address_ar ?? '',
             'addressEn' => $p->address_en ?? '',
             'centerAddress' => $p->address_ar ?? '',
             'centerAddressEn' => $p->address_en ?? '',
             'workingHours' => $p->working_hours ?? '08:00 ص - 10:00 م',
             'workingHoursAr' => $p->working_hours ?? '08:00 ص - 10:00 م',
-            'logoUrl' => $p->logo_url,
+            'avatar' => $resolvedAvatar,
+            'logoUrl' => $resolvedAvatar,
             'customDomain' => $p->custom_domain,
             'planTier' => $tier->value,
             'planNameAr' => $tier->labelAr(),

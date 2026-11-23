@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Center;
 use App\Http\Controllers\Api\BaseApiController;
 use App\Http\Requests\V1\Center\ImportCenterStudentsRequest;
 use App\Http\Requests\V1\Center\UpdateCenterSettingsRequest;
+use App\Http\Requests\V1\Center\UploadCenterAvatarRequest;
 use App\Services\V1\Center\CenterSettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -29,6 +30,23 @@ class CenterSettingsController extends BaseApiController
             $this->authenticatedUser(),
             $request->validated()
         );
+
+        return $this->successResponse($settings, __('messages.center.settings_updated'));
+    }
+
+    public function uploadAvatar(UploadCenterAvatarRequest $request): JsonResponse
+    {
+        $settings = $this->settingsService->uploadAvatar(
+            $this->authenticatedUser(),
+            $request->file('avatar')
+        );
+
+        return $this->successResponse($settings, __('messages.center.settings_updated'));
+    }
+
+    public function deleteAvatar(): JsonResponse
+    {
+        $settings = $this->settingsService->deleteAvatar($this->authenticatedUser());
 
         return $this->successResponse($settings, __('messages.center.settings_updated'));
     }
