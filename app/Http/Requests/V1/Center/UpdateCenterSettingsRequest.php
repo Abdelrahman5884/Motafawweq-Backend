@@ -39,16 +39,25 @@ class UpdateCenterSettingsRequest extends BaseApiRequest
 
         $map = [
             'centerNameAr' => 'name_ar',
+            'nameAr' => 'name_ar',
             'centerNameEn' => 'name_en',
+            'nameEn' => 'name_en',
             'centerPhone' => 'phone',
             'centerAddress' => 'address_ar',
+            'addressAr' => 'address_ar',
+            'centerAddressEn' => 'address_en',
+            'addressEn' => 'address_en',
             'workingHours' => 'working_hours',
+            'workingHoursAr' => 'working_hours',
             'lateMarginMinutes' => 'late_margin_minutes',
             'siblingDiscountPercent' => 'sibling_discount_percent',
             'mandatoryCashClose' => 'mandatory_cash_close',
             'refundPolicy' => 'refund_policy',
+            'defaultTeacherSettlementRate' => 'default_teacher_settlement_rate',
             'paymentMethods' => 'payment_methods',
             'customDomain' => 'custom_domain',
+            'preferredTheme' => 'preferred_theme',
+            'preferredLang' => 'preferred_lang',
         ];
 
         $merged = [];
