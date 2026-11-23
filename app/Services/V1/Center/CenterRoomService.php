@@ -9,6 +9,7 @@ use App\Models\StudyGroup;
 use App\Models\User;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 
 class CenterRoomService extends BaseService
@@ -57,39 +58,66 @@ class CenterRoomService extends BaseService
             ->withCount('enrolledEnrollments as enrolled_count')
             ->get();
 
-        return $rooms->map(function (CenterRoom $room) use ($activeGroups) {
-            $assignedGroups = $activeGroups->filter(function (StudyGroup $g) use ($room) {
-                if ($g->center_room_id !== null && (int) $g->center_room_id === (int) $room->id) {
+        return $rooms->map(fn (CenterRoom $room) => $this->hydrateRoom($center, $room, $activeGroups))->values()->all();
+    }
+
+    /**
+     * Hydrate a single CenterRoom with its assigned active cohorts and live efficiency percentage.
+     *
+     * @param  Collection<int, StudyGroup>|null  $activeGroups
+     * @return array<string, mixed>
+     */
+    public function hydrateRoom(User $center, CenterRoom $room, $activeGroups = null): array
+    {
+        $groups = $activeGroups ?? StudyGroup::where('center_id', $center->id)
+            ->where('status', 'active')
+            ->with(['scheduleSlots', 'centerTeacher:id,uuid,name_ar'])
+            ->withCount('enrolledEnrollments as enrolled_count')
+            ->get();
+
+        $roomNorm = $this->normalizeHallKey((string) $room->name_ar);
+
+        $assignedGroups = $groups->filter(function (StudyGroup $g) use ($room, $roomNorm) {
+            if ($g->center_room_id !== null && (int) $g->center_room_id === (int) $room->id) {
+                return true;
+            }
+            if ($g->scheduleSlots->contains(fn ($s) => $s->center_room_id !== null && (int) $s->center_room_id === (int) $room->id)) {
+                return true;
+            }
+            if ($g->center_room_id === null && $roomNorm !== '') {
+                if ($this->normalizeHallKey((string) $g->hall_name) === $roomNorm) {
                     return true;
                 }
-                if ($g->scheduleSlots->contains(fn ($s) => $s->center_room_id !== null && (int) $s->center_room_id === (int) $room->id)) {
+                if ($g->scheduleSlots->contains(fn ($s) => $s->center_room_id === null && $this->normalizeHallKey((string) $s->hall_name) === $roomNorm)) {
                     return true;
                 }
+            }
 
-                return mb_strtolower(trim((string) $g->hall_name)) === mb_strtolower(trim((string) $room->name_ar));
-            });
+            return false;
+        });
 
-            $assignedCohorts = $assignedGroups->map(function (StudyGroup $g) use ($room) {
-                $enrolled = (int) ($g->enrolled_count ?? 0);
-                $fillRatio = $room->capacity > 0 ? min(100, (int) round(($enrolled / $room->capacity) * 100)) : 0;
+        $assignedCohorts = $assignedGroups->map(function (StudyGroup $g) use ($room) {
+            $enrolled = (int) ($g->enrolled_count ?? 0);
+            $fillRatio = $room->capacity > 0 ? min(100, (int) round(($enrolled / $room->capacity) * 100)) : 0;
 
-                return [
-                    'id' => $g->uuid,
-                    'nameAr' => $g->name_ar,
-                    'subjectAr' => $g->subject_ar,
-                    'teacherNameAr' => $g->centerTeacher?->name_ar ?: ($g->teacher_name_override ?: 'معلم معتمد'),
-                    'enrolledCount' => $enrolled,
-                    'capacity' => (int) $room->capacity,
-                    'fillRatio' => $fillRatio,
-                ];
-            })->values()->all();
-
-            $avgFillRatio = count($assignedCohorts) > 0
-                ? (int) round(collect($assignedCohorts)->avg('fillRatio'))
-                : 0;
-
-            return $this->formatRoom($room, $assignedCohorts, $avgFillRatio);
+            return [
+                'id' => $g->uuid,
+                'nameAr' => $g->name_ar,
+                'subjectAr' => $g->subject_ar,
+                'gradeAr' => $g->grade_ar,
+                'scheduleAr' => $g->schedule_ar,
+                'teacherNameAr' => $g->centerTeacher?->name_ar ?: ($g->teacher_name_override ?: 'معلم معتمد'),
+                'enrolledCount' => $enrolled,
+                'capacity' => (int) $room->capacity,
+                'fillRatio' => $fillRatio,
+            ];
         })->values()->all();
+
+        $avgFillRatio = count($assignedCohorts) > 0
+            ? (int) round(collect($assignedCohorts)->avg('fillRatio'))
+            : 0;
+
+        return $this->formatRoom($room, $assignedCohorts, $avgFillRatio);
     }
 
     /**
@@ -144,7 +172,7 @@ class CenterRoomService extends BaseService
             return $created->load('branch');
         });
 
-        return $this->formatRoom($room);
+        return $this->hydrateRoom($center, $room);
     }
 
     /**
@@ -155,6 +183,7 @@ class CenterRoomService extends BaseService
     public function updateRoom(User $center, string $uuid, array $data): array
     {
         $room = $this->findOwnedRoom($center, $uuid);
+        $oldNameAr = $room->name_ar;
 
         $branchId = null;
         $hasBranchInput = array_key_exists('branch_id', $data) || array_key_exists('branchId', $data);
@@ -162,7 +191,7 @@ class CenterRoomService extends BaseService
             $branchId = $this->resolveOwnedBranchId($center, $data['branch_id'] ?? $data['branchId']);
         }
 
-        $updated = $this->transaction(function () use ($center, $room, $data, $hasBranchInput, $branchId) {
+        $updated = $this->transaction(function () use ($center, $room, $oldNameAr, $data, $hasBranchInput, $branchId) {
             $payload = [];
 
             if ($hasBranchInput) {
@@ -194,12 +223,24 @@ class CenterRoomService extends BaseService
             // Keep hall_name synced on linked study groups and schedule slots if room was renamed
             if (isset($payload['name_ar'])) {
                 StudyGroup::where('center_id', $center->id)
-                    ->where('center_room_id', $room->id)
-                    ->update(['hall_name' => $payload['name_ar']]);
+                    ->where(function ($q) use ($room, $oldNameAr) {
+                        $q->where('center_room_id', $room->id)
+                            ->orWhere(fn ($sq) => $sq->whereNull('center_room_id')->where('hall_name', $oldNameAr));
+                    })
+                    ->update([
+                        'center_room_id' => $room->id,
+                        'hall_name' => $payload['name_ar'],
+                    ]);
 
-                GroupScheduleSlot::where('center_room_id', $room->id)
-                    ->whereHas('studyGroup', fn ($q) => $q->where('center_id', $center->id))
-                    ->update(['hall_name' => $payload['name_ar']]);
+                GroupScheduleSlot::whereHas('studyGroup', fn ($q) => $q->where('center_id', $center->id))
+                    ->where(function ($q) use ($room, $oldNameAr) {
+                        $q->where('center_room_id', $room->id)
+                            ->orWhere(fn ($sq) => $sq->whereNull('center_room_id')->where('hall_name', $oldNameAr));
+                    })
+                    ->update([
+                        'center_room_id' => $room->id,
+                        'hall_name' => $payload['name_ar'],
+                    ]);
             }
 
             $this->logSecurityEvent('center.room.updated', [
@@ -210,19 +251,28 @@ class CenterRoomService extends BaseService
             return $room->fresh(['branch']);
         });
 
-        return $this->formatRoom($updated);
+        return $this->hydrateRoom($center, $updated);
     }
 
     /**
-     * Soft-delete a room.
+     * Soft-delete a room and detach references on active groups/slots.
      */
     public function deleteRoom(User $center, string $uuid): bool
     {
         $room = $this->findOwnedRoom($center, $uuid);
 
-        return $this->transaction(function () use ($room) {
+        return $this->transaction(function () use ($center, $room) {
             $roomUuid = $room->uuid;
             $roomName = $room->name_ar;
+
+            StudyGroup::where('center_id', $center->id)
+                ->where('center_room_id', $room->id)
+                ->update(['center_room_id' => null]);
+
+            GroupScheduleSlot::where('center_room_id', $room->id)
+                ->whereHas('studyGroup', fn ($q) => $q->where('center_id', $center->id))
+                ->update(['center_room_id' => null]);
+
             $room->delete();
 
             $this->logSecurityEvent('center.room.deleted', [
@@ -297,5 +347,10 @@ class CenterRoomService extends BaseService
             ->take(20)
             ->values()
             ->all();
+    }
+
+    protected function normalizeHallKey(string $hall): string
+    {
+        return preg_replace('/[\(\)\s\-_]+/u', '', mb_strtolower(trim($hall))) ?? '';
     }
 }

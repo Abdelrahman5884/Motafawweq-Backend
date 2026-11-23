@@ -132,6 +132,8 @@ class CenterScheduleService extends BaseService
                 'branchNameAr' => $room->branch?->name_ar ?? 'الفرع الرئيسي',
                 'floor' => $room->floor ?? 'الطابق الأول',
                 'capacity' => (int) $room->capacity,
+                'isAvailable' => (bool) $room->is_available,
+                'equipped' => $room->equipment ?? [],
                 'isOccupied' => $isOccupied,
                 'sessionsCount' => count($sessions),
                 'sessions' => $sessions,

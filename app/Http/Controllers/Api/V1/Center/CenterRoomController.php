@@ -48,10 +48,11 @@ class CenterRoomController extends BaseApiController
 
     public function show(string $uuid): JsonResponse
     {
-        $room = $this->roomService->findOwnedRoom($this->authenticatedUser(), $uuid);
+        $center = $this->authenticatedUser();
+        $room = $this->roomService->findOwnedRoom($center, $uuid);
 
         return $this->successResponse(
-            $this->roomService->formatRoom($room),
+            $this->roomService->hydrateRoom($center, $room),
             __('messages.center.room_fetched')
         );
     }
