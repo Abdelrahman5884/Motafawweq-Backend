@@ -5,6 +5,7 @@ namespace App\Services\V1\Center;
 use App\Enums\AttendanceStatus;
 use App\Enums\DayOfWeek;
 use App\Enums\EnrollmentStatus;
+use App\Models\CenterBranch;
 use App\Models\CenterProfile;
 use App\Models\CenterQueueCompletion;
 use App\Models\CenterRoom;
@@ -42,8 +43,8 @@ class CenterDashboardService extends BaseService
         $profile = CenterProfile::firstOrCreate(
             ['user_id' => $center->id],
             [
-                'name_ar' => $center->name ?: 'السنتر التعليمي',
-                'name_en' => $center->name ?: 'Educational Center',
+                'name_ar' => 'السنتر التعليمي',
+                'name_en' => 'Educational Center',
                 'phone' => $center->phone,
             ]
         );
@@ -52,6 +53,11 @@ class CenterDashboardService extends BaseService
         if ($branchUuid && $branchUuid !== 'all') {
             $branchId = $this->branchService->findOwnedBranch($center, $branchUuid)->id;
         }
+
+        $centerBranches = CenterBranch::forCenter($center->id)
+            ->orderByDesc('is_main')
+            ->orderBy('name_ar')
+            ->get(['uuid', 'name_ar', 'name_en', 'is_main']);
 
         $periodStart = match ($period) {
             'today' => now()->startOfDay(),
@@ -88,24 +94,26 @@ class CenterDashboardService extends BaseService
                 ->distinct('student_id')
                 ->count('student_id');
 
-        $activeStudentsInPeriod = empty($groupIds)
+        $activeStudentsCount = empty($groupIds)
             ? 0
-            : (int) GroupAttendanceRecord::whereIn('study_group_id', $groupIds)
-                ->whereIn('status', [AttendanceStatus::PRESENT->value, AttendanceStatus::LATE->value])
-                ->where('created_at', '>=', $periodStart)
-                ->distinct('student_id')
-                ->count('student_id');
+            : (int) GroupAttendanceRecord::query()
+                ->join('group_attendance_sessions as gas', 'gas.id', '=', 'group_attendance_records.attendance_session_id')
+                ->whereIn('group_attendance_records.study_group_id', $groupIds)
+                ->whereIn('group_attendance_records.status', [AttendanceStatus::PRESENT->value, AttendanceStatus::LATE->value])
+                ->whereDate('gas.session_date', '>=', $periodStart->toDateString())
+                ->distinct('group_attendance_records.student_id')
+                ->count('group_attendance_records.student_id');
 
-        // Fallback active students count = enrolled students when attendance sessions haven't been logged yet in this period
-        $activeStudentsCount = $activeStudentsInPeriod > 0 ? $activeStudentsInPeriod : $totalRegisteredStudents;
         $activeStudentsPct = $totalRegisteredStudents > 0
             ? round(($activeStudentsCount / $totalRegisteredStudents) * 100, 1)
             : 0.0;
 
-        // 4. Hall Occupancy Breakdown (real seat occupancy from active groups mapped to rooms)
+        // 4. Hall Occupancy Breakdown (real seat occupancy from active groups & slots mapped to rooms)
         $roomOccupancy = $rooms->map(function (CenterRoom $room) use ($groups) {
+            $roomNameNormalized = mb_strtolower(trim((string) $room->name_ar));
             $roomGroups = $groups->filter(fn (StudyGroup $g) => (int) $g->center_room_id === (int) $room->id
-                || mb_strtolower(trim((string) $g->hall_name)) === mb_strtolower(trim((string) $room->name_ar))
+                || mb_strtolower(trim((string) $g->hall_name)) === $roomNameNormalized
+                || $g->scheduleSlots->contains(fn ($s) => (int) $s->center_room_id === (int) $room->id)
             );
             $maxGroupEnrolled = (int) ($roomGroups->max('enrolled_count') ?? 0);
             $occupied = min((int) $room->capacity, $maxGroupEnrolled);
@@ -146,11 +154,19 @@ class CenterDashboardService extends BaseService
             'center' => [
                 'nameAr' => $profile->name_ar,
                 'nameEn' => $profile->name_en ?: $profile->name_ar,
+                'managerName' => $center->name,
                 'planTier' => $planTier->value,
                 'planNameAr' => $planTier->labelAr(),
                 'planNameEn' => $planTier->labelEn(),
                 'isVerified' => (bool) $profile->is_verified_center,
             ],
+            'branches' => $centerBranches->map(fn (CenterBranch $b) => [
+                'id' => $b->uuid,
+                'nameAr' => $b->name_ar,
+                'nameEn' => $b->name_en ?: $b->name_ar,
+                'isMain' => (bool) $b->is_main,
+            ])->values()->all(),
+            'selectedBranchId' => ($branchUuid && $branchUuid !== 'all') ? $branchUuid : 'all',
             'period' => $period,
             'kpis' => [
                 'activeStudents' => $activeStudentsCount,
@@ -196,10 +212,13 @@ class CenterDashboardService extends BaseService
         $group->assertOwnedByCenter($center);
 
         $slot = null;
-        if ($slotUuid) {
+        if ($slotUuid !== null && $slotUuid !== '') {
             $slot = GroupScheduleSlot::where('study_group_id', $group->id)
                 ->where('uuid', $slotUuid)
                 ->first();
+            if (! $slot) {
+                throw (new ModelNotFoundException)->setModel(GroupScheduleSlot::class, [$slotUuid]);
+            }
         }
 
         $targetDate = $queueDate ? Carbon::parse($queueDate)->toDateString() : now()->toDateString();
@@ -259,13 +278,14 @@ class CenterDashboardService extends BaseService
             ->where('study_group_id', $group->id)
             ->whereDate('queue_date', $targetDate);
 
-        if ($slotUuid) {
+        if ($slotUuid !== null && $slotUuid !== '') {
             $slotId = GroupScheduleSlot::where('study_group_id', $group->id)
                 ->where('uuid', $slotUuid)
                 ->value('id');
-            if ($slotId) {
-                $query->where('schedule_slot_id', $slotId);
+            if (! $slotId) {
+                throw (new ModelNotFoundException)->setModel(GroupScheduleSlot::class, [$slotUuid]);
             }
+            $query->where('schedule_slot_id', $slotId);
         }
 
         $query->delete();
@@ -403,7 +423,7 @@ class CenterDashboardService extends BaseService
 
         $points = [];
         $maxStudents = 0;
-        $peakIdx = 0;
+        $peakIdx = null;
         $totalStudentsSum = 0;
         $totalHoursSum = 0.0;
         $rateSum = 0.0;
@@ -416,14 +436,18 @@ class CenterDashboardService extends BaseService
 
             // Compute teaching hours scheduled on this weekday across center groups
             $hours = 0.0;
-            $topTopic = '';
+            $topSessionGroup = $daySessions->sortByDesc('present_count')->first()?->group;
+            $topTopic = $topSessionGroup
+                ? trim($topSessionGroup->subject_ar.' — '.$topSessionGroup->name_ar)
+                : '';
+
             foreach ($groups as $g) {
                 foreach ($g->scheduleSlots as $slot) {
                     $sDay = $slot->day_of_week instanceof DayOfWeek ? $slot->day_of_week->value : strtolower((string) $slot->day_of_week);
                     if ($sDay === $dayKey) {
                         $sParts = explode(':', (string) $slot->start_time);
                         $eParts = explode(':', (string) $slot->end_time);
-                        if (count($sParts) === 2 && count($eParts) === 2) {
+                        if (count($sParts) >= 2 && count($eParts) >= 2) {
                             $durMin = max(0, (((int) $eParts[0] * 60) + (int) $eParts[1]) - (((int) $sParts[0] * 60) + (int) $sParts[1]));
                             $hours += $durMin / 60;
                         }
@@ -443,7 +467,7 @@ class CenterDashboardService extends BaseService
             $totalStudentsSum += $studentsPresent;
             $totalHoursSum += $hoursRounded;
 
-            if ($studentsPresent >= $maxStudents) {
+            if ($studentsPresent > $maxStudents) {
                 $maxStudents = $studentsPresent;
                 $peakIdx = $idx;
             }
@@ -462,13 +486,13 @@ class CenterDashboardService extends BaseService
             ];
         }
 
-        if (isset($points[$peakIdx]) && $maxStudents > 0) {
+        if ($peakIdx !== null && isset($points[$peakIdx])) {
             $points[$peakIdx]['isPeak'] = true;
         }
 
         return [
             'days' => $points,
-            'peakDay' => $points[$peakIdx] ?? null,
+            'peakDay' => ($peakIdx !== null && isset($points[$peakIdx])) ? $points[$peakIdx] : null,
             'dailyAverage' => count($points) > 0 ? (int) round($totalStudentsSum / count($points)) : 0,
             'commitmentRate' => $rateCount > 0 ? round($rateSum / $rateCount, 1) : 0.0,
             'totalWeeklyHours' => round($totalHoursSum, 1),
@@ -504,6 +528,16 @@ class CenterDashboardService extends BaseService
                 $lookupKey = $group->id.'_'.$slot->id;
                 $isCompleted = array_key_exists($lookupKey, $completedKeys);
 
+                $durationMinutes = 120;
+                $sParts = explode(':', (string) $slot->start_time);
+                $eParts = explode(':', (string) $slot->end_time);
+                if (count($sParts) >= 2 && count($eParts) >= 2) {
+                    $diff = (((int) $eParts[0] * 60) + (int) $eParts[1]) - (((int) $sParts[0] * 60) + (int) $sParts[1]);
+                    if ($diff > 0) {
+                        $durationMinutes = $diff;
+                    }
+                }
+
                 $items[] = [
                     'uniqueId' => "{$group->uuid}_{$slot->uuid}",
                     'groupId' => $group->uuid,
@@ -516,6 +550,7 @@ class CenterDashboardService extends BaseService
                     'hall' => $slot->hall_name ?: ($group->hall_name ?: 'القاعة الرئيسية'),
                     'startTime' => $slot->start_time,
                     'endTime' => $slot->end_time,
+                    'durationMinutes' => $durationMinutes,
                     'studentCount' => (int) ($group->enrolled_count ?? 0),
                     'capacity' => (int) ($group->centerRoom?->capacity ?: $group->max_students),
                     'priceEgp' => (float) $group->price_egp,
@@ -536,6 +571,7 @@ class CenterDashboardService extends BaseService
             'totalCount' => count($items),
             'activeCount' => count($activeQueue),
             'completedCount' => count($completedQueue),
+            'completedIds' => array_values(array_map(fn ($i) => $i['uniqueId'], $completedQueue)),
             'currentActiveItem' => $activeQueue[0] ?? null,
             'upcomingQueueItems' => array_slice($activeQueue, 1),
             'activeQueue' => $activeQueue,

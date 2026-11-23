@@ -536,8 +536,8 @@ class CenterSettingsService extends BaseService
         return CenterProfile::firstOrCreate(
             ['user_id' => $center->id],
             [
-                'name_ar' => $center->name ?: 'السنتر التعليمي',
-                'name_en' => $center->name ?: 'Educational Center',
+                'name_ar' => 'السنتر التعليمي',
+                'name_en' => 'Educational Center',
                 'phone' => $center->phone,
             ]
         );

@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\BaseApiController;
 use App\Services\V1\Center\CenterDashboardService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class CenterDashboardController extends BaseApiController
@@ -20,15 +21,35 @@ class CenterDashboardController extends BaseApiController
      */
     public function index(Request $request): JsonResponse
     {
-        $period = in_array($request->query('period'), ['today', 'month', 'year'], true)
-            ? (string) $request->query('period')
-            : 'month';
+        $rawPeriod = $request->query('period');
+        $period = ($rawPeriod === null || $rawPeriod === '') ? 'month' : (string) $rawPeriod;
+        if (! in_array($period, ['today', 'month', 'year'], true)) {
+            return $this->validationErrorResponse([
+                'period' => [__('validation.in', ['attribute' => 'period'])],
+            ]);
+        }
+
+        $rawBranchId = $request->query('branch_id', $request->query('branchId'));
+        $branchId = ($rawBranchId === null || $rawBranchId === '') ? null : trim((string) $rawBranchId);
+        if ($branchId !== null && $branchId !== 'all' && ! Str::isUuid($branchId)) {
+            return $this->validationErrorResponse([
+                'branch_id' => [__('validation.uuid', ['attribute' => 'branch_id'])],
+            ]);
+        }
+
+        $rawQueueDay = $request->query('queue_day', $request->query('queueDay'));
+        $queueDay = ($rawQueueDay === null || $rawQueueDay === '') ? null : strtolower(trim((string) $rawQueueDay));
+        if ($queueDay !== null && ! in_array($queueDay, DayOfWeek::values(), true)) {
+            return $this->validationErrorResponse([
+                'queue_day' => [__('validation.in', ['attribute' => 'queue_day'])],
+            ]);
+        }
 
         $data = $this->dashboardService->getDashboard(
             $this->authenticatedUser(),
-            $request->query('branch_id'),
+            $branchId,
             $period,
-            $request->query('queue_day')
+            $queueDay
         );
 
         return $this->successResponse($data, __('messages.center.dashboard_fetched'));

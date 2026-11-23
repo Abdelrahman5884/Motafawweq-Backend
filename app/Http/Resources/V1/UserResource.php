@@ -33,6 +33,10 @@ class UserResource extends BaseJsonResource
             ? app(CenterBillingService::class)->resolveActivePlanTier($this->resource)
             : null;
 
+        $centerProfile = $this->role === UserRole::CENTER
+            ? ($this->relationLoaded('centerProfile') ? $this->centerProfile : $this->centerProfile()->first())
+            : null;
+
         $activePlan = $studentPlan ?? $teacherPlan ?? $centerPlan;
 
         return [
@@ -47,6 +51,8 @@ class UserResource extends BaseJsonResource
             'status_label' => $this->status?->label(),
             'phone' => $this->phone,
             'avatar' => $this->avatar,
+            'center_name_ar' => $this->when($this->role === UserRole::CENTER, fn () => $centerProfile?->name_ar),
+            'center_name_en' => $this->when($this->role === UserRole::CENTER, fn () => $centerProfile?->name_en ?: $centerProfile?->name_ar),
             'student_code' => $this->when($this->role === UserRole::STUDENT || $this->student_code !== null, $this->student_code),
             'plan_tier' => $this->when($activePlan !== null, fn () => $activePlan->value),
             'plan_name_ar' => $this->when($activePlan !== null, fn () => $activePlan->labelAr()),

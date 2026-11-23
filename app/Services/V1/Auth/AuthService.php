@@ -7,6 +7,7 @@ use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Enums\VerificationCodeType;
 use App\Exceptions\AuthSecurityException;
+use App\Models\CenterProfile;
 use App\Models\PersonalAccessToken;
 use App\Models\StoredFile;
 use App\Models\User;
@@ -81,6 +82,23 @@ class AuthService extends BaseService
 
             if ($linkedStudent) {
                 $user->children()->syncWithoutDetaching([$linkedStudent->id]);
+            }
+
+            if ($role === UserRole::CENTER) {
+                $rawCenterName = trim(strip_tags((string) ($data['center_name'] ?? '')));
+                $rawGovernorate = trim(strip_tags((string) ($data['governorate'] ?? '')));
+                $resolvedCenterNameAr = $rawCenterName !== '' ? $rawCenterName : 'السنتر التعليمي';
+                $resolvedCenterNameEn = $rawCenterName !== '' ? $rawCenterName : 'Educational Center';
+
+                CenterProfile::firstOrCreate(
+                    ['user_id' => $user->id],
+                    [
+                        'name_ar' => $resolvedCenterNameAr,
+                        'name_en' => $resolvedCenterNameEn,
+                        'phone' => $user->phone,
+                        'address_ar' => $rawGovernorate !== '' ? $rawGovernorate : null,
+                    ]
+                );
             }
 
             $tokens = $this->tokenService->issuePair($user, $ip, $userAgent);

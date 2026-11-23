@@ -18,6 +18,8 @@ class RegisterRequest extends BaseApiRequest
             'role' => ['nullable', 'string', Rule::in(config('auth_security.self_registration_roles'))],
             'phone' => ['nullable', 'string', 'regex:/^\+?[0-9]{8,15}$/', 'unique:users,phone'],
             'student_code' => ['required_if:role,parent', 'nullable', 'string', 'max:20'],
+            'center_name' => ['nullable', 'string', 'min:2', 'max:180'],
+            'governorate' => ['nullable', 'string', 'max:120'],
         ];
     }
 
@@ -31,6 +33,14 @@ class RegisterRequest extends BaseApiRequest
 
         if ($this->filled('student_code')) {
             $this->merge(['student_code' => strtoupper(trim((string) $this->input('student_code')))]);
+        }
+
+        if ($this->filled('center_name')) {
+            $this->merge(['center_name' => trim((string) $this->input('center_name'))]);
+        }
+
+        if ($this->filled('governorate')) {
+            $this->merge(['governorate' => trim((string) $this->input('governorate'))]);
         }
     }
 }
