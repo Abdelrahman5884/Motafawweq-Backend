@@ -202,7 +202,7 @@ class CenterStaffService extends BaseService
     /**
      * Retrieve strictly tenant-isolated immutable SecurityAuditLog trail for this center.
      */
-    public function listAuditLogs(User $center, array $filters = [], int $perPage = 25): LengthAwarePaginator
+    public function listAuditLogs(User $center, array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
         $safePerPage = min(100, max(5, $perPage));
 
@@ -219,6 +219,19 @@ class CenterStaffService extends BaseService
         if (! empty($filters['event'])) {
             $event = trim((string) $filters['event']);
             $query->where('event', 'like', "%{$event}%");
+        }
+
+        if (! empty($filters['search'])) {
+            $term = trim(strip_tags((string) $filters['search']));
+            if ($term !== '') {
+                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $term);
+                $like = "%{$escaped}%";
+                $query->where(function ($sub) use ($like) {
+                    $sub->where('event', 'like', $like)
+                        ->orWhere('ip_address', 'like', $like)
+                        ->orWhere('context', 'like', $like);
+                });
+            }
         }
 
         return $query->paginate($safePerPage);

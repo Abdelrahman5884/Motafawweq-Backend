@@ -65,8 +65,8 @@ class CenterStaffController extends BaseApiController
     {
         $paginator = $this->staffService->listAuditLogs(
             $this->authenticatedUser(),
-            $request->only(['level', 'event']),
-            (int) $request->query('per_page', 25)
+            $request->only(['level', 'event', 'search']),
+            (int) $request->query('per_page', 15)
         );
 
         $items = collect($paginator->items())->map(fn (SecurityAuditLog $log) => [
@@ -89,6 +89,8 @@ class CenterStaffController extends BaseApiController
                 'per_page' => $paginator->perPage(),
                 'total' => $paginator->total(),
                 'last_page' => $paginator->lastPage(),
+                'from' => $paginator->firstItem() ?? 0,
+                'to' => $paginator->lastItem() ?? 0,
                 'has_more' => $paginator->hasMorePages(),
             ],
         ]);
