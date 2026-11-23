@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\V1\Teacher\LessonWorkspaceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherAnalyticsController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherAttendanceController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherBillingController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherCenterInvitationController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherCertificateController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherCourseController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherExamController;
@@ -383,6 +384,17 @@ Route::prefix('v1')->group(function () {
                     Route::post('/avatar', [TeacherSettingsController::class, 'uploadAvatar'])
                         ->middleware('throttle:teacher-uploads');
                     Route::delete('/avatar', [TeacherSettingsController::class, 'deleteAvatar']);
+                });
+
+                // Incoming Educational Center Invitations (Teacher must approve/decline)
+                Route::prefix('center-invitations')->group(function () {
+                    Route::get('/', [TeacherCenterInvitationController::class, 'index']);
+                    Route::post('/{uuid}/accept', [TeacherCenterInvitationController::class, 'accept'])
+                        ->whereUuid('uuid')
+                        ->middleware('idempotent');
+                    Route::post('/{uuid}/decline', [TeacherCenterInvitationController::class, 'decline'])
+                        ->whereUuid('uuid')
+                        ->middleware('idempotent');
                 });
 
                 // Stage 3: Encrypted Payout & Direct Receiving Accounts (Plus & Pro)

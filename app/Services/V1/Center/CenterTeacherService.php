@@ -4,6 +4,7 @@ namespace App\Services\V1\Center;
 
 use App\Enums\UserRole;
 use App\Models\CenterBranch;
+use App\Models\CenterConnectedUser;
 use App\Models\CenterProfile;
 use App\Models\CenterTeacher;
 use App\Models\StudyGroup;
@@ -124,6 +125,8 @@ class CenterTeacherService extends BaseService
             $subjectAr = trim(strip_tags((string) ($data['subject_ar'] ?? $data['subjectAr'] ?? 'مادة دراسية')));
             $subjectEn = trim(strip_tags((string) ($data['subject_en'] ?? $data['subjectEn'] ?? $subjectAr)));
 
+            $isPlatformTeacher = $linkedUser !== null;
+
             /** @var CenterTeacher $created */
             $created = CenterTeacher::create([
                 'center_id' => $center->id,
@@ -136,16 +139,33 @@ class CenterTeacherService extends BaseService
                 'phone' => $phone,
                 'email' => $email,
                 'settlement_rate' => $settlementRate,
-                'status' => 'active',
+                // Platform teachers MUST explicitly approve the invitation from their own account
+                'status' => $isPlatformTeacher ? 'invited' : 'active',
                 'invite_token_hash' => $tokenPair['hash'],
                 'invite_sent_at' => now(),
-                'activated_at' => $linkedUser ? now() : null,
+                'activated_at' => null,
             ]);
+
+            if ($isPlatformTeacher) {
+                CenterConnectedUser::firstOrCreate(
+                    [
+                        'center_id' => $center->id,
+                        'user_id' => $linkedUser->id,
+                    ],
+                    [
+                        'branch_id' => $branchId,
+                        'connected_role' => UserRole::TEACHER->value,
+                        'connected_by' => $center->id,
+                        'connected_at' => now(),
+                    ]
+                );
+            }
 
             $this->logSecurityEvent('center.teacher.created', [
                 'center_teacher_uuid' => $created->uuid,
                 'email' => $email,
                 'linked_user_id' => $linkedUser?->id,
+                'awaiting_teacher_approval' => $isPlatformTeacher,
             ], 'info', $created);
 
             return $created->load(['branch', 'teacherUser:id,name,email,phone,avatar']);
@@ -214,6 +234,16 @@ class CenterTeacherService extends BaseService
                 $payload['settlement_rate'] = max(0.05, min(0.95, (float) ($data['settlement_rate'] ?? $data['settlementRate'])));
             }
             if (array_key_exists('status', $data) && in_array($data['status'], ['active', 'invited', 'suspended'], true)) {
+                $wantsActivateUnapprovedPlatformTeacher = $data['status'] === 'active'
+                    && $teacher->teacher_user_id !== null
+                    && in_array($teacher->status, ['invited', 'declined'], true);
+
+                if ($wantsActivateUnapprovedPlatformTeacher) {
+                    throw ValidationException::withMessages([
+                        'status' => ['لا يمكن تفعيل معلم مسجل بالمنصة قبل موافقته على الدعوة من حسابه.'],
+                    ]);
+                }
+
                 $payload['status'] = $data['status'];
             }
 
@@ -249,7 +279,16 @@ class CenterTeacherService extends BaseService
         return $this->transaction(function () use ($teacher) {
             $tUuid = $teacher->uuid;
             $tName = $teacher->name_ar;
+            $centerId = $teacher->center_id;
+            $linkedUserId = $teacher->teacher_user_id;
+
             $teacher->delete();
+
+            if ($linkedUserId) {
+                CenterConnectedUser::where('center_id', $centerId)
+                    ->where('user_id', $linkedUserId)
+                    ->delete();
+            }
 
             $this->logSecurityEvent('center.teacher.deleted', [
                 'center_teacher_uuid' => $tUuid,
@@ -270,10 +309,30 @@ class CenterTeacherService extends BaseService
         $teacher = $this->findOwnedTeacher($center, $uuid);
         $tokenPair = CenterTeacher::generateActivationToken();
 
-        $teacher->update([
+        $updates = [
             'invite_token_hash' => $tokenPair['hash'],
             'invite_sent_at' => now(),
-        ]);
+        ];
+
+        // If a platform teacher previously declined, re-inviting moves them back to pending approval
+        if ($teacher->teacher_user_id !== null && $teacher->status === 'declined') {
+            $updates['status'] = 'invited';
+
+            CenterConnectedUser::firstOrCreate(
+                [
+                    'center_id' => $center->id,
+                    'user_id' => $teacher->teacher_user_id,
+                ],
+                [
+                    'branch_id' => $teacher->branch_id,
+                    'connected_role' => UserRole::TEACHER->value,
+                    'connected_by' => $center->id,
+                    'connected_at' => now(),
+                ]
+            );
+        }
+
+        $teacher->update($updates);
 
         $activationLink = $this->buildActivationUrl($tokenPair['plain']);
 
@@ -285,6 +344,7 @@ class CenterTeacherService extends BaseService
         return [
             'teacherId' => $teacher->uuid,
             'email' => $teacher->email,
+            'status' => $teacher->fresh()->status,
             'activationLink' => $activationLink,
             'inviteSentAt' => $teacher->invite_sent_at?->toIso8601String(),
         ];
@@ -297,9 +357,11 @@ class CenterTeacherService extends BaseService
      */
     public function formatTeacher(CenterTeacher $teacher): array
     {
+        $isPlatformLinked = $teacher->teacher_user_id !== null;
         $statusAr = match ($teacher->status) {
-            'active' => 'معتمد ونشط بالمنصة',
-            'invited' => 'بانتظار التفعيل',
+            'active' => $isPlatformLinked ? 'معتمد ونشط بالمنصة' : 'نشط بالسنتر',
+            'invited' => $isPlatformLinked ? 'بانتظار موافقة المعلم' : 'بانتظار التفعيل',
+            'declined' => 'رفض المعلم الدعوة',
             'suspended' => 'موقوف مؤقتاً',
             default => 'نشط',
         };
@@ -319,9 +381,10 @@ class CenterTeacherService extends BaseService
             'settlementRate' => (float) $teacher->settlement_rate,
             'status' => $teacher->status,
             'statusAr' => $statusAr,
+            'awaitingTeacherApproval' => $isPlatformLinked && $teacher->status === 'invited',
             'inviteSent' => $teacher->invite_sent_at !== null,
             'inviteSentAt' => $teacher->invite_sent_at?->toIso8601String(),
-            'isPlatformLinked' => $teacher->teacher_user_id !== null,
+            'isPlatformLinked' => $isPlatformLinked,
             'avatar' => $teacher->teacherUser?->avatar,
             'enrolledGroupsCount' => (int) ($teacher->enrolled_groups_count ?? 0),
             'createdAt' => $teacher->created_at?->toDateString(),

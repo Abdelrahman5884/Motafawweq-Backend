@@ -61,8 +61,20 @@ class CenterConnectService extends BaseService
             ->pluck('user_id')
             ->flip();
 
-        return $users->map(function (User $u) use ($connectedIds) {
+        $teacherStatuses = CenterTeacher::forCenter($center->id)
+            ->whereIn('teacher_user_id', $users->pluck('id')->all())
+            ->get(['teacher_user_id', 'status'])
+            ->keyBy('teacher_user_id');
+
+        return $users->map(function (User $u) use ($connectedIds, $teacherStatuses) {
             $isTeacher = $u->role === UserRole::TEACHER;
+            $ct = $isTeacher ? $teacherStatuses->get($u->id) : null;
+            $hasActiveOrPendingInvite = $ct !== null && in_array($ct->status, ['active', 'invited'], true);
+            $connectionStatus = $ct?->status === 'invited'
+                ? 'pending'
+                : ($ct?->status === 'declined'
+                    ? 'declined'
+                    : ($connectedIds->has($u->id) || $ct?->status === 'active' ? 'active' : null));
 
             return [
                 'id' => $u->id,
@@ -77,7 +89,8 @@ class CenterConnectService extends BaseService
                 'gradeAr' => ! $isTeacher ? ($u->studentProfile?->grade_ar ?? '') : null,
                 'schoolAr' => ! $isTeacher ? ($u->studentProfile?->school_name ?? '') : null,
                 'avatar' => $u->avatar,
-                'isAlreadyConnected' => $connectedIds->has($u->id),
+                'isAlreadyConnected' => $connectedIds->has($u->id) || $hasActiveOrPendingInvite,
+                'connectionStatus' => $connectionStatus,
             ];
         })->values()->all();
     }
@@ -107,8 +120,22 @@ class CenterConnectService extends BaseService
             $query->where('branch_id', $branch->id);
         }
 
-        return $query->get()
-            ->map(fn (CenterConnectedUser $conn) => $this->formatConnection($conn))
+        $connections = $query->get();
+
+        $teacherUserIds = $connections
+            ->where('connected_role', UserRole::TEACHER->value)
+            ->pluck('user_id')
+            ->all();
+
+        $teacherStatusMap = empty($teacherUserIds)
+            ? collect()
+            : CenterTeacher::forCenter($center->id)
+                ->whereIn('teacher_user_id', $teacherUserIds)
+                ->get(['uuid', 'teacher_user_id', 'status'])
+                ->keyBy('teacher_user_id');
+
+        return $connections
+            ->map(fn (CenterConnectedUser $conn) => $this->formatConnection($conn, $teacherStatusMap->get($conn->user_id)))
             ->values()
             ->all();
     }
@@ -178,7 +205,9 @@ class CenterConnectService extends BaseService
                 'connected_at' => now(),
             ]);
 
-            // If linking a platform teacher, auto-add them to CenterTeacher roster if not already listed
+            $linkedCenterTeacher = null;
+
+            // If linking a platform teacher, send a PENDING invitation (status = invited) requiring teacher approval!
             if ($target->isTeacher()) {
                 $existingTeacher = CenterTeacher::forCenter($center->id)
                     ->where(function ($q) use ($target) {
@@ -188,7 +217,7 @@ class CenterConnectService extends BaseService
                     ->first();
 
                 if (! $existingTeacher) {
-                    CenterTeacher::create([
+                    $linkedCenterTeacher = CenterTeacher::create([
                         'center_id' => $center->id,
                         'branch_id' => $branchId,
                         'teacher_user_id' => $target->id,
@@ -197,14 +226,18 @@ class CenterConnectService extends BaseService
                         'subject_ar' => $target->teacherProfile?->subject_ar ?: 'مادة دراسية',
                         'phone' => $target->phone,
                         'email' => strtolower($target->email),
-                        'status' => 'active',
-                        'activated_at' => now(),
+                        'status' => 'invited',
+                        'invite_sent_at' => now(),
+                        'activated_at' => null,
                     ]);
-                } elseif (! $existingTeacher->teacher_user_id) {
+                } else {
                     $existingTeacher->update([
+                        'branch_id' => $branchId ?? $existingTeacher->branch_id,
                         'teacher_user_id' => $target->id,
-                        'activated_at' => now(),
+                        'status' => $existingTeacher->status === 'active' ? 'active' : 'invited',
+                        'invite_sent_at' => now(),
                     ]);
+                    $linkedCenterTeacher = $existingTeacher->fresh();
                 }
             }
 
@@ -213,21 +246,25 @@ class CenterConnectService extends BaseService
                 'connected_user_id' => $target->id,
                 'connected_role' => $target->role->value,
                 'branch_id' => $branchId,
+                'awaiting_teacher_approval' => $target->isTeacher() && $linkedCenterTeacher?->status === 'invited',
             ], 'info', $conn);
 
-            return $conn->load([
-                'user:id,name,email,phone,role,avatar,student_code',
-                'user.teacherProfile:user_id,subject_ar',
-                'user.studentProfile:student_id,grade_ar',
-                'branch:id,uuid,name_ar',
-            ]);
+            return [
+                'conn' => $conn->load([
+                    'user:id,name,email,phone,role,avatar,student_code',
+                    'user.teacherProfile:user_id,subject_ar',
+                    'user.studentProfile:student_id,grade_ar',
+                    'branch:id,uuid,name_ar',
+                ]),
+                'teacher' => $linkedCenterTeacher,
+            ];
         });
 
-        return $this->formatConnection($connection);
+        return $this->formatConnection($connection['conn'], $connection['teacher']);
     }
 
     /**
-     * Disconnect a previously linked user from the center.
+     * Disconnect a previously linked user (or cancel a pending platform teacher invite) from the center.
      */
     public function disconnectUser(User $center, string $connectionUuid): bool
     {
@@ -242,7 +279,17 @@ class CenterConnectService extends BaseService
         return $this->transaction(function () use ($conn) {
             $uuid = $conn->uuid;
             $userId = $conn->user_id;
+            $centerId = $conn->center_id;
+            $role = $conn->connected_role;
             $conn->delete();
+
+            // Cancel any pending/declined CenterTeacher invitation when disconnecting
+            if ($role === UserRole::TEACHER->value) {
+                CenterTeacher::where('center_id', $centerId)
+                    ->where('teacher_user_id', $userId)
+                    ->whereIn('status', ['invited', 'declined'])
+                    ->delete();
+            }
 
             $this->logSecurityEvent('center.connect.user_unlinked', [
                 'connection_uuid' => $uuid,
@@ -256,15 +303,28 @@ class CenterConnectService extends BaseService
     /**
      * @return array<string, mixed>
      */
-    protected function formatConnection(CenterConnectedUser $conn): array
+    protected function formatConnection(CenterConnectedUser $conn, ?CenterTeacher $centerTeacher = null): array
     {
         $u = $conn->user;
         $isTeacher = $conn->connected_role === UserRole::TEACHER->value;
+
+        $connectionStatus = 'active';
+        $connectionStatusAr = 'مربوط ونشط';
+        if ($isTeacher && $centerTeacher) {
+            if ($centerTeacher->status === 'invited') {
+                $connectionStatus = 'pending';
+                $connectionStatusAr = 'بانتظار موافقة المعلم';
+            } elseif ($centerTeacher->status === 'declined') {
+                $connectionStatus = 'declined';
+                $connectionStatusAr = 'رفض المعلم الدعوة';
+            }
+        }
 
         return [
             'id' => $conn->uuid,
             'uuid' => $conn->uuid,
             'userId' => $conn->user_id,
+            'centerTeacherId' => $centerTeacher?->uuid,
             'nameAr' => $u?->name ?? '',
             'email' => $u?->email ?? '',
             'phone' => $u?->phone ?? '',
@@ -276,6 +336,9 @@ class CenterConnectService extends BaseService
             'avatar' => $u?->avatar,
             'branchId' => $conn->branch?->uuid,
             'branchNameAr' => $conn->branch?->name_ar ?? 'الفرع الرئيسي',
+            'status' => $connectionStatus,
+            'statusAr' => $connectionStatusAr,
+            'awaitingTeacherApproval' => $connectionStatus === 'pending',
             'connectedAt' => ($conn->connected_at ?? $conn->created_at)?->toDateString(),
         ];
     }

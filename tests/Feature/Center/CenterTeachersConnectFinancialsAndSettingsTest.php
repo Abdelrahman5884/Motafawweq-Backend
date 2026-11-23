@@ -350,4 +350,117 @@ class CenterTeachersConnectFinancialsAndSettingsTest extends TestCase
         $this->assertDatabaseMissing('users', ['id' => $centerId]);
         $this->assertDatabaseMissing('center_profiles', ['user_id' => $centerId]);
     }
+
+    public function test_platform_teacher_invite_requires_teacher_approval_before_activation(): void
+    {
+        $center = $this->createProCenter();
+
+        $platformTeacher = User::factory()->create([
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
+            'email_verified_at' => now(),
+            'name' => 'د. شريف المنياوي',
+            'email' => 'sherif.platform@motafawweq.test',
+            'phone' => '01055443322',
+        ]);
+
+        $otherTeacher = User::factory()->create([
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
+            'email_verified_at' => now(),
+            'name' => 'أ. معلم آخر',
+        ]);
+
+        Sanctum::actingAs($center, ['access']);
+        $branchId = $this->postJson('/api/v1/center/branches', ['name_ar' => 'فرع مدينة نصر'])->json('data.id');
+
+        // 1. Center invites platform teacher via Connect -> status MUST be 'invited' (awaiting teacher approval)
+        $conn = $this->postJson('/api/v1/center/connect/users', [
+            'user_id' => $platformTeacher->id,
+            'branch_id' => $branchId,
+        ])->assertStatus(201)->json('data');
+
+        $this->assertSame('pending', $conn['status']);
+        $this->assertTrue($conn['awaitingTeacherApproval']);
+
+        $teacherUuid = $conn['centerTeacherId'];
+        $this->assertNotEmpty($teacherUuid);
+
+        // Center MUST NOT be able to force-activate an unaccepted platform teacher
+        $this->putJson("/api/v1/center/teachers/{$teacherUuid}", [
+            'status' => 'active',
+        ])->assertStatus(422);
+
+        // Center MUST NOT be able to assign a study group to an unaccepted platform teacher
+        $this->postJson('/api/v1/center/groups', [
+            'name_ar' => 'مجموعة الفيزياء التجريبية',
+            'subject_ar' => 'الفيزياء',
+            'center_teacher_id' => $teacherUuid,
+        ])->assertStatus(422);
+
+        // 2. Another teacher cannot accept/decline this invitation (strict IDOR isolation)
+        Sanctum::actingAs($otherTeacher, ['access']);
+        $this->postJson("/api/v1/teacher/center-invitations/{$teacherUuid}/accept")->assertStatus(404);
+        $this->postJson("/api/v1/teacher/center-invitations/{$teacherUuid}/decline")->assertStatus(404);
+
+        // 3. Invited platform teacher sees the incoming invitation and declines it first
+        Sanctum::actingAs($platformTeacher, ['access']);
+        $listRes = $this->getJson('/api/v1/teacher/center-invitations')->assertOk();
+        $listRes->assertJsonCount(1, 'data.invitations')
+            ->assertJsonPath('data.invitations.0.id', $teacherUuid)
+            ->assertJsonPath('data.invitations.0.centerNameAr', 'أكاديمية الرواد')
+            ->assertJsonPath('data.invitations.0.branchNameAr', 'فرع مدينة نصر');
+
+        $this->postJson("/api/v1/teacher/center-invitations/{$teacherUuid}/decline")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'declined');
+
+        // 4. Center sees declined status, resends invite -> moves back to 'invited'
+        Sanctum::actingAs($center, ['access']);
+        $this->getJson("/api/v1/center/teachers/{$teacherUuid}")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'declined');
+
+        $this->postJson("/api/v1/center/teachers/{$teacherUuid}/resend-invite")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'invited');
+
+        // 5. Platform teacher accepts the invitation -> becomes active!
+        Sanctum::actingAs($platformTeacher, ['access']);
+        $this->postJson("/api/v1/teacher/center-invitations/{$teacherUuid}/accept")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'active');
+
+        $this->getJson('/api/v1/teacher/center-invitations')
+            ->assertOk()
+            ->assertJsonCount(0, 'data.invitations')
+            ->assertJsonCount(1, 'data.activeCenters');
+
+        // 6. Center can now assign a study group to the accepted platform teacher
+        Sanctum::actingAs($center, ['access']);
+        $this->postJson('/api/v1/center/groups', [
+            'name_ar' => 'مجموعة الفيزياء المعتمدة',
+            'subject_ar' => 'الفيزياء',
+            'center_teacher_id' => $teacherUuid,
+        ])->assertStatus(201);
+
+        // 7. Adding another existing platform teacher via POST /center/teachers also starts as 'invited'
+        $platformTeacher2 = User::factory()->create([
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
+            'email_verified_at' => now(),
+            'name' => 'أ. مروة كامل',
+            'email' => 'marwa.kamel@motafawweq.test',
+        ]);
+
+        $directAdd = $this->postJson('/api/v1/center/teachers', [
+            'name_ar' => 'أ. مروة كامل',
+            'subject_ar' => 'الأحياء',
+            'email' => 'marwa.kamel@motafawweq.test',
+            'branch_id' => $branchId,
+        ])->assertStatus(201)->json('data');
+
+        $this->assertSame('invited', $directAdd['status']);
+        $this->assertTrue($directAdd['awaitingTeacherApproval']);
+    }
 }

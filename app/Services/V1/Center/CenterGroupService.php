@@ -1276,6 +1276,14 @@ class CenterGroupService extends BaseService
             return null;
         }
 
-        return $this->teacherService->findOwnedTeacher($center, (string) $uuid);
+        $teacher = $this->teacherService->findOwnedTeacher($center, (string) $uuid);
+
+        if ($teacher->teacher_user_id !== null && in_array($teacher->status, ['invited', 'declined'], true)) {
+            throw ValidationException::withMessages([
+                'center_teacher_id' => ['لا يمكن إسناد مجموعة لهذا المعلم قبل موافقته على دعوة الانضمام للسنتر من حسابه.'],
+            ]);
+        }
+
+        return $teacher;
     }
 }
