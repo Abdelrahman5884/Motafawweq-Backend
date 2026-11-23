@@ -509,17 +509,29 @@ class CenterGroupService extends BaseService
         return [
             'group' => $this->formatGroup($group),
             'enrolled' => $studentsList->values()->all(),
-            'pending' => $pending->map(fn (GroupEnrollment $e) => [
-                'id' => $e->uuid,
-                'enrollmentId' => $e->uuid,
-                'studentId' => $e->student_id,
-                'studentCode' => $e->student?->student_code,
-                'nameAr' => $e->student_name_override ?: ($e->student?->name ?? 'طالب'),
-                'phone' => $e->student_phone_override ?: ($e->student?->phone ?? ''),
-                'parentNameAr' => $e->parent_name_ar,
-                'parentPhone' => $e->parent_phone,
-                'requestedAt' => ($e->requested_at ?? $e->created_at)?->toIso8601String(),
-            ])->values()->all(),
+            'pending' => $pending->map(function (GroupEnrollment $e) {
+                $methodEnum = $e->join_method instanceof JoinMethod
+                    ? $e->join_method
+                    : JoinMethod::tryFrom((string) $e->join_method);
+                $methodValue = $methodEnum ? $methodEnum->value : (string) $e->join_method;
+
+                return [
+                    'id' => $e->uuid,
+                    'enrollmentId' => $e->uuid,
+                    'studentId' => $e->student_id,
+                    'studentCode' => $e->student?->student_code,
+                    'nameAr' => $e->student_name_override ?: ($e->student?->name ?? 'طالب'),
+                    'phone' => $e->student_phone_override ?: ($e->student?->phone ?? ''),
+                    'email' => $e->student?->email ?? '',
+                    'avatar' => $e->student?->avatar ?: null,
+                    'parentNameAr' => $e->parent_name_ar,
+                    'parentPhone' => $e->parent_phone,
+                    'joinMethod' => $methodValue,
+                    'method' => $methodEnum ? $methodEnum->labelAr() : 'كود الانضمام',
+                    'isTeacherInvite' => $methodValue === JoinMethod::TEACHER_INVITE->value,
+                    'requestedAt' => ($e->requested_at ?? $e->created_at)?->toIso8601String(),
+                ];
+            })->values()->all(),
             'stats' => [
                 'enrolledCount' => $totalEnrolled,
                 'pendingCount' => $pending->count(),
@@ -533,48 +545,60 @@ class CenterGroupService extends BaseService
     }
 
     /**
-     * Search active platform students to enroll directly into a center group.
+     * Search active platform students to invite into a center group.
+     * When query is empty, returns the most recent registered platform students.
      *
      * @return array<int, array<string, mixed>>
      */
-    public function searchPlatformStudents(User $center, string $query, int $limit = 20): array
+    public function searchPlatformStudents(User $center, string $query = '', int $limit = 20): array
     {
         $clean = trim($query);
-        if (mb_strlen($clean) < 2) {
-            return [];
-        }
-
         $safeLimit = min(40, max(1, $limit));
 
-        return User::query()
+        $builder = User::query()
             ->where('role', UserRole::STUDENT->value)
             ->where('status', UserStatus::ACTIVE->value)
-            ->where(function ($q) use ($clean) {
+            ->where('email', 'not like', '%@student.motafawweq.local')
+            ->with(['parents:id,name,phone', 'studentProfile:student_id,grade_ar,school_name,parent_name,parent_phone']);
+
+        if ($clean !== '') {
+            $builder->where(function ($q) use ($clean) {
                 $q->where('name', 'like', "%{$clean}%")
                     ->orWhere('phone', 'like', "%{$clean}%")
                     ->orWhere('email', 'like', "%{$clean}%")
                     ->orWhere('student_code', 'like', "%{$clean}%");
-            })
-            ->with('studentProfile:student_id,grade_ar,school_name')
+            });
+        }
+
+        return $builder
             ->orderByDesc('id')
             ->limit($safeLimit)
             ->get()
-            ->map(fn (User $s) => [
-                'id' => $s->id,
-                'nameAr' => $s->name,
-                'email' => $s->email,
-                'phone' => $s->phone ?? '',
-                'studentCode' => $s->student_code,
-                'gradeAr' => $s->studentProfile?->grade_ar ?? 'الصف الثالث الثانوي',
-                'schoolAr' => $s->studentProfile?->school_name ?? '',
-                'avatar' => $s->avatar,
-            ])
+            ->map(function (User $s) {
+                $parent = $s->relationLoaded('parents') ? $s->parents->first() : null;
+                $profile = $s->studentProfile;
+
+                return [
+                    'id' => $s->id,
+                    'name' => $s->name,
+                    'nameAr' => $s->name,
+                    'email' => $s->email,
+                    'phone' => $s->phone ?? '',
+                    'studentCode' => $s->student_code,
+                    'gradeAr' => $profile?->grade_ar ?? 'الصف الثالث الثانوي',
+                    'schoolAr' => $profile?->school_name ?? '',
+                    'parentNameAr' => $profile?->parent_name ?: ($parent?->name ?? ''),
+                    'parentPhone' => $profile?->parent_phone ?: ($parent?->phone ?? ''),
+                    'avatar' => $s->avatar ?: null,
+                ];
+            })
             ->values()
             ->all();
     }
 
     /**
-     * Directly enroll an existing platform student OR register & enroll a walk-in student into a center group.
+     * Invite an existing platform student (creates a pending invitation for the student to accept)
+     * OR register & directly enroll a walk-in non-platform student into a center group.
      *
      * @return array<string, mixed>
      */
@@ -594,8 +618,11 @@ class CenterGroupService extends BaseService
 
         $this->billingService->assertUsersQuotaAvailable($center, 1);
 
-        $enrollment = $this->transaction(function () use ($group, $data) {
-            $studentUser = $this->resolveOrProvisionStudent($data);
+        $isPlatformInvite = false;
+
+        $enrollment = $this->transaction(function () use ($group, $data, &$isPlatformInvite) {
+            [$studentUser, $isExistingPlatformStudent] = $this->resolveOrProvisionStudentWithOrigin($data);
+            $isPlatformInvite = $isExistingPlatformStudent;
 
             /** @var GroupEnrollment|null $existing */
             $existing = GroupEnrollment::withTrashed()
@@ -604,18 +631,81 @@ class CenterGroupService extends BaseService
                 ->lockForUpdate()
                 ->first();
 
-            if ($existing && ! $existing->trashed() && $existing->status === EnrollmentStatus::ENROLLED) {
-                throw ValidationException::withMessages([
-                    'student' => [__('messages.student_already_enrolled')],
-                ]);
+            if ($existing && ! $existing->trashed()) {
+                if ($existing->status === EnrollmentStatus::ENROLLED) {
+                    throw ValidationException::withMessages([
+                        'student' => [__('messages.student_already_enrolled')],
+                    ]);
+                }
+                if ($isPlatformInvite && $existing->status === EnrollmentStatus::PENDING) {
+                    throw ValidationException::withMessages([
+                        'student' => [__('messages.student_already_pending')],
+                    ]);
+                }
             }
 
-            $barcode = ($existing?->student_barcode) ?: GroupEnrollment::generateUniqueBarcode($group->id, $studentUser->id);
-            $passcode = ($existing?->student_passcode) ?: GroupEnrollment::generatePasscode();
             $paymentStatus = in_array($data['payment_status'] ?? 'paid', ['paid', 'partial', 'due'], true)
                 ? (string) ($data['payment_status'] ?? 'paid')
                 : 'paid';
             $dueAmount = $paymentStatus === 'paid' ? 0.0 : max(0.0, (float) ($data['due_amount_egp'] ?? $group->price_egp));
+
+            if ($isPlatformInvite) {
+                if ($existing) {
+                    if ($existing->trashed()) {
+                        $existing->restore();
+                    }
+                    $existing->update([
+                        'status' => EnrollmentStatus::PENDING,
+                        'join_method' => JoinMethod::TEACHER_INVITE,
+                        'student_barcode' => null,
+                        'student_passcode' => null,
+                        'enrolled_at' => null,
+                        'student_name_override' => trim(strip_tags((string) ($data['name_ar'] ?? $data['nameAr'] ?? $studentUser->name))),
+                        'student_phone_override' => trim(strip_tags((string) ($data['phone'] ?? $studentUser->phone ?? ''))),
+                        'parent_name_ar' => isset($data['parent_name_ar']) || isset($data['parentNameAr'])
+                            ? trim(strip_tags((string) ($data['parent_name_ar'] ?? $data['parentNameAr'])))
+                            : $existing->parent_name_ar,
+                        'parent_phone' => isset($data['parent_phone']) || isset($data['parentPhone'])
+                            ? trim(strip_tags((string) ($data['parent_phone'] ?? $data['parentPhone'])))
+                            : $existing->parent_phone,
+                        'payment_status' => $paymentStatus,
+                        'due_amount_egp' => $dueAmount,
+                        'payment_due_since' => $dueAmount > 0 ? now()->toDateString() : null,
+                        'requested_at' => now(),
+                    ]);
+                    $enr = $existing;
+                } else {
+                    $enr = GroupEnrollment::create([
+                        'study_group_id' => $group->id,
+                        'student_id' => $studentUser->id,
+                        'status' => EnrollmentStatus::PENDING,
+                        'join_method' => JoinMethod::TEACHER_INVITE,
+                        'student_name_override' => trim(strip_tags((string) ($data['name_ar'] ?? $data['nameAr'] ?? $studentUser->name))),
+                        'student_phone_override' => trim(strip_tags((string) ($data['phone'] ?? $studentUser->phone ?? ''))),
+                        'parent_name_ar' => isset($data['parent_name_ar']) || isset($data['parentNameAr'])
+                            ? trim(strip_tags((string) ($data['parent_name_ar'] ?? $data['parentNameAr'])))
+                            : null,
+                        'parent_phone' => isset($data['parent_phone']) || isset($data['parentPhone'])
+                            ? trim(strip_tags((string) ($data['parent_phone'] ?? $data['parentPhone'])))
+                            : null,
+                        'payment_status' => $paymentStatus,
+                        'due_amount_egp' => $dueAmount,
+                        'payment_due_since' => $dueAmount > 0 ? now()->toDateString() : null,
+                        'requested_at' => now(),
+                    ]);
+                }
+
+                $this->logSecurityEvent('center.group.student_invited', [
+                    'group_uuid' => $group->uuid,
+                    'enrollment_uuid' => $enr->uuid,
+                    'student_id' => $studentUser->id,
+                ], 'info', $enr);
+
+                return $enr->load(['student:id,name,email,phone,student_code,avatar', 'student.studentProfile:student_id,grade_ar']);
+            }
+
+            $barcode = ($existing?->student_barcode) ?: GroupEnrollment::generateUniqueBarcode($group->id, $studentUser->id);
+            $passcode = ($existing?->student_passcode) ?: GroupEnrollment::generatePasscode();
 
             if ($existing) {
                 if ($existing->trashed()) {
@@ -677,7 +767,12 @@ class CenterGroupService extends BaseService
             return $enr->load(['student:id,name,email,phone,student_code,avatar', 'student.studentProfile:student_id,grade_ar']);
         });
 
-        return $this->formatEnrollment($enrollment, $group, 'absent', null);
+        $formatted = $this->formatEnrollment($enrollment, $group, 'absent', null);
+        $formatted['enrollmentStatus'] = $isPlatformInvite ? EnrollmentStatus::PENDING->value : EnrollmentStatus::ENROLLED->value;
+        $formatted['joinMethod'] = $isPlatformInvite ? JoinMethod::TEACHER_INVITE->value : JoinMethod::DIRECT_ENROLLMENT->value;
+        $formatted['isInvitation'] = $isPlatformInvite;
+
+        return $formatted;
     }
 
     /**
@@ -705,6 +800,12 @@ class CenterGroupService extends BaseService
         if ($enrollment->status !== EnrollmentStatus::PENDING) {
             throw ValidationException::withMessages([
                 'enrollment' => ['يمكن قبول طلبات الانضمام المعلقة فقط.'],
+            ]);
+        }
+
+        if ($enrollment->join_method === JoinMethod::TEACHER_INVITE) {
+            throw ValidationException::withMessages([
+                'enrollment' => ['تم إرسال هذه الدعوة من قِبل السنتر، ويجب على الطالب قبولها من حسابه للانضمام للمجموعة.'],
             ]);
         }
 
@@ -895,6 +996,8 @@ class CenterGroupService extends BaseService
             'studentNameAr' => $enrollment->student_name_override ?: ($enrollment->student?->name ?? 'طالب'),
             'studentPhone' => $enrollment->student_phone_override ?: ($enrollment->student?->phone ?? ''),
             'studentCode' => $enrollment->student?->student_code,
+            'avatar' => $enrollment->student?->avatar ?: null,
+            'studentAvatar' => $enrollment->student?->avatar ?: null,
             'gradeAr' => $enrollment->student?->studentProfile?->grade_ar ?: $group->grade_ar,
             'barcode' => $barcode,
             'passcode' => $passcode,
@@ -907,6 +1010,8 @@ class CenterGroupService extends BaseService
             'scheduleAr' => $group->schedule_ar,
             'centerNameAr' => $profile?->name_ar ?: $group->center_name,
             'centerPhone' => $profile?->phone ?: '',
+            'attendanceRate' => (int) ($enrollment->attendance_rate ?? 100),
+            'paymentStatus' => $enrollment->payment_status ?: 'paid',
             'issuedAt' => now()->toDateString(),
         ];
     }
@@ -975,9 +1080,11 @@ class CenterGroupService extends BaseService
             'enrollmentId' => $e->uuid,
             'studentId' => $e->student_id,
             'studentCode' => $e->student?->student_code,
+            'name' => $e->student?->name ?: ($e->student_name_override ?: 'طالب'),
             'nameAr' => $e->student_name_override ?: ($e->student?->name ?? 'طالب'),
             'phone' => $e->student_phone_override ?: ($e->student?->phone ?? ''),
             'email' => $e->student?->email ?? '',
+            'avatar' => $e->student?->avatar ?: null,
             'gradeAr' => $e->student?->studentProfile?->grade_ar ?: $group->grade_ar,
             'parentNameAr' => $e->parent_name_ar ?? '',
             'parentPhone' => $e->parent_phone ?? '',
@@ -999,7 +1106,12 @@ class CenterGroupService extends BaseService
         ];
     }
 
-    protected function resolveOrProvisionStudent(array $data): User
+    /**
+     * Resolve an existing platform student or provision a walk-in non-platform student.
+     *
+     * @return array{0: User, 1: bool} [User $student, bool $isExistingPlatformStudent]
+     */
+    protected function resolveOrProvisionStudentWithOrigin(array $data): array
     {
         $studentIdentifier = trim((string) ($data['student_id'] ?? $data['studentId'] ?? ''));
         if ($studentIdentifier !== '') {
@@ -1014,7 +1126,7 @@ class CenterGroupService extends BaseService
                 ->first();
 
             if ($found) {
-                return $found;
+                return [$found, true];
             }
 
             if (empty($data['name_ar']) && empty($data['nameAr'])) {
@@ -1029,7 +1141,9 @@ class CenterGroupService extends BaseService
             $existingByPhone = User::where('phone', $phone)->first();
             if ($existingByPhone) {
                 if ($existingByPhone->role === UserRole::STUDENT) {
-                    return $existingByPhone;
+                    $isPlatformAccount = ! str_ends_with((string) $existingByPhone->email, '@student.motafawweq.local');
+
+                    return [$existingByPhone, $isPlatformAccount];
                 }
                 throw ValidationException::withMessages([
                     'phone' => ['رقم الهاتف مسجل بالفعل لحساب غير طالب على المنصة.'],
@@ -1045,7 +1159,9 @@ class CenterGroupService extends BaseService
             $existingByEmail = User::whereRaw('LOWER(email) = ?', [$email])->first();
             if ($existingByEmail) {
                 if ($existingByEmail->role === UserRole::STUDENT) {
-                    return $existingByEmail;
+                    $isPlatformAccount = ! str_ends_with((string) $existingByEmail->email, '@student.motafawweq.local');
+
+                    return [$existingByEmail, $isPlatformAccount];
                 }
                 throw ValidationException::withMessages([
                     'email' => ['البريد الإلكتروني مسجل بالفعل لحساب غير طالب على المنصة.'],
@@ -1078,7 +1194,7 @@ class CenterGroupService extends BaseService
             ['grade_ar' => trim(strip_tags((string) ($data['grade_ar'] ?? $data['gradeAr'] ?? 'الصف الثالث الثانوي')))]
         );
 
-        return $user;
+        return [$user, false];
     }
 
     /**

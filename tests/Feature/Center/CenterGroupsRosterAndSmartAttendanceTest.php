@@ -55,9 +55,15 @@ class CenterGroupsRosterAndSmartAttendanceTest extends TestCase
             'name' => 'عمر طارق القاضي',
             'phone' => '01024589912',
             'student_code' => 'STD-778899',
+            'avatar' => 'https://example.com/avatars/omar.jpg',
         ]);
 
         Sanctum::actingAs($center, ['access']);
+
+        // Platform student search works with or without query and returns student avatar
+        $searchRes = $this->getJson('/api/v1/center/students/search')->assertOk()->json('data');
+        $this->assertNotEmpty($searchRes);
+        $this->assertSame('https://example.com/avatars/omar.jpg', $searchRes[0]['avatar']);
 
         $branchId = $this->postJson('/api/v1/center/branches', ['name_ar' => 'فرع الدقي'])->json('data.id');
         $roomId = $this->postJson('/api/v1/center/rooms', ['name_ar' => 'قاعة 1', 'branch_id' => $branchId, 'capacity' => 50])->json('data.id');
@@ -74,22 +80,46 @@ class CenterGroupsRosterAndSmartAttendanceTest extends TestCase
             ],
         ])->assertStatus(201)->json('data');
 
-        // 1. Direct enroll existing platform student
+        // 1. Adding an existing platform student sends an invitation (pending + teacher_invite) for the student to accept
         $enr1 = $this->postJson("/api/v1/center/groups/{$group['id']}/students", [
             'student_id' => (string) $platformStudent->id,
             'payment_status' => 'due',
             'due_amount_egp' => 200,
         ])->assertStatus(201)->json('data');
 
-        $this->assertNotEmpty($enr1['barcode']);
-        $this->assertNotEmpty($enr1['passcode']);
+        $this->assertTrue($enr1['isInvitation']);
+        $this->assertSame('pending', $enr1['enrollmentStatus']);
+        $this->assertSame('teacher_invite', $enr1['joinMethod']);
+        $this->assertSame('https://example.com/avatars/omar.jpg', $enr1['avatar']);
 
-        // Duplicate enrollment rejected
+        // Duplicate invitation while pending is rejected
         $this->postJson("/api/v1/center/groups/{$group['id']}/students", [
             'student_id' => (string) $platformStudent->id,
         ])->assertStatus(422);
 
-        // 2. Manual walk-in student registration (auto-provisions platform student user)
+        // Center cannot self-accept its own sent invitation; the invited student must accept from their account
+        $this->postJson("/api/v1/center/groups/{$group['id']}/enrollments/{$enr1['enrollmentId']}/accept")
+            ->assertStatus(422);
+
+        // Student accepts the center invitation from their account -> becomes enrolled with barcode & passcode
+        Sanctum::actingAs($platformStudent, ['access']);
+        $acceptedInv = $this->postJson("/api/v1/student/groups/invitations/{$enr1['enrollmentId']}/accept")
+            ->assertOk()
+            ->json('data');
+        $this->assertSame('enrolled', $acceptedInv['enrollmentStatus']);
+        $this->assertNotEmpty($acceptedInv['studentBarcode']);
+        $this->assertNotEmpty($acceptedInv['studentPasscode']);
+        $enr1['barcode'] = $acceptedInv['studentBarcode'];
+        $enr1['passcode'] = $acceptedInv['studentPasscode'];
+
+        Sanctum::actingAs($center, ['access']);
+
+        // Duplicate enrollment after acceptance is rejected
+        $this->postJson("/api/v1/center/groups/{$group['id']}/students", [
+            'student_id' => (string) $platformStudent->id,
+        ])->assertStatus(422);
+
+        // 2. Manual walk-in non-platform student registration enrolls directly & generates barcode immediately
         $enr2 = $this->postJson("/api/v1/center/groups/{$group['id']}/students", [
             'name_ar' => 'سارة خالد المنشاوي',
             'phone' => '01199887766',
@@ -97,6 +127,9 @@ class CenterGroupsRosterAndSmartAttendanceTest extends TestCase
             'parent_name_ar' => 'خالد المنشاوي',
             'parent_phone' => '01001122334',
         ])->assertStatus(201)->json('data');
+        $this->assertFalse($enr2['isInvitation']);
+        $this->assertSame('enrolled', $enr2['enrollmentStatus']);
+        $this->assertNotEmpty($enr2['barcode']);
 
         // 3. Capacity limit (max_students = 2) enforced on 3rd student
         $this->postJson("/api/v1/center/groups/{$group['id']}/students", [
@@ -104,12 +137,13 @@ class CenterGroupsRosterAndSmartAttendanceTest extends TestCase
             'phone' => '01200001111',
         ])->assertStatus(422);
 
-        // 4. Generate printable student ID card with signed HMAC QR
+        // 4. Generate printable student ID card with signed HMAC QR and student avatar
         $card = $this->getJson("/api/v1/center/groups/{$group['id']}/enrollments/{$enr1['enrollmentId']}/card")
             ->assertOk()
             ->json('data');
 
         $this->assertStringStartsWith('MOTAFAWWEQ:ATTEND:', $card['signedQrPayload']);
+        $this->assertSame('https://example.com/avatars/omar.jpg', $card['avatar']);
 
         // 5. Tampered HMAC QR payload MUST be rejected!
         $tamperedQr = substr($card['signedQrPayload'], 0, -4).'0000';

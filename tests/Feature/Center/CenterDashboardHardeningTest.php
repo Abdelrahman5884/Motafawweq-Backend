@@ -123,6 +123,14 @@ class CenterDashboardHardeningTest extends TestCase
         $enr1 = $this->postJson("/api/v1/center/groups/{$g1['id']}/students", ['student_id' => $st1->id])->assertStatus(201)->json('data');
         $enr2 = $this->postJson("/api/v1/center/groups/{$g2['id']}/students", ['student_id' => $st2->id])->assertStatus(201)->json('data');
 
+        Sanctum::actingAs($st1, ['access']);
+        $this->postJson("/api/v1/student/groups/invitations/{$enr1['enrollmentId']}/accept")->assertOk();
+
+        Sanctum::actingAs($st2, ['access']);
+        $this->postJson("/api/v1/student/groups/invitations/{$enr2['enrollmentId']}/accept")->assertOk();
+
+        Sanctum::actingAs($center, ['access']);
+
         // Log attendance today for st1 in g1, and 5 days ago for st2 in g2
         $group1Model = StudyGroup::where('uuid', $g1['id'])->firstOrFail();
         $group2Model = StudyGroup::where('uuid', $g2['id'])->firstOrFail();

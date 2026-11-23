@@ -47,6 +47,7 @@ class StudentGroupScheduleService extends BaseService
                 'group' => fn ($q) => $q->withCount('enrolledEnrollments'),
                 'group.scheduleSlots',
                 'group.teacher:id,name',
+                'group.centerTeacher:id,name_ar',
                 'group.course:id,uuid,title_ar,title_en',
             ])
             ->latest()
@@ -64,6 +65,8 @@ class StudentGroupScheduleService extends BaseService
             $joinMethodValue = $joinMethodEnum?->value ?? (string) $enrollment->join_method;
             $isTeacherInvite = $status === EnrollmentStatus::PENDING->value
                 && $joinMethodValue === JoinMethod::TEACHER_INVITE->value;
+            $resolvedTeacherName = $group?->centerTeacher?->name_ar
+                ?: ($group?->teacher_name_override ?: ($group?->teacher?->name ?? ''));
 
             return [
                 'enrollmentId' => $enrollment->uuid,
@@ -83,9 +86,9 @@ class StudentGroupScheduleService extends BaseService
                 'joinCode' => strtoupper(trim((string) ($group?->join_code ?? ''))),
                 'maxStudents' => (int) ($group?->max_students ?? 50),
                 'enrolledCount' => (int) ($group?->enrolled_enrollments_count ?? 0),
-                'teacherName' => $group?->teacher_name_override ?: ($group?->teacher?->name ?? ''),
-                'teacherNameAr' => $group?->teacher_name_override ?: ($group?->teacher?->name ?? ''),
-                'teacherNameEn' => $group?->teacher_name_override ?: ($group?->teacher?->name ?? ''),
+                'teacherName' => $resolvedTeacherName,
+                'teacherNameAr' => $resolvedTeacherName,
+                'teacherNameEn' => $resolvedTeacherName,
                 'enrollmentStatus' => $status,
                 'joinMethod' => $joinMethodValue,
                 'joinMethodLabelAr' => $joinMethodEnum?->labelAr() ?? 'كود الانضمام',

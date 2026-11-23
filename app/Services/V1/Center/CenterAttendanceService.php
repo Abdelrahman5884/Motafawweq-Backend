@@ -73,7 +73,7 @@ class CenterAttendanceService extends BaseService
         $enrollment = GroupEnrollment::where('study_group_id', $group->id)
             ->where('status', EnrollmentStatus::ENROLLED->value)
             ->where('uuid', $enrollmentUuid)
-            ->with('student:id,name,phone,student_code')
+            ->with('student:id,name,phone,student_code,avatar')
             ->first();
 
         if (! $enrollment) {
@@ -635,6 +635,7 @@ class CenterAttendanceService extends BaseService
                     'nameAr' => $studentName,
                     'phone' => $enrollment->student_phone_override ?: ($enrollment->student?->phone ?? ''),
                     'studentCode' => $enrollment->student?->student_code,
+                    'avatar' => $enrollment->student?->avatar ?: null,
                     'barcode' => $enrollment->student_barcode,
                     'paymentStatus' => $payStatus,
                     'paymentStatusAr' => $payStatus === 'paid' ? 'مسدد بالكامل' : "متبقي {$dueAmt} ج.م",
@@ -717,7 +718,7 @@ class CenterAttendanceService extends BaseService
         $enrollment = GroupEnrollment::where('study_group_id', $group->id)
             ->where('status', EnrollmentStatus::ENROLLED->value)
             ->where('student_barcode', $clean)
-            ->with('student:id,name,phone,student_code')
+            ->with('student:id,name,phone,student_code,avatar')
             ->first();
         if ($enrollment) {
             return $enrollment;
@@ -727,7 +728,7 @@ class CenterAttendanceService extends BaseService
         $enrollment = GroupEnrollment::where('study_group_id', $group->id)
             ->where('status', EnrollmentStatus::ENROLLED->value)
             ->where('student_passcode', $clean)
-            ->with('student:id,name,phone,student_code')
+            ->with('student:id,name,phone,student_code,avatar')
             ->first();
         if ($enrollment) {
             return $enrollment;
@@ -748,7 +749,7 @@ class CenterAttendanceService extends BaseService
                         return GroupEnrollment::where('study_group_id', $group->id)
                             ->where('status', EnrollmentStatus::ENROLLED->value)
                             ->where('uuid', $tokenEnrollmentUuid)
-                            ->with('student:id,name,phone,student_code')
+                            ->with('student:id,name,phone,student_code,avatar')
                             ->first();
                     }
                 }
@@ -774,7 +775,7 @@ class CenterAttendanceService extends BaseService
                         return GroupEnrollment::where('study_group_id', $group->id)
                             ->where('status', EnrollmentStatus::ENROLLED->value)
                             ->where('student_id', $tokenStudentId)
-                            ->with('student:id,name,phone,student_code')
+                            ->with('student:id,name,phone,student_code,avatar')
                             ->first();
                     }
                 }
@@ -812,7 +813,7 @@ class CenterAttendanceService extends BaseService
                             ->orWhere('phone', $trimmed);
                     });
             })
-            ->with('student:id,name,phone,student_code')
+            ->with('student:id,name,phone,student_code,avatar')
             ->first();
     }
 

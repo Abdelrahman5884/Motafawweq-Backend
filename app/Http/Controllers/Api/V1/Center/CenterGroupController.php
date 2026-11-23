@@ -92,13 +92,13 @@ class CenterGroupController extends BaseApiController
     public function searchStudents(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'q' => ['required', 'string', 'min:2', 'max:100'],
+            'q' => ['nullable', 'string', 'max:100'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:40'],
         ]);
 
         $students = $this->groupService->searchPlatformStudents(
             $this->authenticatedUser(),
-            $validated['q'],
+            (string) ($validated['q'] ?? ''),
             (int) ($validated['limit'] ?? 20)
         );
 
@@ -117,7 +117,11 @@ class CenterGroupController extends BaseApiController
             $request->validated()
         );
 
-        return $this->createdResponse($enrolled, __('messages.center.student_enrolled'));
+        $message = ! empty($enrolled['isInvitation'])
+            ? 'تم إرسال دعوة الانضمام للطالب بنجاح! بانتظار قبول الطالب من حسابه.'
+            : __('messages.center.student_enrolled');
+
+        return $this->createdResponse($enrolled, $message);
     }
 
     public function acceptPending(string $uuid, string $enrollmentUuid): JsonResponse
