@@ -31,7 +31,7 @@ class CenterDashboardController extends BaseApiController
 
         $rawBranchId = $request->query('branch_id', $request->query('branchId'));
         $branchId = ($rawBranchId === null || $rawBranchId === '') ? null : trim((string) $rawBranchId);
-        if ($branchId !== null && $branchId !== 'all' && ! Str::isUuid($branchId)) {
+        if ($branchId !== null && $branchId !== 'all' && $branchId !== 'main' && ! Str::isUuid($branchId)) {
             return $this->validationErrorResponse([
                 'branch_id' => [__('validation.uuid', ['attribute' => 'branch_id'])],
             ]);

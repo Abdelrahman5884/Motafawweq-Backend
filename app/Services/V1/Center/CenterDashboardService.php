@@ -50,7 +50,8 @@ class CenterDashboardService extends BaseService
         );
 
         $branchId = null;
-        if ($branchUuid && $branchUuid !== 'all') {
+        $filterUnassignedMain = $branchUuid === 'main';
+        if ($branchUuid && $branchUuid !== 'all' && ! $filterUnassignedMain) {
             $branchId = $this->branchService->findOwnedBranch($center, $branchUuid)->id;
         }
 
@@ -58,6 +59,9 @@ class CenterDashboardService extends BaseService
             ->orderByDesc('is_main')
             ->orderBy('name_ar')
             ->get(['uuid', 'name_ar', 'name_en', 'is_main']);
+
+        $hasUnassignedHq = CenterRoom::forCenter($center->id)->whereNull('branch_id')->exists()
+            || StudyGroup::where('center_id', $center->id)->where('status', 'active')->whereNull('center_branch_id')->exists();
 
         $periodStart = match ($period) {
             'today' => now()->startOfDay(),
@@ -67,6 +71,7 @@ class CenterDashboardService extends BaseService
 
         // 1. Rooms & Capacity
         $rooms = CenterRoom::forCenter($center->id)
+            ->when($filterUnassignedMain, fn ($q) => $q->whereNull('branch_id'))
             ->when($branchId !== null, fn ($q) => $q->where('branch_id', $branchId))
             ->with('branch:id,uuid,name_ar')
             ->get();
@@ -74,12 +79,14 @@ class CenterDashboardService extends BaseService
         // 2. Teachers count
         $teachersCount = CenterTeacher::forCenter($center->id)
             ->where('status', 'active')
+            ->when($filterUnassignedMain, fn ($q) => $q->whereNull('branch_id'))
             ->when($branchId !== null, fn ($q) => $q->where('branch_id', $branchId))
             ->count();
 
         // 3. Groups & Enrolled Students
         $groups = StudyGroup::where('center_id', $center->id)
             ->where('status', 'active')
+            ->when($filterUnassignedMain, fn ($q) => $q->whereNull('center_branch_id'))
             ->when($branchId !== null, fn ($q) => $q->where('center_branch_id', $branchId))
             ->with(['scheduleSlots', 'centerTeacher:id,uuid,name_ar', 'centerRoom:id,uuid,name_ar,capacity'])
             ->withCount('enrolledEnrollments as enrolled_count')
@@ -150,6 +157,22 @@ class CenterDashboardService extends BaseService
 
         $planTier = $this->billingService->resolveActivePlanTier($center);
 
+        $formattedBranches = $centerBranches->map(fn (CenterBranch $b) => [
+            'id' => $b->uuid,
+            'nameAr' => $b->name_ar,
+            'nameEn' => $b->name_en ?: $b->name_ar,
+            'isMain' => (bool) $b->is_main,
+        ])->values()->all();
+
+        if ($hasUnassignedHq && ! $centerBranches->contains(fn (CenterBranch $b) => mb_stripos((string) $b->name_ar, 'رئيسي') !== false)) {
+            array_unshift($formattedBranches, [
+                'id' => 'main',
+                'nameAr' => 'الفرع الرئيسي',
+                'nameEn' => 'Main Branch',
+                'isMain' => true,
+            ]);
+        }
+
         return [
             'center' => [
                 'nameAr' => $profile->name_ar,
@@ -160,12 +183,7 @@ class CenterDashboardService extends BaseService
                 'planNameEn' => $planTier->labelEn(),
                 'isVerified' => (bool) $profile->is_verified_center,
             ],
-            'branches' => $centerBranches->map(fn (CenterBranch $b) => [
-                'id' => $b->uuid,
-                'nameAr' => $b->name_ar,
-                'nameEn' => $b->name_en ?: $b->name_ar,
-                'isMain' => (bool) $b->is_main,
-            ])->values()->all(),
+            'branches' => $formattedBranches,
             'selectedBranchId' => ($branchUuid && $branchUuid !== 'all') ? $branchUuid : 'all',
             'period' => $period,
             'kpis' => [

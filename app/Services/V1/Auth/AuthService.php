@@ -7,6 +7,7 @@ use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Enums\VerificationCodeType;
 use App\Exceptions\AuthSecurityException;
+use App\Models\CenterBranch;
 use App\Models\CenterProfile;
 use App\Models\PersonalAccessToken;
 use App\Models\StoredFile;
@@ -97,6 +98,19 @@ class AuthService extends BaseService
                         'name_en' => $resolvedCenterNameEn,
                         'phone' => $user->phone,
                         'address_ar' => $rawGovernorate !== '' ? $rawGovernorate : null,
+                    ]
+                );
+
+                CenterBranch::firstOrCreate(
+                    ['center_id' => $user->id, 'is_main' => true],
+                    [
+                        'name_ar' => 'الفرع الرئيسي',
+                        'name_en' => 'Main Branch',
+                        'address_ar' => $rawGovernorate !== '' ? $rawGovernorate : null,
+                        'phone' => $user->phone,
+                        'manager_name_ar' => $user->name,
+                        'is_main' => true,
+                        'is_active' => true,
                     ]
                 );
             }

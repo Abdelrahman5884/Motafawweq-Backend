@@ -30,8 +30,12 @@ class CenterRoomService extends BaseService
             ->orderByDesc('created_at');
 
         if (! empty($filters['branch_id']) && $filters['branch_id'] !== 'all') {
-            $branch = $this->branchService->findOwnedBranch($center, (string) $filters['branch_id']);
-            $query->where('branch_id', $branch->id);
+            if ($filters['branch_id'] === 'main') {
+                $query->whereNull('branch_id');
+            } else {
+                $branch = $this->branchService->findOwnedBranch($center, (string) $filters['branch_id']);
+                $query->where('branch_id', $branch->id);
+            }
         }
 
         if (isset($filters['is_available']) && $filters['is_available'] !== '') {
