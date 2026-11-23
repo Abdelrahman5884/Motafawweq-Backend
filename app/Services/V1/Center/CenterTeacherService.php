@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Models\CenterBranch;
 use App\Models\CenterProfile;
 use App\Models\CenterTeacher;
+use App\Models\StudyGroup;
 use App\Models\User;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -209,8 +210,8 @@ class CenterTeacherService extends BaseService
             if (array_key_exists('email', $data)) {
                 $payload['email'] = strtolower(trim((string) $data['email']));
             }
-            if (array_key_exists('settlement_rate', $data)) {
-                $payload['settlement_rate'] = max(0.05, min(0.95, (float) $data['settlement_rate']));
+            if (array_key_exists('settlement_rate', $data) || array_key_exists('settlementRate', $data)) {
+                $payload['settlement_rate'] = max(0.05, min(0.95, (float) ($data['settlement_rate'] ?? $data['settlementRate'])));
             }
             if (array_key_exists('status', $data) && in_array($data['status'], ['active', 'invited', 'suspended'], true)) {
                 $payload['status'] = $data['status'];
@@ -218,6 +219,12 @@ class CenterTeacherService extends BaseService
 
             if (! empty($payload)) {
                 $teacher->update($payload);
+            }
+
+            if (isset($payload['name_ar'])) {
+                StudyGroup::where('center_id', $teacher->center_id)
+                    ->where('center_teacher_id', $teacher->id)
+                    ->update(['teacher_name_override' => $payload['name_ar']]);
             }
 
             $this->logSecurityEvent('center.teacher.updated', [

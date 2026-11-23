@@ -244,7 +244,7 @@ class CenterBranchService extends BaseService
             return $branch->fresh();
         });
 
-        return $this->formatBranch($updated);
+        return $this->hydrateBranch($center, $updated);
     }
 
     /**
@@ -254,10 +254,22 @@ class CenterBranchService extends BaseService
     {
         $branch = $this->findOwnedBranch($center, $uuid);
 
-        return $this->transaction(function () use ($branch) {
+        return $this->transaction(function () use ($center, $branch) {
             $branchUuid = $branch->uuid;
             $branchName = $branch->name_ar;
+            $wasMain = (bool) $branch->is_main;
+
+            CenterRoom::forCenter($center->id)->where('branch_id', $branch->id)->update(['branch_id' => null]);
+            CenterTeacher::forCenter($center->id)->where('branch_id', $branch->id)->update(['branch_id' => null]);
+            CenterStaff::forCenter($center->id)->where('branch_id', $branch->id)->update(['branch_id' => null]);
+            StudyGroup::where('center_id', $center->id)->where('center_branch_id', $branch->id)->update(['center_branch_id' => null]);
+
             $branch->delete();
+
+            if ($wasMain) {
+                $nextMain = CenterBranch::forCenter($center->id)->orderBy('created_at')->first();
+                $nextMain?->update(['is_main' => true]);
+            }
 
             $this->logSecurityEvent('center.branch.deleted', [
                 'branch_uuid' => $branchUuid,
@@ -266,6 +278,52 @@ class CenterBranchService extends BaseService
 
             return true;
         });
+    }
+
+    /**
+     * Hydrate a single CenterBranch with its live rooms, teachers, staff, groups, and students metrics.
+     *
+     * @return array<string, mixed>
+     */
+    public function hydrateBranch(User $center, CenterBranch $branch): array
+    {
+        $roomsCount = CenterRoom::forCenter($center->id)->where('branch_id', $branch->id)->count();
+        $totalCapacity = (int) CenterRoom::forCenter($center->id)->where('branch_id', $branch->id)->sum('capacity');
+        $teachersCount = CenterTeacher::forCenter($center->id)->where('branch_id', $branch->id)->count();
+        $staffCount = CenterStaff::forCenter($center->id)->where('branch_id', $branch->id)->count();
+        $groupsCount = StudyGroup::where('center_id', $center->id)
+            ->where('center_branch_id', $branch->id)
+            ->where('status', 'active')
+            ->count();
+
+        $studentRow = GroupEnrollment::query()
+            ->join('study_groups', 'study_groups.id', '=', 'group_enrollments.study_group_id')
+            ->where('study_groups.center_id', $center->id)
+            ->where('study_groups.center_branch_id', $branch->id)
+            ->whereNull('study_groups.deleted_at')
+            ->whereNull('group_enrollments.deleted_at')
+            ->where('group_enrollments.status', EnrollmentStatus::ENROLLED->value)
+            ->select([
+                DB::raw('COUNT(DISTINCT group_enrollments.student_id) as students_count'),
+                DB::raw('COUNT(group_enrollments.id) as seats_occupied'),
+            ])
+            ->first();
+
+        $activeStudents = (int) ($studentRow?->students_count ?? 0);
+        $seatsOccupied = (int) ($studentRow?->seats_occupied ?? 0);
+        $utilizationRate = $totalCapacity > 0
+            ? min(100, (int) round(($seatsOccupied / $totalCapacity) * 100))
+            : 0;
+
+        return $this->formatBranch($branch, [
+            'roomsCount' => $roomsCount,
+            'totalCapacity' => $totalCapacity,
+            'teachersCount' => $teachersCount,
+            'staffCount' => $staffCount,
+            'groupsCount' => $groupsCount,
+            'activeStudents' => $activeStudents,
+            'utilizationRate' => $utilizationRate,
+        ]);
     }
 
     /**

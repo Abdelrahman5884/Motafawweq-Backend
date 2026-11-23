@@ -42,10 +42,11 @@ class CenterBranchController extends BaseApiController
 
     public function show(string $uuid): JsonResponse
     {
-        $branch = $this->branchService->findOwnedBranch($this->authenticatedUser(), $uuid);
+        $center = $this->authenticatedUser();
+        $branch = $this->branchService->findOwnedBranch($center, $uuid);
 
         return $this->successResponse(
-            $this->branchService->formatBranch($branch),
+            $this->branchService->hydrateBranch($center, $branch),
             __('messages.center.branch_fetched')
         );
     }
