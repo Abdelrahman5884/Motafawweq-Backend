@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\CheckCenterPlan;
 use App\Http\Middleware\CheckCenterPlanQuota;
+use App\Http\Middleware\CheckMaintenanceMode;
 use App\Http\Middleware\CheckRole;
 use App\Http\Middleware\CheckStudentPlan;
 use App\Http\Middleware\CheckTeacherPlan;
@@ -40,12 +41,13 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Enforce Locale, JSON & Security Headers on all API requests
+        // Enforce Locale, JSON, Security Headers, Sanitization & Maintenance Policy on all API requests
         $middleware->api(prepend: [
             SetLocale::class,
             ForceJsonResponse::class,
             SecurityHeaders::class,
             SanitizeInput::class,
+            CheckMaintenanceMode::class,
         ]);
 
         // Register custom middleware aliases

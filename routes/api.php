@@ -1,6 +1,14 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\AdminAnnouncementController;
+use App\Http\Controllers\Api\V1\Admin\AdminAttendanceController;
+use App\Http\Controllers\Api\V1\Admin\AdminChampionController;
+use App\Http\Controllers\Api\V1\Admin\AdminCourseController;
+use App\Http\Controllers\Api\V1\Admin\AdminDashboardController;
+use App\Http\Controllers\Api\V1\Admin\AdminFinancialController;
 use App\Http\Controllers\Api\V1\Admin\AdminRepublicLeagueController;
+use App\Http\Controllers\Api\V1\Admin\AdminSystemController;
+use App\Http\Controllers\Api\V1\Admin\AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
@@ -16,6 +24,7 @@ use App\Http\Controllers\Api\V1\Center\CenterSettingsController;
 use App\Http\Controllers\Api\V1\Center\CenterStaffController;
 use App\Http\Controllers\Api\V1\Center\CenterTeacherController;
 use App\Http\Controllers\Api\V1\Public\CertificateVerificationController;
+use App\Http\Controllers\Api\V1\Public\PlatformPublicController;
 use App\Http\Controllers\Api\V1\Storage\StorageController;
 use App\Http\Controllers\Api\V1\Student\StudentBillingController;
 use App\Http\Controllers\Api\V1\Student\StudentConvertedLectureController;
@@ -45,7 +54,6 @@ use App\Http\Controllers\Api\V1\Teacher\TeacherScheduleController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherSettingsController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherStudioController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherStudyGroupController;
-use App\Http\Controllers\Api\V1\UserController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -78,6 +86,14 @@ Route::prefix('v1')->group(function () {
     // Public Certificate Verification via QR Code
     Route::get('/verify-certificate/{serialNumber}', [CertificateVerificationController::class, 'verify'])
         ->middleware('throttle:api');
+
+    // Public Cached Platform Catalogs (Champions, Announcements, Pricing Plans, Operational Status)
+    Route::prefix('public')->middleware('throttle:public-catalog')->group(function () {
+        Route::get('/champions', [PlatformPublicController::class, 'champions']);
+        Route::get('/announcements', [PlatformPublicController::class, 'announcements']);
+        Route::get('/pricing-plans', [PlatformPublicController::class, 'pricingPlans']);
+        Route::get('/status', [PlatformPublicController::class, 'status']);
+    });
 
     /*
     |----------------------------------------------------------------------
@@ -360,16 +376,183 @@ Route::prefix('v1')->group(function () {
                     ->middleware(['throttle:student-read', 'student.plan:certificates']);
             });
 
-            // Admin area
+            // Platform Admin Portal (strictly isolated to active, verified platform administrators)
             Route::prefix('admin')->middleware('role:admin')->group(function () {
-                Route::get('/users', [UserController::class, 'index']);
-                Route::get('/users/{id}', [UserController::class, 'show'])->whereNumber('id');
-                Route::delete('/users/{id}', [UserController::class, 'destroy'])->whereNumber('id');
+                // Tab 1: Executive Dashboard, KPIs, Real-Time Traffic & AI Unit Economics
+                Route::get('/dashboard', [AdminDashboardController::class, 'index'])
+                    ->middleware('throttle:admin-read');
+                Route::get('/dashboard/active-users', [AdminDashboardController::class, 'activeUsers'])
+                    ->middleware('throttle:admin-read');
 
-                // Admin-controlled General Republic League
-                Route::get('/leagues/republic', [AdminRepublicLeagueController::class, 'show']);
-                Route::post('/leagues/republic/start', [AdminRepublicLeagueController::class, 'start']);
-                Route::post('/leagues/republic/stop', [AdminRepublicLeagueController::class, 'stop']);
+                // Tab 2: Honor Roll Cup Champions & General Republic League
+                Route::prefix('champions')->group(function () {
+                    Route::get('/', [AdminChampionController::class, 'index'])
+                        ->middleware('throttle:admin-read');
+                    Route::post('/', [AdminChampionController::class, 'store'])
+                        ->middleware(['throttle:admin-write', 'idempotent']);
+                    Route::put('/{uuid}', [AdminChampionController::class, 'update'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                    Route::patch('/{uuid}/toggle-pin', [AdminChampionController::class, 'togglePin'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                    Route::delete('/{uuid}', [AdminChampionController::class, 'destroy'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                });
+
+                Route::get('/leagues/republic', [AdminRepublicLeagueController::class, 'show'])
+                    ->middleware('throttle:admin-read');
+                Route::post('/leagues/republic/start', [AdminRepublicLeagueController::class, 'start'])
+                    ->middleware(['throttle:admin-write', 'idempotent']);
+                Route::post('/leagues/republic/stop', [AdminRepublicLeagueController::class, 'stop'])
+                    ->middleware('throttle:admin-sensitive');
+
+                // Tab 3: User Management, KYC Verification Queue & Security Controls
+                Route::prefix('users')->group(function () {
+                    Route::get('/', [AdminUserController::class, 'index'])
+                        ->middleware('throttle:admin-read');
+                    Route::get('/verifications', [AdminUserController::class, 'verifications'])
+                        ->middleware('throttle:admin-read');
+                    Route::get('/export', [AdminUserController::class, 'exportCsv'])
+                        ->middleware('throttle:admin-sensitive');
+                    Route::post('/', [AdminUserController::class, 'store'])
+                        ->middleware(['throttle:admin-write', 'idempotent']);
+                    Route::get('/{id}', [AdminUserController::class, 'show'])
+                        ->whereNumber('id')
+                        ->middleware('throttle:admin-read');
+                    Route::put('/{id}', [AdminUserController::class, 'update'])
+                        ->whereNumber('id')
+                        ->middleware('throttle:admin-write');
+                    Route::patch('/{id}/toggle-status', [AdminUserController::class, 'toggleStatus'])
+                        ->whereNumber('id')
+                        ->middleware('throttle:admin-sensitive');
+                    Route::post('/{id}/verify', [AdminUserController::class, 'verify'])
+                        ->whereNumber('id')
+                        ->middleware(['throttle:admin-write', 'idempotent']);
+                    Route::post('/{id}/reject-verification', [AdminUserController::class, 'rejectVerification'])
+                        ->whereNumber('id')
+                        ->middleware(['throttle:admin-write', 'idempotent']);
+                    Route::post('/{id}/reset-password', [AdminUserController::class, 'resetPassword'])
+                        ->whereNumber('id')
+                        ->middleware(['throttle:admin-sensitive', 'idempotent']);
+                    Route::post('/{id}/revoke-sessions', [AdminUserController::class, 'revokeSessions'])
+                        ->whereNumber('id')
+                        ->middleware('throttle:admin-sensitive');
+                    Route::delete('/{id}', [AdminUserController::class, 'destroy'])
+                        ->whereNumber('id')
+                        ->middleware('throttle:admin-sensitive');
+                });
+
+                // Tab 4: Courses & Content Moderation
+                Route::prefix('courses')->group(function () {
+                    Route::get('/', [AdminCourseController::class, 'index'])
+                        ->middleware('throttle:admin-read');
+                    Route::get('/{uuid}', [AdminCourseController::class, 'show'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-read');
+                    Route::patch('/{uuid}/toggle-publish', [AdminCourseController::class, 'togglePublish'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                    Route::patch('/{uuid}/toggle-featured', [AdminCourseController::class, 'toggleFeatured'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                    Route::delete('/{uuid}', [AdminCourseController::class, 'destroy'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-sensitive');
+                });
+
+                // Tab 5: Financials, Tier Pricing Plans, Payout Settlements & Discount Coupons
+                Route::prefix('financials')->group(function () {
+                    Route::get('/overview', [AdminFinancialController::class, 'overview'])
+                        ->middleware('throttle:admin-read');
+
+                    Route::prefix('plans')->group(function () {
+                        Route::get('/', [AdminFinancialController::class, 'plans'])
+                            ->middleware('throttle:admin-read');
+                        Route::post('/', [AdminFinancialController::class, 'storePlan'])
+                            ->middleware(['throttle:admin-financial', 'idempotent']);
+                        Route::post('/reset-defaults', [AdminFinancialController::class, 'resetPlans'])
+                            ->middleware(['throttle:admin-sensitive', 'idempotent']);
+                        Route::put('/{uuid}', [AdminFinancialController::class, 'updatePlan'])
+                            ->whereUuid('uuid')
+                            ->middleware('throttle:admin-financial');
+                        Route::patch('/{uuid}/toggle-active', [AdminFinancialController::class, 'togglePlan'])
+                            ->whereUuid('uuid')
+                            ->middleware('throttle:admin-financial');
+                        Route::delete('/{uuid}', [AdminFinancialController::class, 'destroyPlan'])
+                            ->whereUuid('uuid')
+                            ->middleware('throttle:admin-financial');
+                    });
+
+                    Route::prefix('payouts')->group(function () {
+                        Route::get('/', [AdminFinancialController::class, 'payouts'])
+                            ->middleware('throttle:admin-read');
+                        Route::post('/', [AdminFinancialController::class, 'storePayout'])
+                            ->middleware(['throttle:admin-financial', 'idempotent']);
+                        Route::post('/{uuid}/approve', [AdminFinancialController::class, 'approvePayout'])
+                            ->whereUuid('uuid')
+                            ->middleware(['throttle:admin-financial', 'idempotent']);
+                        Route::post('/{uuid}/reject', [AdminFinancialController::class, 'rejectPayout'])
+                            ->whereUuid('uuid')
+                            ->middleware(['throttle:admin-financial', 'idempotent']);
+                    });
+
+                    Route::prefix('coupons')->group(function () {
+                        Route::get('/', [AdminFinancialController::class, 'coupons'])
+                            ->middleware('throttle:admin-read');
+                        Route::post('/', [AdminFinancialController::class, 'storeCoupon'])
+                            ->middleware(['throttle:admin-financial', 'idempotent']);
+                        Route::put('/{uuid}', [AdminFinancialController::class, 'updateCoupon'])
+                            ->whereUuid('uuid')
+                            ->middleware('throttle:admin-financial');
+                        Route::patch('/{uuid}/toggle-active', [AdminFinancialController::class, 'toggleCoupon'])
+                            ->whereUuid('uuid')
+                            ->middleware('throttle:admin-financial');
+                        Route::delete('/{uuid}', [AdminFinancialController::class, 'destroyCoupon'])
+                            ->whereUuid('uuid')
+                            ->middleware('throttle:admin-financial');
+                    });
+                });
+
+                // Tab 6: Global Center Gate Attendance Monitoring & Export
+                Route::prefix('attendance')->group(function () {
+                    Route::get('/gates', [AdminAttendanceController::class, 'gates'])
+                        ->middleware('throttle:admin-read');
+                    Route::get('/gates/export', [AdminAttendanceController::class, 'exportCsv'])
+                        ->middleware('throttle:admin-sensitive');
+                });
+
+                // Tab 7: Platform Announcements & News Ticker
+                Route::prefix('announcements')->group(function () {
+                    Route::get('/', [AdminAnnouncementController::class, 'index'])
+                        ->middleware('throttle:admin-read');
+                    Route::post('/', [AdminAnnouncementController::class, 'store'])
+                        ->middleware(['throttle:admin-write', 'idempotent']);
+                    Route::put('/{uuid}', [AdminAnnouncementController::class, 'update'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                    Route::patch('/{uuid}/toggle-active', [AdminAnnouncementController::class, 'toggleActive'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                    Route::delete('/{uuid}', [AdminAnnouncementController::class, 'destroy'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                });
+
+                // Tab 8: Infrastructure Telemetry, Platform Policies, Cache Control & Immutable Security Audit Trail
+                Route::prefix('system')->group(function () {
+                    Route::get('/overview', [AdminSystemController::class, 'overview'])
+                        ->middleware('throttle:admin-read');
+                    Route::put('/settings', [AdminSystemController::class, 'updateSettings'])
+                        ->middleware('throttle:admin-sensitive');
+                    Route::post('/cache/flush', [AdminSystemController::class, 'flushCache'])
+                        ->middleware('throttle:admin-sensitive');
+                    Route::get('/audit-logs', [AdminSystemController::class, 'auditLogs'])
+                        ->middleware('throttle:admin-read');
+                    Route::get('/security-summary', [AdminSystemController::class, 'securitySummary'])
+                        ->middleware('throttle:admin-read');
+                });
             });
 
             // Teacher Portal area (strictly isolated to active, verified teachers)

@@ -42,6 +42,9 @@ class Course extends Model
     {
         return [
             'status' => CourseStatus::class,
+            'is_featured' => 'boolean',
+            'rating' => 'float',
+            'moderated_at' => 'datetime',
             'price_egp' => 'float',
             'revenue_egp' => 'float',
             'lessons_count' => 'integer',

@@ -5,12 +5,17 @@ namespace App\Http\Controllers\Api\V1\Admin;
 use App\Enums\LeagueDuration;
 use App\Http\Controllers\Api\BaseApiController;
 use App\Models\RepublicLeague;
+use App\Services\V1\Admin\PlatformSettingsService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AdminRepublicLeagueController extends BaseApiController
 {
+    public function __construct(
+        protected PlatformSettingsService $settingsService
+    ) {}
+
     /**
      * GET /api/v1/admin/leagues/republic
      * Show the active (or latest) Admin-controlled Republic League.
@@ -56,6 +61,13 @@ class AdminRepublicLeagueController extends BaseApiController
             'ends_at' => $endsAt,
         ]);
 
+        $this->settingsService->bumpCacheEpoch();
+        $this->logSecurityEvent('admin.republic_league.started', [
+            'admin_id' => $this->authenticatedUser()->id,
+            'league_uuid' => $league->uuid,
+            'duration_days' => $durationDays,
+        ], 'info', $league);
+
         return $this->createdResponse($this->formatLeague($league), 'تم بدء دوري الجمهورية العام بنجاح.');
     }
 
@@ -69,6 +81,12 @@ class AdminRepublicLeagueController extends BaseApiController
             'is_active' => false,
             'ends_at' => Carbon::now(),
         ]);
+
+        $this->settingsService->bumpCacheEpoch();
+        $this->logSecurityEvent('admin.republic_league.stopped', [
+            'admin_id' => $this->authenticatedUser()->id,
+            'stopped_count' => $stoppedCount,
+        ], 'warning');
 
         return $this->successResponse(
             ['stopped' => $stoppedCount > 0],

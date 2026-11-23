@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\TeacherPlanTier;
+use App\Enums\VerificationStatus;
 use App\Traits\HasSecurityAudit;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -46,6 +47,8 @@ class TeacherProfile extends Model
             'stages_taught' => 'array',
             'plan_tier' => TeacherPlanTier::class,
             'is_verified_educator' => 'boolean',
+            'verification_status' => VerificationStatus::class,
+            'verified_at' => 'datetime',
             'two_factor_enabled' => 'boolean',
             'notify_whatsapp_intervention' => 'boolean',
             'notify_new_enrollment' => 'boolean',

@@ -18,6 +18,7 @@ use App\Notifications\Auth\VerifyEmailOtpNotification;
 use App\Repositories\Contracts\LoginHistoryRepositoryInterface;
 use App\Repositories\Contracts\UserRepositoryInterface;
 use App\Services\BaseService;
+use App\Services\V1\Admin\PlatformSettingsService;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -47,6 +48,13 @@ class AuthService extends BaseService
         // Defence in depth: request validation already restricts roles, re-check here
         if (! in_array($role->value, config('auth_security.self_registration_roles'), true)) {
             throw ValidationException::withMessages(['role' => [__('messages.role_not_allowed')]]);
+        }
+
+        // Respect platform admin policy for teacher self-registration
+        if ($role === UserRole::TEACHER && ! app(PlatformSettingsService::class)->allowTeacherRegistration()) {
+            throw ValidationException::withMessages([
+                'role' => [__('messages.admin.teacher_registration_disabled')],
+            ]);
         }
 
         $status = in_array($role->value, config('auth_security.roles_requiring_approval'), true)

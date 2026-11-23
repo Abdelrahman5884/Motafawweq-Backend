@@ -49,6 +49,8 @@ class User extends Authenticatable
         'remember_token',
         'failed_login_attempts',
         'locked_until',
+        'national_id_encrypted',
+        'national_id_hash',
     ];
 
     /**
@@ -67,7 +69,30 @@ class User extends Authenticatable
             'locked_until' => 'datetime',
             'password_changed_at' => 'datetime',
             'failed_login_attempts' => 'integer',
+            'national_id_encrypted' => 'encrypted',
         ];
+    }
+
+    /**
+     * Compute a keyed HMAC-SHA256 blind index for exact-match National ID search without storing plaintext.
+     */
+    public static function blindIndexNationalId(string $rawNationalId): string
+    {
+        $normalized = preg_replace('/\s+/', '', strtoupper(trim($rawNationalId))) ?: '';
+
+        return hash_hmac('sha256', 'nid:'.$normalized, (string) config('app.key'));
+    }
+
+    /**
+     * Produce a masked National ID representation for list views.
+     */
+    public function maskedNationalId(): ?string
+    {
+        if (! $this->national_id_last4) {
+            return null;
+        }
+
+        return '**********'.$this->national_id_last4;
     }
 
     /* ----------------------------------------------------------------- */

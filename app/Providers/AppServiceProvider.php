@@ -230,5 +230,40 @@ class AppServiceProvider extends ServiceProvider
                 ->by('ctr-alerts:'.($request->user()?->id ?: $request->ip()))
                 ->response($tooMany('messages.rate_limit_api'));
         });
+
+        // Admin read endpoints: 120 per minute per admin
+        RateLimiter::for('admin-read', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(120)
+                ->by('adm-read:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // Admin standard write mutations: 45 per minute per admin
+        RateLimiter::for('admin-write', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(45)
+                ->by('adm-write:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // Admin financial operations (payouts, pricing plans, coupons): 15 per minute
+        RateLimiter::for('admin-financial', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(15)
+                ->by('adm-fin:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_financial'));
+        });
+
+        // Admin high-sensitivity security actions (deletes, resets, maintenance, cache flush, exports): 10 per minute
+        RateLimiter::for('admin-sensitive', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(10)
+                ->by('adm-sens:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // Public cached catalog endpoints (champions, announcements, pricing): 120 per minute per IP
+        RateLimiter::for('public-catalog', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(120)
+                ->by('pub-cat:'.$request->ip())
+                ->response($tooMany('messages.rate_limit_api'));
+        });
     }
 }
