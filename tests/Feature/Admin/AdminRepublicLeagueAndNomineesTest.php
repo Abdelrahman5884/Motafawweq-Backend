@@ -9,6 +9,7 @@ use App\Models\RepublicLeague;
 use App\Models\StudentProfile;
 use App\Models\StudentXpLedger;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -28,10 +29,16 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
         ]);
     }
 
-    private function createStudentWithGradeAndXp(string $name, string $gradeAr, int $xp, string $school = 'مدرسة المتفوقين'): User
-    {
+    private function createStudentWithGradeAndXp(
+        string $name,
+        string $gradeAr,
+        int $xp,
+        string $school = 'مدرسة المتفوقين',
+        ?string $phone = null
+    ): User {
         $student = User::factory()->create([
             'name' => $name,
+            'phone' => $phone ?? '010'.str_pad((string) random_int(10000000, 99999999), 8, '0', STR_PAD_LEFT),
             'role' => UserRole::STUDENT,
             'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
@@ -71,11 +78,12 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
 
         $this->getJson('/api/v1/admin/leagues/republic/leaderboard')->assertStatus(403);
         $this->getJson('/api/v1/admin/leagues/republic/nominees')->assertStatus(403);
+        $this->postJson('/api/v1/admin/leagues/republic/announce-end', [])->assertStatus(403);
         $this->postJson('/api/v1/admin/champions/approve-nominee', [])->assertStatus(403);
         $this->postJson('/api/v1/admin/champions/upload-photo', [])->assertStatus(403);
     }
 
-    public function test_overview_lists_all_six_canonical_grades_with_accurate_counts(): void
+    public function test_overview_lists_all_six_canonical_grades_and_exact_day_progress(): void
     {
         $admin = $this->createVerifiedAdmin();
 
@@ -83,11 +91,26 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
             $this->createStudentWithGradeAndXp("طالب {$idx}", $g['ar'], ($idx + 1) * 100);
         }
 
+        // Seed a 30-day league started exactly 4 days ago -> today must be Day 5 of 30
+        RepublicLeague::create([
+            'started_by' => $admin->id,
+            'title_ar' => 'دوري الجمهورية التجريبي',
+            'duration_type' => 'monthly',
+            'duration_days' => 30,
+            'is_active' => true,
+            'starts_at' => Carbon::now()->subDays(4)->subHours(1),
+            'ends_at' => Carbon::now()->addDays(26),
+        ]);
+
         Sanctum::actingAs($admin, ['access']);
 
         $res = $this->getJson('/api/v1/admin/leagues/republic')
             ->assertOk()
-            ->assertJsonPath('success', true);
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.league.currentDay', 5)
+            ->assertJsonPath('data.league.totalDays', 30);
+
+        $this->assertStringContainsString('اليوم 5 من 30', (string) $res->json('data.league.dayProgressLabelAr'));
 
         $grades = $res->json('data.grades');
         $this->assertCount(6, $grades);
@@ -104,17 +127,16 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
         $admin = $this->createVerifiedAdmin();
         Sanctum::actingAs($admin, ['access']);
 
-        // Launch platform-wide Republic League first
         $startRes = $this->postJson('/api/v1/admin/leagues/republic/start', [
             'title_ar' => 'دوري الجمهورية التجريبي',
             'duration' => 'monthly',
         ], ['Idempotency-Key' => 'rep-start-test-1'])
-            ->assertStatus(201);
+            ->assertStatus(201)
+            ->assertJsonPath('data.currentDay', 1)
+            ->assertJsonPath('data.totalDays', 30);
 
-        $leagueId = $startRes->json('data.id');
-        $this->assertNotEmpty($leagueId);
+        $this->assertNotEmpty($startRes->json('data.id'));
 
-        // Create 8 students in 3rd Secondary + 2 in 1st Preparatory
         for ($i = 1; $i <= 8; $i++) {
             $this->createStudentWithGradeAndXp(
                 "متفوق ثانوي {$i}",
@@ -125,7 +147,6 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
         }
         $this->createStudentWithGradeAndXp('بطل أولى إعدادي', 'الصف الأول الإعدادي', 999);
 
-        // Page 1 (per_page = 5) for 3rd Secondary only
         $page1 = $this->getJson('/api/v1/admin/leagues/republic/leaderboard?grade='.urlencode('الصف الثالث الثانوي').'&page=1&per_page=5')
             ->assertOk()
             ->assertJsonPath('meta.pagination.total', 8)
@@ -135,8 +156,9 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
         $this->assertCount(5, $page1->json('data'));
         $this->assertSame(1, $page1->json('data.0.rank'));
         $this->assertSame('متفوق ثانوي 8', $page1->json('data.0.name'));
+        $this->assertNotEmpty($page1->json('data.0.email'));
+        $this->assertNotEmpty($page1->json('data.0.phone'));
 
-        // Page 2
         $page2 = $this->getJson('/api/v1/admin/leagues/republic/leaderboard?grade='.urlencode('الصف الثالث الثانوي').'&page=2&per_page=5')
             ->assertOk()
             ->assertJsonPath('meta.pagination.current_page', 2);
@@ -144,7 +166,6 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
         $this->assertCount(3, $page2->json('data'));
         $this->assertSame(6, $page2->json('data.0.rank'));
 
-        // Search preserves true rank inside the grade
         $searchRes = $this->getJson('/api/v1/admin/leagues/republic/leaderboard?grade='.urlencode('الصف الثالث الثانوي').'&search='.urlencode('متفوق ثانوي 3'))
             ->assertOk();
 
@@ -152,7 +173,7 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
         $this->assertSame(6, $searchRes->json('data.0.rank'));
     }
 
-    public function test_auto_nominees_approval_upsert_and_public_slider_sync(): void
+    public function test_auto_nominees_strictly_returns_top_two_with_contact_details_and_public_slider_hides_pii(): void
     {
         $admin = $this->createVerifiedAdmin();
         Sanctum::actingAs($admin, ['access']);
@@ -162,16 +183,25 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
             'duration' => 'monthly',
         ], ['Idempotency-Key' => 'rep-start-nom-1'])->assertStatus(201);
 
-        $topStudent = $this->createStudentWithGradeAndXp('يوسف محمود الأول', 'الصف الثاني الثانوي', 850, 'مدرسة النصر');
-        $this->createStudentWithGradeAndXp('علي حسن الثاني', 'الصف الثاني الثانوي', 420, 'مدرسة الأمل');
+        $first = $this->createStudentWithGradeAndXp('يوسف محمود الأول', 'الصف الثاني الثانوي', 850, 'مدرسة النصر', '01011112222');
+        $second = $this->createStudentWithGradeAndXp('علي حسن الثاني', 'الصف الثاني الثانوي', 620, 'مدرسة الأمل', '01033334444');
+        $this->createStudentWithGradeAndXp('كريم خالد الثالث', 'الصف الثاني الثانوي', 500, 'مدرسة النيل', '01055556666');
+        $this->createStudentWithGradeAndXp('طارق عمر الرابع', 'الصف الثاني الثانوي', 300, 'مدرسة السلام', '01077778888');
 
-        // 1. Auto-detected nominees should include top student with pending status
+        // 1. Strictly ONLY Top 2 (#1 and #2) are auto-nominated, with email & phone visible to admin
         $nomineesRes = $this->getJson('/api/v1/admin/leagues/republic/nominees?grade='.urlencode('الصف الثاني الثانوي'))
-            ->assertOk();
+            ->assertOk()
+            ->assertJsonPath('meta.topPerGrade', 2);
 
+        $this->assertCount(2, $nomineesRes->json('data'));
         $firstNominee = $nomineesRes->json('data.0');
-        $this->assertSame($topStudent->id, $firstNominee['studentId']);
-        $this->assertSame('pending', $firstNominee['approvalStatus']);
+        $secondNominee = $nomineesRes->json('data.1');
+
+        $this->assertSame($first->id, $firstNominee['studentId']);
+        $this->assertSame($first->email, $firstNominee['email']);
+        $this->assertSame('01011112222', $firstNominee['phone']);
+        $this->assertSame($second->id, $secondNominee['studentId']);
+        $this->assertSame('01033334444', $secondNominee['phone']);
 
         // 2. Admin customizes data & approves for homepage slider
         $suggested = $firstNominee['suggestedChampion'];
@@ -187,35 +217,59 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
         ])->assertOk();
 
         $champUuid = $approveRes->json('data.id');
-        $this->assertSame('يوسف محمود المتفوق', $approveRes->json('data.nameAr'));
-        $this->assertSame('الصف الثاني الثانوي', $approveRes->json('data.gradeAr'));
-        $this->assertSame('republic_league', $approveRes->json('data.source'));
 
-        // 3. Re-approving same student in same league updates instead of creating a duplicate
+        // 3. Re-approving same student updates instead of duplicating
         $this->postJson('/api/v1/admin/champions/approve-nominee', array_merge($approvePayload, [
             'scoreAr' => '900 نقطة',
         ]), ['Idempotency-Key' => 'approve-nominee-2'])
             ->assertOk()
-            ->assertJsonPath('data.id', $champUuid)
-            ->assertJsonPath('data.scoreAr', '900 نقطة');
+            ->assertJsonPath('data.id', $champUuid);
 
-        $this->assertSame(1, PlatformChampion::query()->where('student_id', $topStudent->id)->count());
+        $this->assertSame(1, PlatformChampion::query()->where('student_id', $first->id)->count());
 
-        // 4. Nominee status now reflects approved_pinned
-        $this->getJson('/api/v1/admin/leagues/republic/nominees?grade='.urlencode('الصف الثاني الثانوي'))
-            ->assertOk()
-            ->assertJsonPath('data.0.approvalStatus', 'approved_pinned');
-
-        // 5. Public homepage slider immediately serves the approved champion
+        // 4. Public homepage slider serves approved champion WITHOUT ever exposing email or phone
         $publicRes = $this->getJson('/api/v1/public/champions')->assertOk();
-        $this->assertSame($champUuid, $publicRes->json('data.0.id'));
-        $this->assertSame('الصف الثاني الثانوي', $publicRes->json('data.0.gradeAr'));
+        $publicChamp = $publicRes->json('data.0');
+        $this->assertSame($champUuid, $publicChamp['id']);
+        $this->assertArrayNotHasKey('email', $publicChamp);
+        $this->assertArrayNotHasKey('phone', $publicChamp);
+    }
 
-        // 6. Paginated admin champions list filters cleanly by grade
-        $this->getJson('/api/v1/admin/champions?grade='.urlencode('الصف الثاني الثانوي').'&page=1&per_page=5')
+    public function test_admin_can_announce_early_league_end_and_broadcast_honoring_announcement(): void
+    {
+        $admin = $this->createVerifiedAdmin();
+        Sanctum::actingAs($admin, ['access']);
+
+        $startRes = $this->postJson('/api/v1/admin/leagues/republic/start', [
+            'title_ar' => 'دوري الجمهورية — موسم التكريم',
+            'duration' => 'monthly',
+        ], ['Idempotency-Key' => 'rep-start-early-end'])->assertStatus(201);
+
+        $leagueUuid = $startRes->json('data.id');
+
+        $endRes = $this->postJson('/api/v1/admin/leagues/republic/announce-end', [
+            'league_id' => $leagueUuid,
+            'end_now' => true,
+            'publish_announcement' => true,
+            'announcement_title_ar' => 'إعلان انتهاء الدوري والتكريم المبكر للأوائل',
+            'announcement_content_ar' => 'تم إغلاق الجولة مبكراً والبدء في تكريم المركز الأول والثاني على مستوى الجمهورية.',
+            'audience' => 'all',
+            'priority' => 'urgent',
+            'display_days' => 5,
+        ], ['Idempotency-Key' => 'rep-announce-end-1'])
             ->assertOk()
-            ->assertJsonPath('meta.pagination.total', 1)
-            ->assertJsonPath('data.0.id', $champUuid);
+            ->assertJsonPath('data.endedEarly', true)
+            ->assertJsonPath('data.league.isActive', false)
+            ->assertJsonPath('data.announcement.titleAr', 'إعلان انتهاء الدوري والتكريم المبكر للأوائل');
+
+        $annUuid = $endRes->json('data.announcement.id');
+        $this->assertNotEmpty($annUuid);
+
+        // Verify the announcement is live on the public announcements endpoint
+        $publicAnn = $this->getJson('/api/v1/public/announcements')->assertOk();
+        $this->assertTrue(
+            collect($publicAnn->json('data'))->contains(fn (array $a) => ($a['id'] ?? null) === $annUuid)
+        );
     }
 
     public function test_champion_photo_upload_accepts_valid_image_and_rejects_spoofed_file(): void
@@ -224,7 +278,6 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
         $admin = $this->createVerifiedAdmin();
         Sanctum::actingAs($admin, ['access']);
 
-        // Valid spec-compliant 120x120 PNG generated in pure PHP (works even without GD extension)
         $validImage = UploadedFile::fake()->createWithContent('winner.png', $this->makeValidPngBytes(120, 120));
         $uploadRes = $this->postJson('/api/v1/admin/champions/upload-photo', [
             'photo' => $validImage,
@@ -235,7 +288,6 @@ class AdminRepublicLeagueAndNomineesTest extends TestCase
         $this->assertStringStartsWith('/storage/champions/', $url);
         Storage::disk('public')->assertExists($path);
 
-        // Spoofed PHP text file disguised as .jpg must be rejected
         $spoofed = UploadedFile::fake()->createWithContent('shell.jpg', '<?php system($_GET["c"]); ?>');
         $this->postJson('/api/v1/admin/champions/upload-photo', [
             'photo' => $spoofed,

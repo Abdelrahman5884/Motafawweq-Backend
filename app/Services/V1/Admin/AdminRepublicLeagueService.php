@@ -2,6 +2,8 @@
 
 namespace App\Services\V1\Admin;
 
+use App\Enums\AnnouncementAudience;
+use App\Enums\AnnouncementPriority;
 use App\Enums\ExamSubmissionStatus;
 use App\Enums\LeagueDuration;
 use App\Enums\LeagueTier;
@@ -17,23 +19,26 @@ use Carbon\Carbon;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * High-performance, pure-SQL Republic League management, grade-scoped live standings,
- * and automatic Top-Performer nominee detection for the Platform Admin Portal.
- *
- * Supports all 6 canonical grades from 1st Preparatory through 3rd Secondary,
- * with zero N+1 queries, MySQL ONLY_FULL_GROUP_BY safety, and full server-side pagination.
+ * Top-2 automatic nominee detection (1st & 2nd place per grade) with admin contact details,
+ * exact per-round day progress tracking, and early end & honoring broadcast workflow.
  */
 class AdminRepublicLeagueService extends BaseService
 {
+    public const DEFAULT_TOP_NOMINEES_PER_GRADE = 2;
+
     public function __construct(
         protected PlatformSettingsService $settingsService,
-        protected LeagueRulesService $leagueRulesService
+        protected LeagueRulesService $leagueRulesService,
+        protected AdminAnnouncementService $announcementService
     ) {}
 
     /**
-     * Overview of the Republic League state, active/recent rounds, and per-grade stats (1st Prep → 3rd Sec).
+     * Overview of the Republic League state, active/recent rounds with exact day progress,
+     * and per-grade stats (1st Prep → 3rd Sec).
      *
      * @return array<string, mixed>
      */
@@ -123,11 +128,11 @@ class AdminRepublicLeagueService extends BaseService
         // Count active competitors (students with > 0 XP in scope)
         $scoredCount = $this->buildStandingsBaseQuery($normalizedGrade, $latestLeague, '', true)->count();
 
-        // Quick count of pending top nominees (top 3 per grade or top 10 in selected grade not yet pinned)
+        // Strictly count pending Top-2 nominees (#1 and #2 per grade)
         $nomineesSnapshot = $this->getAutoNominees([
             'grade' => $normalizedGrade ?? 'all',
             'league_id' => $latestLeague?->uuid,
-            'top_per_grade' => $normalizedGrade !== null ? 10 : 3,
+            'top_per_grade' => self::DEFAULT_TOP_NOMINEES_PER_GRADE,
             'per_page' => 1,
             'page' => 1,
         ]);
@@ -242,6 +247,99 @@ class AdminRepublicLeagueService extends BaseService
     }
 
     /**
+     * Announce the conclusion of a Republic League round (optionally ending an active round early
+     * to lock standings & celebrate/honor top achievers ahead of schedule) and publish a live Platform Announcement.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{league: array<string, mixed>, announcement: array<string, mixed>|null, endedEarly: bool}
+     */
+    public function announceLeagueEnd(User $admin, array $data): array
+    {
+        RepublicLeague::closeExpiredRounds();
+
+        $normalizedGrade = RepublicLeague::normalizeGrade($data['grade_ar'] ?? null);
+        $league = $this->resolveTargetLeague($data['league_id'] ?? null, $normalizedGrade);
+
+        if (! $league) {
+            throw ValidationException::withMessages([
+                'league_id' => [__('messages.admin.republic_league_not_found')],
+            ]);
+        }
+
+        $endNow = array_key_exists('end_now', $data) ? (bool) $data['end_now'] : true;
+        $publishAnnouncement = array_key_exists('publish_announcement', $data)
+            ? (bool) $data['publish_announcement']
+            : true;
+        $displayDays = min(30, max(1, (int) ($data['display_days'] ?? 7)));
+
+        $endedEarly = false;
+        $announcement = null;
+
+        $this->transaction(function () use (
+            $admin,
+            $league,
+            $data,
+            $endNow,
+            $publishAnnouncement,
+            $displayDays,
+            &$endedEarly,
+            &$announcement
+        ): void {
+            if ($endNow && $league->is_active) {
+                $endedEarly = $league->ends_at !== null && $league->ends_at->isFuture();
+                $league->update([
+                    'is_active' => false,
+                    'ends_at' => Carbon::now(),
+                ]);
+            }
+
+            if ($publishAnnouncement) {
+                $gradeScopeAr = $league->grade_ar ?: 'جميع الصفوف (أولى إعدادي — ثالثة ثانوي)';
+                $defaultTitleAr = "إعلان انتهاء {$league->title_ar} وبدء التكريم الرسمي للأوائل";
+                $defaultContentAr = "تُعلن إدارة منصة متفوّق عن انتهاء جولة {$league->title_ar} ({$gradeScopeAr}) وتثبيت الترتيب النهائي، والبدء في تكريم أوائل الجمهورية (المركز الأول والثاني من كل صف) وعرضهم في لوحة الشرف الرئيسية.";
+
+                $titleAr = trim((string) ($data['announcement_title_ar'] ?? '')) ?: $defaultTitleAr;
+                $contentAr = trim((string) ($data['announcement_content_ar'] ?? '')) ?: $defaultContentAr;
+
+                $audience = isset($data['audience']) && in_array($data['audience'], AnnouncementAudience::values(), true)
+                    ? (string) $data['audience']
+                    : AnnouncementAudience::ALL->value;
+
+                $priority = isset($data['priority']) && in_array($data['priority'], AnnouncementPriority::values(), true)
+                    ? (string) $data['priority']
+                    : AnnouncementPriority::IMPORTANT->value;
+
+                $announcement = $this->announcementService->create($admin, [
+                    'title_ar' => $titleAr,
+                    'title_en' => trim((string) ($data['announcement_title_en'] ?? '')) ?: "Republic League Concluded — {$league->title_ar}",
+                    'content_ar' => $contentAr,
+                    'content_en' => trim((string) ($data['announcement_content_en'] ?? '')) ?: $contentAr,
+                    'audience' => $audience,
+                    'priority' => $priority,
+                    'is_active' => true,
+                    'starts_at' => Carbon::now(),
+                    'expires_at' => Carbon::now()->addDays($displayDays),
+                ]);
+            }
+        });
+
+        $this->settingsService->bumpCacheEpoch();
+        $this->logSecurityEvent('admin.republic_league.end_announced', [
+            'admin_id' => $admin->id,
+            'league_uuid' => $league->uuid,
+            'ended_early' => $endedEarly,
+            'published_announcement' => $announcement !== null,
+            'announcement_uuid' => $announcement['id'] ?? null,
+        ], 'warning', $league);
+
+        return [
+            'league' => $this->formatLeague($league->fresh()),
+            'announcement' => $announcement,
+            'endedEarly' => $endedEarly,
+        ];
+    }
+
+    /**
      * Paginated, searchable, grade-filterable Republic League live leaderboard.
      * Uses pure-SQL aggregated subqueries with deterministic ranking and zero N+1 queries.
      *
@@ -302,9 +400,8 @@ class AdminRepublicLeagueService extends BaseService
     }
 
     /**
-     * Automatically surface Top Republic League achievers pending Admin review/edit/approval for the homepage slider.
-     * - When grade = 'all': takes top N performers from EACH of the 6 grades (1st Prep → 3rd Sec).
-     * - When a specific grade is selected: takes top performers within that grade.
+     * Automatically surface STRICTLY Top-2 Republic League achievers (#1 and #2 per grade)
+     * with admin-only contact details (email & phone) pending review/photo edit/approval for the homepage slider.
      *
      * @param  array<string, mixed>  $filters
      * @return array{items: list<array<string, mixed>>, meta: array<string, mixed>}
@@ -316,8 +413,9 @@ class AdminRepublicLeagueService extends BaseService
         $normalizedGrade = RepublicLeague::normalizeGrade($filters['grade'] ?? null);
         $statusFilter = strtolower(trim((string) ($filters['status'] ?? 'all')));
         $page = max(1, (int) ($filters['page'] ?? 1));
-        $perPage = min(30, max(3, (int) ($filters['per_page'] ?? 9)));
-        $topPerGrade = min(15, max(1, (int) ($filters['top_per_grade'] ?? ($normalizedGrade !== null ? 10 : 3))));
+        $perPage = min(30, max(2, (int) ($filters['per_page'] ?? 12)));
+        // Strictly nominate ONLY 1st and 2nd place (#1 and #2) per grade
+        $topPerGrade = min(2, max(1, (int) ($filters['top_per_grade'] ?? self::DEFAULT_TOP_NOMINEES_PER_GRADE)));
 
         $league = $this->resolveTargetLeague($filters['league_id'] ?? null, $normalizedGrade);
 
@@ -335,7 +433,7 @@ class AdminRepublicLeagueService extends BaseService
                 ];
             }
         } else {
-            // Pull Top N per canonical grade (6 lightweight indexed queries, capped at 3-5 rows each)
+            // Pull Top 2 (#1 & #2) per canonical grade across all 6 grades (1st Prep → 3rd Sec)
             foreach (RepublicLeague::SUPPORTED_GRADES as $g) {
                 $gradeLeague = $this->resolveTargetLeague($filters['league_id'] ?? null, $g['ar']) ?? $league;
                 $gradeRows = $this->buildStandingsBaseQuery($g['ar'], $gradeLeague, '', false)
@@ -354,7 +452,7 @@ class AdminRepublicLeagueService extends BaseService
             // Fallback if no students match canonical grade profiles yet
             if (empty($nomineeCandidates)) {
                 $fallbackRows = $this->buildStandingsBaseQuery(null, $league, '', false)
-                    ->limit(10)
+                    ->limit($topPerGrade)
                     ->get();
                 foreach ($fallbackRows->values() as $idx => $row) {
                     $nomineeCandidates[] = [
@@ -365,7 +463,7 @@ class AdminRepublicLeagueService extends BaseService
                 }
             }
 
-            // Sort combined nominees: rank #1s across grades first, then highest XP
+            // Sort combined nominees: Rank #1s across grades first, then Rank #2s, ordered by XP desc
             usort($nomineeCandidates, function (array $a, array $b): int {
                 if ($a['gradeRank'] !== $b['gradeRank']) {
                     return $a['gradeRank'] <=> $b['gradeRank'];
@@ -432,6 +530,7 @@ class AdminRepublicLeagueService extends BaseService
             'meta' => [
                 'league' => $league ? $this->formatLeague($league) : null,
                 'selectedGrade' => $normalizedGrade ?? 'all',
+                'topPerGrade' => $topPerGrade,
                 'summary' => [
                     'totalNominees' => count($nomineeCandidates),
                     'pendingCount' => $pendingCount,
@@ -524,7 +623,7 @@ class AdminRepublicLeagueService extends BaseService
             ])
             ->groupBy('sxl.student_id');
 
-        // ANSI SQL expression for window streak (no MySQL-only LEAST or SQLite-only MIN(a,b))
+        // ANSI SQL expression for window streak (compatible with both MySQL and SQLite)
         $isConcluded = $league && (! $league->is_active || ($league->ends_at && $league->ends_at->isPast()));
         if ($since === null) {
             $streakExpr = 'COALESCE(sp.current_streak_days, 0)';
@@ -548,6 +647,8 @@ class AdminRepublicLeagueService extends BaseService
             ->select([
                 'users.id as student_id',
                 'users.name',
+                'users.email',
+                'users.phone',
                 'users.student_code',
                 'users.avatar',
                 'sp.grade_ar',
@@ -555,6 +656,7 @@ class AdminRepublicLeagueService extends BaseService
                 'sp.school_name',
                 'sp.governorate',
                 'sp.center_name',
+                'sp.parent_phone',
                 DB::raw('COALESCE(sp.current_streak_days, 0) as current_streak_days'),
                 DB::raw("{$streakExpr} as streak_days"),
                 DB::raw('COALESCE(ex_agg.exams_solved, 0) as exams_solved'),
@@ -573,6 +675,8 @@ class AdminRepublicLeagueService extends BaseService
             $like = "%{$escaped}%";
             $query->where(function ($q) use ($like): void {
                 $q->whereRaw('LOWER(users.name) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(COALESCE(users.email, \'\')) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(COALESCE(users.phone, \'\')) LIKE ?', [$like])
                     ->orWhereRaw('LOWER(COALESCE(users.student_code, \'\')) LIKE ?', [$like])
                     ->orWhereRaw('LOWER(COALESCE(sp.school_name, \'\')) LIKE ?', [$like])
                     ->orWhereRaw('LOWER(COALESCE(sp.governorate, \'\')) LIKE ?', [$like]);
@@ -669,7 +773,7 @@ class AdminRepublicLeagueService extends BaseService
     }
 
     /**
-     * Format a raw SQL standing row + suggested champion approval payload for the Admin UI.
+     * Format a raw SQL standing row + admin-only contact details + suggested champion approval payload.
      *
      * @return array<string, mixed>
      */
@@ -714,6 +818,9 @@ class AdminRepublicLeagueService extends BaseService
             'studentId' => (int) $row->student_id,
             'studentCode' => $row->student_code ?: 'STD-'.$row->student_id,
             'name' => $row->name,
+            'email' => trim((string) ($row->email ?? '')) ?: null,
+            'phone' => trim((string) ($row->phone ?? '')) ?: null,
+            'parentPhone' => trim((string) ($row->parent_phone ?? '')) ?: null,
             'avatar' => $row->avatar ?: null,
             'gradeAr' => $canonicalGrade,
             'gradeEn' => $gradeEn,
@@ -740,8 +847,8 @@ class AdminRepublicLeagueService extends BaseService
                 'nameAr' => $existingChampion?->name_ar ?: $row->name,
                 'nameEn' => $existingChampion?->name_en ?: $row->name,
                 'gradeAr' => $existingChampion?->grade_ar ?: $canonicalGrade,
-                'titleAr' => $existingChampion?->title_ar ?: ($rank === 1 ? "الأول على الجمهورية — {$canonicalGrade}" : "من أوائل الجمهورية — {$canonicalGrade}"),
-                'titleEn' => $existingChampion?->title_en ?: ($rank === 1 ? "National #1 — {$gradeEn}" : "Top National Achiever — {$gradeEn}"),
+                'titleAr' => $existingChampion?->title_ar ?: ($rank === 1 ? "الأول على الجمهورية — {$canonicalGrade}" : "الوصيف على الجمهورية — {$canonicalGrade}"),
+                'titleEn' => $existingChampion?->title_en ?: ($rank === 1 ? "National #1 — {$gradeEn}" : "National #2 — {$gradeEn}"),
                 'monthAr' => $existingChampion?->month_ar ?: $monthAr,
                 'monthEn' => $existingChampion?->month_en ?: 'Republic League '.Carbon::now()->format('Y'),
                 'schoolAr' => $existingChampion?->school_ar ?: $schoolDisplay,
@@ -797,6 +904,8 @@ class AdminRepublicLeagueService extends BaseService
     }
 
     /**
+     * Format a Republic League round with exact day progression ("اليوم X من Y • متبقي Z يوم").
+     *
      * @return array<string, mixed>
      */
     public function formatLeague(RepublicLeague $league): array
@@ -804,6 +913,41 @@ class AdminRepublicLeagueService extends BaseService
         $durationEnum = $league->duration_type instanceof LeagueDuration
             ? $league->duration_type
             : (LeagueDuration::tryFrom((string) $league->duration_type) ?? LeagueDuration::MONTHLY);
+
+        $totalDays = max(1, (int) ($league->duration_days ?: $durationEnum->durationDays()));
+        $daysRemaining = $league->roundDaysRemaining();
+        $isActive = (bool) $league->is_active;
+
+        $currentDay = 0;
+        if ($league->starts_at) {
+            $effectiveNow = (! $isActive && $league->ends_at && $league->ends_at->isPast())
+                ? $league->ends_at
+                : Carbon::now();
+            $elapsedSeconds = max(0, $league->starts_at->diffInSeconds($effectiveNow, false));
+            $currentDay = min($totalDays, max(1, (int) floor($elapsedSeconds / 86400) + 1));
+        }
+
+        $daysElapsed = max(0, $currentDay - 1);
+        $progressPercent = $isActive
+            ? min(100, max(0, (int) round(($currentDay / $totalDays) * 100)))
+            : 100;
+
+        $endedEarly = ! $isActive
+            && $league->starts_at !== null
+            && $league->ends_at !== null
+            && $currentDay < $totalDays;
+
+        $dayProgressLabelAr = $isActive
+            ? "اليوم {$currentDay} من {$totalDays} • متبقي {$daysRemaining} يوم"
+            : ($endedEarly
+                ? "انتهى مبكراً في اليوم {$currentDay} من {$totalDays}"
+                : "اكتمل الدوري ({$totalDays} يوم)");
+
+        $dayProgressLabelEn = $isActive
+            ? "Day {$currentDay} of {$totalDays} • {$daysRemaining}d left"
+            : ($endedEarly
+                ? "Ended early on Day {$currentDay} of {$totalDays}"
+                : "Completed ({$totalDays} days)");
 
         return [
             'id' => $league->uuid,
@@ -814,11 +958,18 @@ class AdminRepublicLeagueService extends BaseService
             'gradeLabelEn' => RepublicLeague::gradeLabelEn($league->grade_ar),
             'durationType' => $durationEnum->value,
             'durationLabelAr' => $durationEnum->labelAr(),
-            'durationDays' => (int) $league->duration_days,
-            'isActive' => (bool) $league->is_active,
+            'durationDays' => $totalDays,
+            'totalDays' => $totalDays,
+            'currentDay' => $currentDay,
+            'daysElapsed' => $daysElapsed,
+            'daysRemaining' => $daysRemaining,
+            'progressPercent' => $progressPercent,
+            'endedEarly' => $endedEarly,
+            'dayProgressLabelAr' => $dayProgressLabelAr,
+            'dayProgressLabelEn' => $dayProgressLabelEn,
+            'isActive' => $isActive,
             'startsAt' => $league->starts_at?->toIso8601String(),
             'endsAt' => $league->ends_at?->toIso8601String(),
-            'daysRemaining' => $league->roundDaysRemaining(),
         ];
     }
 

@@ -416,6 +416,8 @@ Route::prefix('v1')->group(function () {
                         ->middleware(['throttle:admin-write', 'idempotent']);
                     Route::post('/stop', [AdminRepublicLeagueController::class, 'stop'])
                         ->middleware('throttle:admin-sensitive');
+                    Route::post('/announce-end', [AdminRepublicLeagueController::class, 'announceEnd'])
+                        ->middleware(['throttle:admin-sensitive', 'idempotent']);
                 });
 
                 // Tab 3: User Management, KYC Verification Queue & Security Controls

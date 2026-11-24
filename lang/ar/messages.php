@@ -394,7 +394,9 @@ return [
         'champion_pin_toggled' => 'تم تحديث حالة تثبيت البطل في الواجهة الرئيسية بنجاح',
         'champion_deleted' => 'تم حذف البطل من لوحة الشرف بنجاح',
         'republic_league_leaderboard_fetched' => 'تم جلب ترتيب دوري الجمهورية بنجاح',
-        'republic_league_nominees_fetched' => 'تم جلب قائمة أوائل دوري الجمهورية المرشحين للاعتماد بنجاح',
+        'republic_league_nominees_fetched' => 'تم جلب قائمة أوائل دوري الجمهورية (الأول والثاني) بنجاح',
+        'republic_league_end_announced' => 'تم إعلان انتهاء دوري الجمهورية وبث تنبيه التكريم الرسمي بنجاح',
+        'republic_league_not_found' => 'لا توجد جولة دوري حالية لإعلان انتهائها.',
 
         'announcements_fetched' => 'تم جلب قائمة إعلانات المنصة بنجاح',
         'announcement_created' => 'تم بث ونشر الإعلان بنجاح',

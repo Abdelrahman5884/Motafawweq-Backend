@@ -394,7 +394,9 @@ return [
         'champion_pin_toggled' => 'Champion homepage visibility toggled successfully.',
         'champion_deleted' => 'Champion removed from honor roll successfully.',
         'republic_league_leaderboard_fetched' => 'Republic League standings retrieved successfully.',
-        'republic_league_nominees_fetched' => 'Republic League top nominees retrieved successfully.',
+        'republic_league_nominees_fetched' => 'Republic League Top-2 nominees retrieved successfully.',
+        'republic_league_end_announced' => 'Republic League conclusion and honoring announcement published successfully.',
+        'republic_league_not_found' => 'No Republic League round found to conclude.',
 
         'announcements_fetched' => 'Platform announcements retrieved successfully.',
         'announcement_created' => 'Platform announcement broadcasted successfully.',
