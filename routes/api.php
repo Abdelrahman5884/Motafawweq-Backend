@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\Admin\AdminChampionController;
 use App\Http\Controllers\Api\V1\Admin\AdminCourseController;
 use App\Http\Controllers\Api\V1\Admin\AdminDashboardController;
 use App\Http\Controllers\Api\V1\Admin\AdminFinancialController;
+use App\Http\Controllers\Api\V1\Admin\AdminMinistryCurriculumController;
 use App\Http\Controllers\Api\V1\Admin\AdminRepublicLeagueController;
 use App\Http\Controllers\Api\V1\Admin\AdminSystemController;
 use App\Http\Controllers\Api\V1\Admin\AdminUserController;
@@ -474,6 +475,56 @@ Route::prefix('v1')->group(function () {
                     Route::delete('/{uuid}', [AdminCourseController::class, 'destroy'])
                         ->whereUuid('uuid')
                         ->middleware('throttle:admin-sensitive');
+                });
+
+                // Tab 4B: Ministry of Education Official Curricula CMS (1st Primary -> 3rd Secondary + Units & Lessons)
+                Route::prefix('ministry-curricula')->group(function () {
+                    Route::get('/', [AdminMinistryCurriculumController::class, 'index'])
+                        ->middleware('throttle:admin-read');
+                    Route::post('/', [AdminMinistryCurriculumController::class, 'store'])
+                        ->middleware(['throttle:admin-write', 'idempotent']);
+                    Route::get('/{uuid}', [AdminMinistryCurriculumController::class, 'show'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-read');
+                    Route::put('/{uuid}', [AdminMinistryCurriculumController::class, 'update'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                    Route::patch('/{uuid}/toggle-publish', [AdminMinistryCurriculumController::class, 'togglePublish'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                    Route::delete('/{uuid}', [AdminMinistryCurriculumController::class, 'destroy'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-sensitive');
+
+                    // Units management inside a Ministry course
+                    Route::post('/{uuid}/units', [AdminMinistryCurriculumController::class, 'storeUnit'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                    Route::put('/{uuid}/units/{unitIndex}', [AdminMinistryCurriculumController::class, 'updateUnit'])
+                        ->whereUuid('uuid')
+                        ->whereNumber('unitIndex')
+                        ->middleware('throttle:admin-write');
+                    Route::delete('/{uuid}/units/{unitIndex}', [AdminMinistryCurriculumController::class, 'destroyUnit'])
+                        ->whereUuid('uuid')
+                        ->whereNumber('unitIndex')
+                        ->middleware('throttle:admin-write');
+
+                    // Lessons (الحصص: YouTube video + content + attachments) inside a Ministry course
+                    Route::post('/{uuid}/lessons', [AdminMinistryCurriculumController::class, 'storeLesson'])
+                        ->whereUuid('uuid')
+                        ->middleware('throttle:admin-write');
+                    Route::put('/{uuid}/units/{unitIndex}/lessons/{lessonId}', [AdminMinistryCurriculumController::class, 'updateLesson'])
+                        ->whereUuid('uuid')
+                        ->whereNumber('unitIndex')
+                        ->middleware('throttle:admin-write');
+                    Route::delete('/{uuid}/units/{unitIndex}/lessons/{lessonId}', [AdminMinistryCurriculumController::class, 'destroyLesson'])
+                        ->whereUuid('uuid')
+                        ->whereNumber('unitIndex')
+                        ->middleware('throttle:admin-write');
+                    Route::patch('/{uuid}/units/{unitIndex}/lessons/reorder', [AdminMinistryCurriculumController::class, 'reorderLessons'])
+                        ->whereUuid('uuid')
+                        ->whereNumber('unitIndex')
+                        ->middleware('throttle:admin-write');
                 });
 
                 // Tab 5: Financials, Tier Pricing Plans, Payout Settlements & Discount Coupons

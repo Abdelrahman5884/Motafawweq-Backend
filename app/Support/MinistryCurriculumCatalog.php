@@ -15,7 +15,8 @@ final class MinistryCurriculumCatalog
     public const OFFICIAL_PORTAL_URL = 'https://elearning1.moe.gov.eg/';
 
     /**
-     * Ordered list of Egyptian grades supported in the Ministry catalog.
+     * Ordered list of all 12 Egyptian grades supported in the Ministry catalog
+     * (from 1st Primary through 3rd Secondary).
      *
      * @return list<string>
      */
@@ -31,7 +32,60 @@ final class MinistryCurriculumCatalog
             'الصف السادس الابتدائي',
             'الصف الخامس الابتدائي',
             'الصف الرابع الابتدائي',
+            'الصف الثالث الابتدائي',
+            'الصف الثاني الابتدائي',
+            'الصف الأول الابتدائي',
         ];
+    }
+
+    /**
+     * Structured 12-grade metadata catalog ordered ascending (1st Primary -> 3rd Secondary) for CMS UI selectors.
+     *
+     * @return list<array{gradeAr: string, gradeEn: string, stage: string, stageLabelAr: string, stageLabelEn: string, shortCode: string}>
+     */
+    public static function gradeCatalog(): array
+    {
+        return [
+            ['gradeAr' => 'الصف الأول الابتدائي', 'gradeEn' => '1st Primary', 'stage' => 'stage-primary', 'stageLabelAr' => 'المرحلة الابتدائية', 'stageLabelEn' => 'Primary Stage', 'shortCode' => 'pri1'],
+            ['gradeAr' => 'الصف الثاني الابتدائي', 'gradeEn' => '2nd Primary', 'stage' => 'stage-primary', 'stageLabelAr' => 'المرحلة الابتدائية', 'stageLabelEn' => 'Primary Stage', 'shortCode' => 'pri2'],
+            ['gradeAr' => 'الصف الثالث الابتدائي', 'gradeEn' => '3rd Primary', 'stage' => 'stage-primary', 'stageLabelAr' => 'المرحلة الابتدائية', 'stageLabelEn' => 'Primary Stage', 'shortCode' => 'pri3'],
+            ['gradeAr' => 'الصف الرابع الابتدائي', 'gradeEn' => '4th Primary', 'stage' => 'stage-primary', 'stageLabelAr' => 'المرحلة الابتدائية', 'stageLabelEn' => 'Primary Stage', 'shortCode' => 'pri4'],
+            ['gradeAr' => 'الصف الخامس الابتدائي', 'gradeEn' => '5th Primary', 'stage' => 'stage-primary', 'stageLabelAr' => 'المرحلة الابتدائية', 'stageLabelEn' => 'Primary Stage', 'shortCode' => 'pri5'],
+            ['gradeAr' => 'الصف السادس الابتدائي', 'gradeEn' => '6th Primary', 'stage' => 'stage-primary', 'stageLabelAr' => 'المرحلة الابتدائية', 'stageLabelEn' => 'Primary Stage', 'shortCode' => 'pri6'],
+            ['gradeAr' => 'الصف الأول الإعدادي', 'gradeEn' => '1st Preparatory', 'stage' => 'stage-prep', 'stageLabelAr' => 'المرحلة الإعدادية', 'stageLabelEn' => 'Preparatory Stage', 'shortCode' => 'prep1'],
+            ['gradeAr' => 'الصف الثاني الإعدادي', 'gradeEn' => '2nd Preparatory', 'stage' => 'stage-prep', 'stageLabelAr' => 'المرحلة الإعدادية', 'stageLabelEn' => 'Preparatory Stage', 'shortCode' => 'prep2'],
+            ['gradeAr' => 'الصف الثالث الإعدادي', 'gradeEn' => '3rd Preparatory', 'stage' => 'stage-prep', 'stageLabelAr' => 'المرحلة الإعدادية', 'stageLabelEn' => 'Preparatory Stage', 'shortCode' => 'prep3'],
+            ['gradeAr' => 'الصف الأول الثانوي', 'gradeEn' => '1st Secondary', 'stage' => 'stage-secondary', 'stageLabelAr' => 'المرحلة الثانوية', 'stageLabelEn' => 'Secondary Stage', 'shortCode' => 'sec1'],
+            ['gradeAr' => 'الصف الثاني الثانوي', 'gradeEn' => '2nd Secondary', 'stage' => 'stage-secondary', 'stageLabelAr' => 'المرحلة الثانوية', 'stageLabelEn' => 'Secondary Stage', 'shortCode' => 'sec2'],
+            ['gradeAr' => 'الصف الثالث الثانوي', 'gradeEn' => '3rd Secondary', 'stage' => 'stage-thanawya', 'stageLabelAr' => 'الثانوية العامة', 'stageLabelEn' => 'Thanawya Amma', 'shortCode' => 'sec3'],
+        ];
+    }
+
+    public static function isValidGrade(?string $gradeAr): bool
+    {
+        return in_array(trim((string) $gradeAr), self::availableGrades(), true);
+    }
+
+    public static function stageForGrade(string $gradeAr): string
+    {
+        foreach (self::gradeCatalog() as $meta) {
+            if ($meta['gradeAr'] === $gradeAr) {
+                return $meta['stage'];
+            }
+        }
+
+        return 'stage-secondary';
+    }
+
+    public static function shortCodeForGrade(string $gradeAr): string
+    {
+        foreach (self::gradeCatalog() as $meta) {
+            if ($meta['gradeAr'] === $gradeAr) {
+                return $meta['shortCode'];
+            }
+        }
+
+        return 'grade';
     }
 
     /**
@@ -58,6 +112,9 @@ final class MinistryCurriculumCatalog
             '6th Primary' => 'الصف السادس الابتدائي',
             '5th Primary' => 'الصف الخامس الابتدائي',
             '4th Primary' => 'الصف الرابع الابتدائي',
+            '3rd Primary' => 'الصف الثالث الابتدائي',
+            '2nd Primary' => 'الصف الثاني الابتدائي',
+            '1st Primary' => 'الصف الأول الابتدائي',
         ];
 
         if (isset($aliases[$clean])) {
@@ -765,6 +822,90 @@ final class MinistryCurriculumCatalog
                         'titleEn' => 'Motion, Energy & Digital Citizenship',
                         'chaptersCount' => 3,
                         'topics' => ['الطاقة والتصادم والوقود المتجدد', 'الأمان الرقمي ومصادر التعلم الإلكترونية'],
+                    ],
+                ],
+            ],
+            [
+                'code' => 'moe-pri3-math',
+                'titleAr' => 'الرياضيات المطورة — الصف الثالث الابتدائي',
+                'titleEn' => 'Mathematics — 3rd Primary',
+                'subjectAr' => 'الرياضيات',
+                'subjectEn' => 'Mathematics',
+                'gradeAr' => 'الصف الثالث الابتدائي',
+                'gradeSubtitleAr' => 'المرحلة الابتدائية — التأسيس المطور',
+                'gradeSubtitleEn' => '3rd Primary — Modern MOE',
+                'stage' => 'stage-primary',
+                'tracks' => ['عام', 'لغات', 'أزهر'],
+                'examCode' => null,
+                'textbookUrl' => self::OFFICIAL_PORTAL_URL,
+                'units' => [
+                    [
+                        'titleAr' => 'المحور الأول: الأنماط والضرب والقيمة المكانية',
+                        'titleEn' => 'Theme 1: Patterns, Multiplication & Place Value',
+                        'chaptersCount' => 3,
+                        'topics' => ['الأنماط العددية والتمثيل البياني بالأعمدة', 'القيمة المكانية حتى مئات الألوف وجداول الضرب'],
+                    ],
+                    [
+                        'titleAr' => 'المحور الثاني: المساحة والمحيط والكسور البسيطة',
+                        'titleEn' => 'Theme 2: Area, Perimeter & Basic Fractions',
+                        'chaptersCount' => 3,
+                        'topics' => ['المضلعات وحساب المحيط والمساحة', 'الوقت والكسور والعلاقة بين الضرب والقسمة'],
+                    ],
+                ],
+            ],
+            [
+                'code' => 'moe-pri2-arabic',
+                'titleAr' => 'اللغة العربية (تواصل) — الصف الثاني الابتدائي',
+                'titleEn' => 'Arabic Language — 2nd Primary',
+                'subjectAr' => 'اللغة العربية',
+                'subjectEn' => 'Arabic Language',
+                'gradeAr' => 'الصف الثاني الابتدائي',
+                'gradeSubtitleAr' => 'المرحلة الابتدائية — منهج تواصل',
+                'gradeSubtitleEn' => '2nd Primary — Tawasul Curriculum',
+                'stage' => 'stage-primary',
+                'tracks' => ['عام', 'لغات', 'أزهر'],
+                'examCode' => null,
+                'textbookUrl' => self::OFFICIAL_PORTAL_URL,
+                'units' => [
+                    [
+                        'titleAr' => 'المحور الأول: من أكون؟ (يوم في حياتي وأهتم بنفسي)',
+                        'titleEn' => 'Theme 1: Who Am I?',
+                        'chaptersCount' => 3,
+                        'topics' => ['قصص الاستماع والمفردات اللغوية', 'الأساليب والتراكيب: ضمائر المتكلم والمخاطب وأسلوب النهي'],
+                    ],
+                    [
+                        'titleAr' => 'المحور الثاني: العالم من حولي (السماء ليلاً والتواصل)',
+                        'titleEn' => 'Theme 2: The World Around Me',
+                        'chaptersCount' => 3,
+                        'topics' => ['القراءة المتحررة والفهم القرائي', 'كتابة لافتة ووصف مكان وقصة قصيرة'],
+                    ],
+                ],
+            ],
+            [
+                'code' => 'moe-pri1-arabic',
+                'titleAr' => 'اللغة العربية (تواصل) — الصف الأول الابتدائي',
+                'titleEn' => 'Arabic Language — 1st Primary',
+                'subjectAr' => 'اللغة العربية',
+                'subjectEn' => 'Arabic Language',
+                'gradeAr' => 'الصف الأول الابتدائي',
+                'gradeSubtitleAr' => 'المرحلة الابتدائية — التأسيس المبكر',
+                'gradeSubtitleEn' => '1st Primary — Early Foundations',
+                'stage' => 'stage-primary',
+                'tracks' => ['عام', 'لغات', 'أزهر'],
+                'examCode' => null,
+                'textbookUrl' => self::OFFICIAL_PORTAL_URL,
+                'units' => [
+                    [
+                        'titleAr' => 'المحور الأول: من أكون؟ (أنا مميز وأسرتي)',
+                        'titleEn' => 'Theme 1: Who Am I? (I Am Special & My Family)',
+                        'chaptersCount' => 2,
+                        'topics' => ['أصوات الحروف بالحركات القصيرة (الفتحة والضمة والكسرة)', 'تكوين الكلمات البسيطة وقصة الاستماع'],
+                    ],
+                    [
+                        'titleAr' => 'المحور الثاني: العالم من حولي (عالمي الصغير والكبير)',
+                        'titleEn' => 'Theme 2: The World Around Me',
+                        'chaptersCount' => 2,
+                        'topics' => ['السكون والمدود (المد بالألف والياء والواو)', 'أسماء الإشارة (هذا وهذه) وتكوين جمل مفيدة'],
                     ],
                 ],
             ],

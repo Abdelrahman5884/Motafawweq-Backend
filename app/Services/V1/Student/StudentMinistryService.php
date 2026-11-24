@@ -2,6 +2,7 @@
 
 namespace App\Services\V1\Student;
 
+use App\Models\MinistryCurriculum;
 use App\Models\StudentMinistryExamAttempt;
 use App\Models\StudentMinistryUnitProgress;
 use App\Models\StudentProfile;
@@ -21,19 +22,27 @@ class StudentMinistryService extends BaseService
      */
     public function listCurricula(User $student, ?string $gradeFilter = null): array
     {
+        MinistryCurriculum::ensureCatalogSeeded();
+
         [$studentGrade, $studentTrack] = $this->resolveStudentGradeAndTrack($student);
         $showAllGrades = $gradeFilter !== null && strtolower(trim($gradeFilter)) === 'all';
         $selectedGrade = $showAllGrades
             ? 'all'
             : MinistryCurriculumCatalog::normalizeGrade($gradeFilter ?: $studentGrade);
 
-        $curricula = MinistryCurriculumCatalog::curricula();
+        $query = MinistryCurriculum::query()
+            ->where('is_published', true)
+            ->orderBy('sort_order')
+            ->orderBy('id');
+
         if (! $showAllGrades) {
-            $curricula = array_values(array_filter(
-                $curricula,
-                fn (array $item) => $item['gradeAr'] === $selectedGrade
-            ));
+            $query->where('grade_ar', $selectedGrade);
         }
+
+        $curricula = $query->get()
+            ->map(fn (MinistryCurriculum $m) => $m->toCatalogArray())
+            ->values()
+            ->all();
 
         // Prioritize subjects matching the student's track first
         usort($curricula, function (array $a, array $b) use ($studentTrack) {
@@ -105,17 +114,33 @@ class StudentMinistryService extends BaseService
 
             $flatTopics = [];
             $formattedUnits = [];
+            $lessonsCount = 0;
+            $videosCount = 0;
+            $resourcesCount = 0;
             foreach ($units as $idx => $unit) {
-                $unitTopics = $unit['topics'] ?? [];
+                $unitTopics = is_array($unit['topics'] ?? null) ? array_values($unit['topics']) : [];
+                $unitVideos = is_array($unit['videos'] ?? null) ? array_values($unit['videos']) : [];
+                $unitLessons = is_array($unit['lessons'] ?? null) ? array_values($unit['lessons']) : $unitVideos;
+                $unitResources = is_array($unit['resources'] ?? null) ? array_values($unit['resources']) : [];
+                $lessonsCount += count($unitLessons);
+                $videosCount += count($unitVideos);
+                $resourcesCount += count($unitResources);
+                foreach ($unitLessons as $les) {
+                    $resourcesCount += count((array) ($les['attachments'] ?? []));
+                }
                 foreach ($unitTopics as $t) {
                     $flatTopics[] = $t;
                 }
                 $formattedUnits[] = [
                     'index' => $idx,
-                    'titleAr' => $unit['titleAr'],
-                    'titleEn' => $unit['titleEn'] ?? $unit['titleAr'],
-                    'chaptersCount' => (int) ($unit['chaptersCount'] ?? count($unitTopics)),
+                    'titleAr' => $unit['titleAr'] ?? '',
+                    'titleEn' => $unit['titleEn'] ?? ($unit['titleAr'] ?? ''),
+                    'summaryAr' => $unit['summaryAr'] ?? '',
+                    'chaptersCount' => (int) ($unit['chaptersCount'] ?? max(1, count($unitLessons) ?: count($unitTopics))),
                     'topics' => $unitTopics,
+                    'lessons' => $unitLessons,
+                    'videos' => $unitVideos,
+                    'resources' => $unitResources,
                     'isCompleted' => in_array($idx, $completedIndices, true),
                 ];
             }
@@ -136,12 +161,18 @@ class StudentMinistryService extends BaseService
                 'gradeSubtitleAr' => $curr['gradeSubtitleAr'] ?? $curr['gradeAr'],
                 'gradeSubtitleEn' => $curr['gradeSubtitleEn'] ?? $curr['gradeAr'],
                 'stage' => $curr['stage'],
+                'term' => $curr['term'] ?? 'full_year',
                 'tracks' => $curr['tracks'] ?? [],
+                'descriptionAr' => $curr['descriptionAr'] ?? '',
+                'descriptionEn' => $curr['descriptionEn'] ?? '',
                 'isRecommendedForTrack' => $this->matchesTrack($curr['tracks'] ?? [], $studentTrack),
                 'sourceAr' => MinistryCurriculumCatalog::SOURCE_AR,
                 'sourceEn' => MinistryCurriculumCatalog::SOURCE_EN,
                 'unitsCount' => $unitsCount,
                 'chaptersCount' => $chaptersCount,
+                'lessonsCount' => $lessonsCount,
+                'videosCount' => $videosCount,
+                'resourcesCount' => $resourcesCount,
                 'completedUnitsCount' => $completedUnitsCount,
                 'completedUnitIndices' => $completedIndices,
                 'progressPercent' => $progressPercent,
@@ -173,7 +204,14 @@ class StudentMinistryService extends BaseService
      */
     public function toggleUnitCompletion(User $student, string $curriculumCode, int $unitIndex): array
     {
-        $curriculum = MinistryCurriculumCatalog::findCurriculum($curriculumCode);
+        MinistryCurriculum::ensureCatalogSeeded();
+
+        $curriculumModel = MinistryCurriculum::query()
+            ->where('code', $curriculumCode)
+            ->where('is_published', true)
+            ->first();
+
+        $curriculum = $curriculumModel?->toCatalogArray();
         if (! $curriculum) {
             throw (new ModelNotFoundException)->setModel(StudentMinistryUnitProgress::class, [$curriculumCode]);
         }

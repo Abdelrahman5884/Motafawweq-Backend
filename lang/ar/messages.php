@@ -384,6 +384,13 @@ return [
         'course_featured_toggled' => 'تم تحديث حالة تمييز المقرر في متجر المنصة بنجاح',
         'course_deleted' => 'تمت أرشفة وحذف المقرر التعليمي بنجاح',
 
+        'ministry_curricula_fetched' => 'تم جلب مناهج وزارة التربية والتعليم بنجاح',
+        'ministry_curriculum_fetched' => 'تم جلب تفاصيل المنهج الوزاري بنجاح',
+        'ministry_curriculum_created' => 'تم إضافة ونشر المنهج الوزاري بنجاح',
+        'ministry_curriculum_updated' => 'تم حفظ تعديلات المنهج الوزاري بنجاح',
+        'ministry_curriculum_publish_toggled' => 'تم تحديث حالة نشر المنهج الوزاري بنجاح',
+        'ministry_curriculum_deleted' => 'تم حذف وأرشفة المنهج الوزاري بنجاح',
+
         'champions_fetched' => 'تم جلب لوحة الشرف وأبطال الكؤوس بنجاح',
         'champion_created' => 'تمت إضافة بطل الكأس إلى لوحة الشرف بنجاح',
         'champion_approved' => 'تم اعتماد الطالب المتفوق وعرضه في لوحة الشرف والسلايدر بنجاح',

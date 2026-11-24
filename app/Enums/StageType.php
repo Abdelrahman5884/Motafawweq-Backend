@@ -31,6 +31,9 @@ enum StageType: string
             'الصف السادس الابتدائي',
             'الصف الخامس الابتدائي',
             'الصف الرابع الابتدائي',
+            'الصف الثالث الابتدائي',
+            'الصف الثاني الابتدائي',
+            'الصف الأول الابتدائي',
         ];
     }
 
@@ -83,6 +86,9 @@ enum StageType: string
                     ['id' => 'g-pri6', 'nameAr' => 'الصف السادس الابتدائي', 'nameEn' => '6th Primary'],
                     ['id' => 'g-pri5', 'nameAr' => 'الصف الخامس الابتدائي', 'nameEn' => '5th Primary'],
                     ['id' => 'g-pri4', 'nameAr' => 'الصف الرابع الابتدائي', 'nameEn' => '4th Primary'],
+                    ['id' => 'g-pri3', 'nameAr' => 'الصف الثالث الابتدائي', 'nameEn' => '3rd Primary'],
+                    ['id' => 'g-pri2', 'nameAr' => 'الصف الثاني الابتدائي', 'nameEn' => '2nd Primary'],
+                    ['id' => 'g-pri1', 'nameAr' => 'الصف الأول الابتدائي', 'nameEn' => '1st Primary'],
                 ],
             ],
         ];

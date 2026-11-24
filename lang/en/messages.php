@@ -384,6 +384,13 @@ return [
         'course_featured_toggled' => 'Course marketplace featured status updated successfully.',
         'course_deleted' => 'Course archived and removed successfully.',
 
+        'ministry_curricula_fetched' => 'Ministry of Education curricula retrieved successfully.',
+        'ministry_curriculum_fetched' => 'Ministry curriculum details retrieved successfully.',
+        'ministry_curriculum_created' => 'Ministry curriculum created successfully.',
+        'ministry_curriculum_updated' => 'Ministry curriculum updated successfully.',
+        'ministry_curriculum_publish_toggled' => 'Ministry curriculum publish status updated successfully.',
+        'ministry_curriculum_deleted' => 'Ministry curriculum archived and removed successfully.',
+
         'champions_fetched' => 'Honor roll champions retrieved successfully.',
         'champion_created' => 'Cup champion added to honor roll successfully.',
         'champion_approved' => 'Republic League nominee approved and published to the slider successfully.',
