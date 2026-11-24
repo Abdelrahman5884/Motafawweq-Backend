@@ -24,6 +24,7 @@ use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Exceptions\MissingAbilityException;
 use Laravel\Sanctum\Http\Middleware\CheckAbilities;
@@ -128,7 +129,7 @@ return Application::configure(basePath: dirname(__DIR__))
             }
         });
 
-        // Safe Fallback for unhandled server errors (never leak stack trace in production)
+        // Safe Fallback for unhandled server errors (NEVER expose raw SQL, stack traces, or internal details to clients)
         $exceptions->render(function (Throwable $e, Request $request) use ($isApi) {
             if (! $isApi($request)) {
                 return null;
@@ -139,26 +140,52 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             if ($e instanceof HttpExceptionInterface) {
+                $statusCode = $e->getStatusCode();
+                if ($statusCode >= 500) {
+                    $referenceId = 'ERR-'.strtoupper(Str::random(8));
+                    Log::error("[API-HTTP-{$statusCode}] [{$referenceId}] ".$e->getMessage(), [
+                        'reference_id' => $referenceId,
+                        'status' => $statusCode,
+                        'exception' => get_class($e),
+                        'path' => $request->path(),
+                        'method' => $request->method(),
+                        'user_id' => $request->user()?->id,
+                        'file' => $e->getFile(),
+                        'line' => $e->getLine(),
+                    ]);
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => __('messages.server_error'),
+                        'error_code' => 'SERVER_ERROR',
+                        'reference_id' => $referenceId,
+                    ], $statusCode, $e->getHeaders());
+                }
+
                 return response()->json([
                     'success' => false,
                     'message' => $e->getMessage() ?: __('messages.general_error'),
-                ], $e->getStatusCode(), $e->getHeaders());
+                ], $statusCode, $e->getHeaders());
             }
 
-            Log::error('[API-UNHANDLED-EXCEPTION] '.$e->getMessage(), [
+            $referenceId = 'ERR-'.strtoupper(Str::random(8));
+            Log::error("[API-UNHANDLED-EXCEPTION] [{$referenceId}] ".$e->getMessage(), [
+                'reference_id' => $referenceId,
                 'exception' => get_class($e),
+                'path' => $request->path(),
+                'method' => $request->method(),
+                'user_id' => $request->user()?->id,
+                'ip' => $request->ip(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
+                'trace' => collect($e->getTrace())->take(10)->all(),
             ]);
 
-            return response()->json(array_filter([
+            return response()->json([
                 'success' => false,
-                'message' => config('app.debug') ? $e->getMessage() : __('messages.server_error'),
-                'debug' => config('app.debug') ? [
-                    'exception' => get_class($e),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                ] : null,
-            ], fn ($v) => $v !== null), 500);
+                'message' => __('messages.server_error'),
+                'error_code' => 'SERVER_ERROR',
+                'reference_id' => $referenceId,
+            ], 500);
         });
     })->create();

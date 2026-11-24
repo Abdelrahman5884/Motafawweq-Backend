@@ -359,7 +359,7 @@ class AdminDashboardService extends BaseService
 
         $studyActivities = StudentDailyActivity::query()
             ->where('activity_date', '>=', $start->toDateString())
-            ->get(['student_id', 'activity_date', 'active_minutes']);
+            ->get(['student_id', 'activity_date', 'active_seconds']);
 
         $dayBuckets = [];
         for ($i = 6; $i >= 0; $i--) {
@@ -371,7 +371,7 @@ class AdminDashboardService extends BaseService
                 'dayAr' => $daysAr[$shortEn] ?? $shortEn,
                 'dayEn' => $shortEn,
                 'userIds' => [],
-                'minutes' => 0,
+                'seconds' => 0,
                 'isToday' => $i === 0,
             ];
         }
@@ -387,7 +387,7 @@ class AdminDashboardService extends BaseService
             $d = $act->activity_date?->toDateString();
             if ($d && isset($dayBuckets[$d])) {
                 $dayBuckets[$d]['userIds'][$act->student_id] = true;
-                $dayBuckets[$d]['minutes'] += (int) $act->active_minutes;
+                $dayBuckets[$d]['seconds'] += (int) $act->active_seconds;
             }
         }
 
@@ -407,7 +407,7 @@ class AdminDashboardService extends BaseService
 
         foreach ($dayBuckets as $dateStr => $b) {
             $cnt = count($b['userIds']);
-            $hrs = round($b['minutes'] / 60, 1);
+            $hrs = round($b['seconds'] / 3600, 1);
             $totalActiveHours += $hrs;
             $totalDistinct += $cnt;
 

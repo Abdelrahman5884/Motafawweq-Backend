@@ -177,11 +177,11 @@ class AdminUserService extends BaseService
         $recentLogins = $user->loginHistories()
             ->latest('created_at')
             ->limit(5)
-            ->get(['status', 'ip_address', 'device_name', 'created_at'])
+            ->get(['status', 'ip_address', 'user_agent', 'created_at'])
             ->map(fn ($h) => [
                 'status' => is_object($h->status) ? $h->status->value : (string) $h->status,
                 'ipAddress' => $h->ip_address,
-                'deviceName' => $h->device_name,
+                'deviceName' => Str::limit((string) ($h->user_agent ?: 'Web'), 80),
                 'createdAt' => $h->created_at?->toIso8601String(),
             ])
             ->values()

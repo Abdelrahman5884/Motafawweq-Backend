@@ -44,13 +44,8 @@ class DatabaseSeeder extends Seeder
                 'role' => UserRole::CENTER->value,
                 'avatar' => 'https://images.unsplash.com/photo-1562774053-701939374585?w=150&auto=format&fit=crop&q=80',
             ],
-            [
-                'name' => 'مدير منصة متفوّق',
-                'email' => 'hq@motafawweq.me',
-                'phone' => '01000000000',
-                'role' => UserRole::ADMIN->value,
-                'avatar' => 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-            ],
+            // SECURITY: Platform SuperAdmin accounts are NEVER hardcoded in seeders.
+            // Provision securely from the server terminal using: php artisan admin:provision
         ];
 
         User::unguarded(function () use ($accounts) {

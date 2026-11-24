@@ -56,7 +56,7 @@ class AdminSystemService extends BaseService
         $failedJobs = Schema::hasTable('failed_jobs') ? (int) DB::table('failed_jobs')->count() : 0;
 
         $storageFilesCount = Schema::hasTable('stored_files') ? (int) StoredFile::query()->count() : 0;
-        $storageBytes = Schema::hasTable('stored_files') ? (int) StoredFile::query()->sum('size_bytes') : 0;
+        $storageBytes = Schema::hasTable('stored_files') ? (int) StoredFile::query()->sum('file_size_bytes') : 0;
 
         $aiEconomics = $this->dashboardService->computeAiEconomics();
 

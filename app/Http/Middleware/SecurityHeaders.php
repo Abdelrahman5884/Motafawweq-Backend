@@ -46,6 +46,13 @@ class SecurityHeaders
         // Content Security Policy (API-safe)
         $response->headers->set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none';");
 
+        // Strictly prevent browser or proxy caching on privileged admin & auth responses
+        if ($request->is('api/v1/admin*') || $request->is('api/v1/auth*')) {
+            $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, private');
+            $response->headers->set('Pragma', 'no-cache');
+            $response->headers->set('Expires', '0');
+        }
+
         return $response;
     }
 }
