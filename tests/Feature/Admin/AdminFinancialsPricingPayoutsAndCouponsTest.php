@@ -291,4 +291,77 @@ class AdminFinancialsPricingPayoutsAndCouponsTest extends TestCase
         $this->assertDatabaseMissing('discount_coupons', ['uuid' => $couponUuid]);
         $this->assertEquals(0, DiscountCoupon::where('code', 'MOTAFAWWEQ30')->count());
     }
+
+    public function test_admin_invoices_pagination_and_search_by_name(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $teacher = User::factory()->create(['name' => 'أحمد محمود المعلم', 'role' => UserRole::TEACHER]);
+        $student = User::factory()->create(['name' => 'سارة علي الطالبة']);
+        $center = User::factory()->center()->create(['name' => 'سنتر النور التعليمي']);
+
+        TeacherInvoice::create([
+            'teacher_id' => $teacher->id,
+            'invoice_number' => 'INV-T-101',
+            'description_ar' => 'باقة معلم برو',
+            'base_amount_egp' => 500,
+            'discount_amount_egp' => 0,
+            'final_amount_egp' => 500,
+            'payment_method' => PaymentMethod::INSTAPAY,
+            'status' => InvoiceStatus::PAID,
+            'paid_at' => now()->subHours(1),
+        ]);
+
+        StudentInvoice::create([
+            'student_id' => $student->id,
+            'invoice_number' => 'INV-S-102',
+            'description_ar' => 'باقة طالب بلس',
+            'base_amount_egp' => 150,
+            'discount_amount_egp' => 0,
+            'final_amount_egp' => 150,
+            'payment_method' => PaymentMethod::VODAFONE,
+            'status' => InvoiceStatus::PAID,
+            'paid_at' => now()->subHours(2),
+        ]);
+
+        CenterInvoice::create([
+            'center_id' => $center->id,
+            'invoice_number' => 'INV-C-103',
+            'description_ar' => 'باقة سنتر برو',
+            'base_amount_egp' => 1200,
+            'discount_amount_egp' => 0,
+            'final_amount_egp' => 1200,
+            'payment_method' => PaymentMethod::INSTAPAY,
+            'status' => InvoiceStatus::PAID,
+            'paid_at' => now()->subHours(3),
+        ]);
+
+        Sanctum::actingAs($admin, ['access']);
+
+        // 1. Pagination (per_page=2 across 3 paid invoices -> 2 pages)
+        $page1 = $this->getJson('/api/v1/admin/financials/invoices?per_page=2&page=1')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 3)
+            ->assertJsonPath('meta.last_page', 2)
+            ->assertJsonPath('meta.current_page', 1);
+        $this->assertCount(2, $page1->json('data'));
+
+        $page2 = $this->getJson('/api/v1/admin/financials/invoices?per_page=2&page=2')
+            ->assertOk()
+            ->assertJsonPath('meta.current_page', 2);
+        $this->assertCount(1, $page2->json('data'));
+
+        // 2. Search by payer name
+        $searchRes = $this->getJson('/api/v1/admin/financials/invoices?search='.urlencode('سارة علي'))
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('data.0.invoiceNumber', 'INV-S-102')
+            ->assertJsonPath('data.0.role', 'student');
+        $this->assertSame('سارة علي الطالبة', $searchRes->json('data.0.payerName'));
+
+        // 3. Role filter
+        $this->getJson('/api/v1/admin/financials/invoices?role=center')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('data.0.invoiceNumber', 'INV-C-103');
+    }
 }

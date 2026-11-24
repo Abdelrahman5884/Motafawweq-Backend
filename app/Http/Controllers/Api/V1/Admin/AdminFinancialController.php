@@ -28,6 +28,26 @@ class AdminFinancialController extends BaseApiController
         );
     }
 
+    /**
+     * GET /api/v1/admin/financials/invoices
+     */
+    public function invoices(Request $request): JsonResponse
+    {
+        $result = $this->financialService->listPaidInvoices([
+            'search' => $request->query('search'),
+            'role' => $request->query('role'),
+            'page' => $request->query('page', 1),
+            'per_page' => $request->query('per_page', 10),
+        ]);
+
+        return $this->successResponse(
+            $result['items'],
+            'تم جلب سجل الفواتير المدفوعة بنجاح',
+            200,
+            $result['meta']
+        );
+    }
+
     /* ── Manual Platform Expenses & Costs Ledger ── */
 
     /**

@@ -531,6 +531,8 @@ Route::prefix('v1')->group(function () {
                 Route::prefix('financials')->group(function () {
                     Route::get('/overview', [AdminFinancialController::class, 'overview'])
                         ->middleware('throttle:admin-read');
+                    Route::get('/invoices', [AdminFinancialController::class, 'invoices'])
+                        ->middleware('throttle:admin-read');
 
                     Route::prefix('expenses')->group(function () {
                         Route::get('/', [AdminFinancialController::class, 'expenses'])

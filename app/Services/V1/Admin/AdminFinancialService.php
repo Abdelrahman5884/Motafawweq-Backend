@@ -21,6 +21,7 @@ use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -300,6 +301,88 @@ class AdminFinancialService extends BaseService
 
             return $row;
         }, array_slice($merged, 0, $limit));
+    }
+
+    /**
+     * Paginated & searchable list of verified paid subscription invoices across Teachers, Students, and Centers.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array<string, mixed>
+     */
+    public function listPaidInvoices(array $filters = []): array
+    {
+        $perPage = min(max((int) ($filters['per_page'] ?? 10), 1), 50);
+        $page = max((int) ($filters['page'] ?? 1), 1);
+        $role = isset($filters['role']) ? strtolower(trim((string) $filters['role'])) : null;
+        $search = isset($filters['search']) ? trim((string) $filters['search']) : null;
+
+        $validRoles = ['teacher', 'student', 'center'];
+        $rolesToQuery = ($role && in_array($role, $validRoles, true)) ? [$role] : $validRoles;
+
+        $paidStatus = InvoiceStatus::PAID->value;
+        $usersTable = (new User)->getTable();
+        $safeSearch = ($search !== null && $search !== '') ? '%'.addcslashes($search, '%_\\').'%' : null;
+
+        $roleSpecs = [
+            'teacher' => ['table' => (new TeacherInvoice)->getTable(), 'fk' => 'teacher_id', 'fallback' => 'T-INV', 'prefix' => 'معلم #'],
+            'student' => ['table' => (new StudentInvoice)->getTable(), 'fk' => 'student_id', 'fallback' => 'S-INV', 'prefix' => 'طالب #'],
+            'center' => ['table' => (new CenterInvoice)->getTable(), 'fk' => 'center_id', 'fallback' => 'C-INV', 'prefix' => 'سنتر #'],
+        ];
+
+        $unionQuery = null;
+        foreach ($rolesToQuery as $rKey) {
+            $spec = $roleSpecs[$rKey];
+            $branch = DB::table($spec['table'].' as inv')
+                ->leftJoin($usersTable.' as u', 'u.id', '=', 'inv.'.$spec['fk'])
+                ->where('inv.status', $paidStatus)
+                ->selectRaw(
+                    'inv.invoice_number, ? as role, inv.'.$spec['fk'].' as user_id, u.name as payer_name, inv.description_ar, inv.final_amount_egp, inv.payment_method, COALESCE(inv.paid_at, inv.created_at) as effective_paid_at',
+                    [$rKey]
+                );
+
+            if ($safeSearch !== null) {
+                $branch->where(function ($q) use ($safeSearch): void {
+                    $q->where('u.name', 'like', $safeSearch)
+                        ->orWhere('inv.invoice_number', 'like', $safeSearch);
+                });
+            }
+
+            $unionQuery = $unionQuery === null ? $branch : $unionQuery->unionAll($branch);
+        }
+
+        /** @var LengthAwarePaginator $paginator */
+        $paginator = DB::query()
+            ->fromSub($unionQuery, 'paid_invoices')
+            ->orderByDesc('effective_paid_at')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        $items = collect($paginator->items())->map(static function (object $row) use ($roleSpecs): array {
+            $rKey = (string) ($row->role ?? 'student');
+            $spec = $roleSpecs[$rKey] ?? $roleSpecs['student'];
+            $paidAt = $row->effective_paid_at ? Carbon::parse($row->effective_paid_at) : null;
+
+            return [
+                'invoiceNumber' => $row->invoice_number ?: $spec['fallback'],
+                'role' => $rKey,
+                'payerName' => $row->payer_name ?: ($spec['prefix'].($row->user_id ?? '')),
+                'descriptionAr' => $row->description_ar,
+                'amountEgp' => round((float) $row->final_amount_egp, 2),
+                'paymentMethod' => (string) ($row->payment_method ?? ''),
+                'paidAt' => $paidAt?->toIso8601String(),
+                'paidDate' => $paidAt?->toDateString(),
+            ];
+        })->values()->all();
+
+        return [
+            'items' => $items,
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+                'has_more' => $paginator->hasMorePages(),
+            ],
+        ];
     }
 
     /* =========================================================================
