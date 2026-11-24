@@ -390,6 +390,10 @@ Route::prefix('v1')->group(function () {
                         ->middleware('throttle:admin-read');
                     Route::post('/', [AdminChampionController::class, 'store'])
                         ->middleware(['throttle:admin-write', 'idempotent']);
+                    Route::post('/approve-nominee', [AdminChampionController::class, 'approveNominee'])
+                        ->middleware(['throttle:admin-write', 'idempotent']);
+                    Route::post('/upload-photo', [AdminChampionController::class, 'uploadPhoto'])
+                        ->middleware('throttle:admin-write');
                     Route::put('/{uuid}', [AdminChampionController::class, 'update'])
                         ->whereUuid('uuid')
                         ->middleware('throttle:admin-write');
@@ -401,12 +405,18 @@ Route::prefix('v1')->group(function () {
                         ->middleware('throttle:admin-write');
                 });
 
-                Route::get('/leagues/republic', [AdminRepublicLeagueController::class, 'show'])
-                    ->middleware('throttle:admin-read');
-                Route::post('/leagues/republic/start', [AdminRepublicLeagueController::class, 'start'])
-                    ->middleware(['throttle:admin-write', 'idempotent']);
-                Route::post('/leagues/republic/stop', [AdminRepublicLeagueController::class, 'stop'])
-                    ->middleware('throttle:admin-sensitive');
+                Route::prefix('leagues/republic')->group(function () {
+                    Route::get('/', [AdminRepublicLeagueController::class, 'show'])
+                        ->middleware('throttle:admin-read');
+                    Route::get('/leaderboard', [AdminRepublicLeagueController::class, 'leaderboard'])
+                        ->middleware('throttle:admin-read');
+                    Route::get('/nominees', [AdminRepublicLeagueController::class, 'nominees'])
+                        ->middleware('throttle:admin-read');
+                    Route::post('/start', [AdminRepublicLeagueController::class, 'start'])
+                        ->middleware(['throttle:admin-write', 'idempotent']);
+                    Route::post('/stop', [AdminRepublicLeagueController::class, 'stop'])
+                        ->middleware('throttle:admin-sensitive');
+                });
 
                 // Tab 3: User Management, KYC Verification Queue & Security Controls
                 Route::prefix('users')->group(function () {

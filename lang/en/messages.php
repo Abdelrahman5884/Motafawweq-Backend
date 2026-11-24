@@ -386,9 +386,15 @@ return [
 
         'champions_fetched' => 'Honor roll champions retrieved successfully.',
         'champion_created' => 'Cup champion added to honor roll successfully.',
+        'champion_approved' => 'Republic League nominee approved and published to the slider successfully.',
+        'champion_photo_uploaded' => 'Champion portrait verified and uploaded successfully.',
+        'invalid_champion_photo' => 'Invalid or unsupported image file. Only verified JPG, PNG, or WebP images are allowed.',
+        'invalid_champion_photo_dimensions' => 'Unsupported image dimensions. Please upload an image between 60×60 and 4096×4096 pixels.',
         'champion_updated' => 'Cup champion details updated successfully.',
         'champion_pin_toggled' => 'Champion homepage visibility toggled successfully.',
         'champion_deleted' => 'Champion removed from honor roll successfully.',
+        'republic_league_leaderboard_fetched' => 'Republic League standings retrieved successfully.',
+        'republic_league_nominees_fetched' => 'Republic League top nominees retrieved successfully.',
 
         'announcements_fetched' => 'Platform announcements retrieved successfully.',
         'announcement_created' => 'Platform announcement broadcasted successfully.',

@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\BaseApiController;
 use App\Http\Requests\V1\Admin\SaveAdminChampionRequest;
 use App\Services\V1\Admin\AdminChampionService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AdminChampionController extends BaseApiController
 {
@@ -15,12 +16,26 @@ class AdminChampionController extends BaseApiController
 
     /**
      * GET /api/v1/admin/champions
+     * Supports server-side pagination, grade filtering, visibility filtering, source filtering, and search.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'grade' => ['nullable', 'string', 'max:100'],
+            'search' => ['nullable', 'string', 'max:120'],
+            'pinned' => ['nullable', 'string', 'in:all,pinned,hidden'],
+            'source' => ['nullable', 'string', 'in:all,manual,republic_league'],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:3', 'max:50'],
+        ]);
+
+        $result = $this->championService->listPaginated($validated);
+
         return $this->successResponse(
-            $this->championService->listAll(),
-            __('messages.admin.champions_fetched')
+            $result['items'],
+            __('messages.admin.champions_fetched'),
+            200,
+            $result['meta']
         );
     }
 
@@ -32,6 +47,35 @@ class AdminChampionController extends BaseApiController
         $champion = $this->championService->create($this->authenticatedUser(), $request->validated());
 
         return $this->createdResponse($champion, __('messages.admin.champion_created'));
+    }
+
+    /**
+     * POST /api/v1/admin/champions/approve-nominee
+     * Approve & publish an auto-detected Republic League top performer (with optional edited text & custom photo).
+     */
+    public function approveNominee(SaveAdminChampionRequest $request): JsonResponse
+    {
+        $champion = $this->championService->approveNominee($this->authenticatedUser(), $request->validated());
+
+        return $this->successResponse($champion, __('messages.admin.champion_approved'));
+    }
+
+    /**
+     * POST /api/v1/admin/champions/upload-photo
+     * Hardened portrait photo upload for homepage slider champions.
+     */
+    public function uploadPhoto(Request $request): JsonResponse
+    {
+        $request->validate([
+            'photo' => ['required', 'file', 'image', 'mimes:jpeg,jpg,png,webp', 'max:3072'],
+        ]);
+
+        $result = $this->championService->uploadPhoto(
+            $this->authenticatedUser(),
+            $request->file('photo')
+        );
+
+        return $this->createdResponse($result, __('messages.admin.champion_photo_uploaded'));
     }
 
     /**

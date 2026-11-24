@@ -386,9 +386,15 @@ return [
 
         'champions_fetched' => 'تم جلب لوحة الشرف وأبطال الكؤوس بنجاح',
         'champion_created' => 'تمت إضافة بطل الكأس إلى لوحة الشرف بنجاح',
+        'champion_approved' => 'تم اعتماد الطالب المتفوق وعرضه في لوحة الشرف والسلايدر بنجاح',
+        'champion_photo_uploaded' => 'تم رفع وفحص صورة البطل بنجاح',
+        'invalid_champion_photo' => 'ملف الصورة غير صالح أو غير مدعوم. يُسمح فقط بصور JPG أو PNG أو WebP.',
+        'invalid_champion_photo_dimensions' => 'أبعاد الصورة غير مناسبة. يُرجى اختيار صورة واضحة بين 60×60 و4096×4096 بكسل.',
         'champion_updated' => 'تم تحديث بيانات بطل الكأس بنجاح',
         'champion_pin_toggled' => 'تم تحديث حالة تثبيت البطل في الواجهة الرئيسية بنجاح',
         'champion_deleted' => 'تم حذف البطل من لوحة الشرف بنجاح',
+        'republic_league_leaderboard_fetched' => 'تم جلب ترتيب دوري الجمهورية بنجاح',
+        'republic_league_nominees_fetched' => 'تم جلب قائمة أوائل دوري الجمهورية المرشحين للاعتماد بنجاح',
 
         'announcements_fetched' => 'تم جلب قائمة إعلانات المنصة بنجاح',
         'announcement_created' => 'تم بث ونشر الإعلان بنجاح',

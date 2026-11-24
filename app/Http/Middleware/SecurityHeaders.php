@@ -18,7 +18,9 @@ class SecurityHeaders
         $response = $next($request);
 
         // Remove server software disclosure
-        header_remove('X-Powered-By');
+        if (! headers_sent()) {
+            header_remove('X-Powered-By');
+        }
         if (method_exists($response, 'headers')) {
             $response->headers->remove('X-Powered-By');
         }

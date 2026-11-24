@@ -3,6 +3,7 @@
 namespace App\Http\Requests\V1\Admin;
 
 use App\Http\Requests\BaseApiRequest;
+use App\Models\RepublicLeague;
 use Closure;
 
 class SaveAdminChampionRequest extends BaseApiRequest
@@ -16,12 +17,21 @@ class SaveAdminChampionRequest extends BaseApiRequest
     {
         parent::prepareForValidation();
 
+        $rawGrade = $this->input('grade_ar', $this->input('gradeAr'));
+        $normalizedGrade = is_string($rawGrade) && trim($rawGrade) !== ''
+            ? (RepublicLeague::normalizeGrade($rawGrade) ?? trim($rawGrade))
+            : null;
+
         $map = [
             'student_id' => $this->input('student_id', $this->input('studentId')),
+            'republic_league_id' => $this->input('republic_league_id', $this->input('republicLeagueId')),
+            'champion_uuid' => $this->input('champion_uuid', $this->input('championUuid')),
+            'source' => $this->input('source'),
             'name_ar' => $this->input('name_ar', $this->input('nameAr')),
             'name_en' => $this->input('name_en', $this->input('nameEn')),
             'title_ar' => $this->input('title_ar', $this->input('titleAr')),
             'title_en' => $this->input('title_en', $this->input('titleEn')),
+            'grade_ar' => $normalizedGrade,
             'month_ar' => $this->input('month_ar', $this->input('monthAr')),
             'month_en' => $this->input('month_en', $this->input('monthEn')),
             'school_ar' => $this->input('school_ar', $this->input('schoolAr')),
@@ -51,14 +61,20 @@ class SaveAdminChampionRequest extends BaseApiRequest
     public function rules(): array
     {
         $isUpdate = $this->isMethod('PUT') || $this->isMethod('PATCH');
-        $nameRule = $isUpdate ? ['sometimes', 'required', 'string', 'min:2', 'max:160'] : ['required', 'string', 'min:2', 'max:160'];
+        $nameRule = $isUpdate
+            ? ['sometimes', 'required', 'string', 'min:2', 'max:160']
+            : ['required', 'string', 'min:2', 'max:160'];
 
         return [
             'student_id' => ['nullable', 'integer', 'exists:users,id'],
+            'republic_league_id' => ['nullable', 'integer', 'exists:republic_leagues,id'],
+            'champion_uuid' => ['nullable', 'uuid'],
+            'source' => ['nullable', 'string', 'in:manual,republic_league'],
             'name_ar' => $nameRule,
             'name_en' => ['nullable', 'string', 'max:160'],
             'title_ar' => ['nullable', 'string', 'max:220'],
             'title_en' => ['nullable', 'string', 'max:220'],
+            'grade_ar' => ['nullable', 'string', 'max:100'],
             'month_ar' => ['nullable', 'string', 'max:120'],
             'month_en' => ['nullable', 'string', 'max:120'],
             'school_ar' => ['nullable', 'string', 'max:220'],
@@ -97,7 +113,7 @@ class SaveAdminChampionRequest extends BaseApiRequest
             return true;
         }
 
-        // Allow safe relative static asset paths (no directory traversal)
+        // Allow safe relative static asset & uploaded storage paths (no directory traversal)
         if (str_starts_with($trimmed, '/')) {
             return ! str_contains($trimmed, '..')
                 && preg_match('#^/(characters|images|storage|assets)/[A-Za-z0-9._\-/]+$#', $trimmed) === 1;

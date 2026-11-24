@@ -1470,7 +1470,8 @@ class StudentGamificationService extends BaseService
      */
     public function getGeneralLeaderboard(User $student): array
     {
-        $republicLeague = RepublicLeague::currentActive();
+        $studentGrade = StudentProfile::where('student_id', $student->id)->value('grade_ar');
+        $republicLeague = RepublicLeague::currentActive(is_string($studentGrade) ? $studentGrade : null);
 
         if (! $republicLeague) {
             return [
@@ -1732,7 +1733,8 @@ class StudentGamificationService extends BaseService
      */
     protected function buildGeneralLeagueSummary(User $student): array
     {
-        $republicLeague = RepublicLeague::currentActive();
+        $studentGrade = StudentProfile::where('student_id', $student->id)->value('grade_ar');
+        $republicLeague = RepublicLeague::currentActive(is_string($studentGrade) ? $studentGrade : null);
 
         if (! $republicLeague) {
             return [
@@ -1803,10 +1805,19 @@ class StudentGamificationService extends BaseService
      */
     protected function computeGeneralRankedStudents(User $currentStudent, RepublicLeague $republicLeague): array
     {
-        $activeStudents = User::query()
+        $studentsQuery = User::query()
             ->where('role', UserRole::STUDENT)
-            ->where('status', UserStatus::ACTIVE)
-            ->get(['id', 'name', 'avatar']);
+            ->where('status', UserStatus::ACTIVE);
+
+        if (! empty($republicLeague->grade_ar)) {
+            $aliases = RepublicLeague::aliasesForGrade((string) $republicLeague->grade_ar);
+            $studentsQuery->where(function ($q) use ($aliases, $currentStudent): void {
+                $q->whereHas('studentProfile', fn ($sp) => $sp->whereIn('grade_ar', $aliases))
+                    ->orWhere('id', $currentStudent->id);
+            });
+        }
+
+        $activeStudents = $studentsQuery->get(['id', 'name', 'avatar']);
 
         $studentIds = $activeStudents->pluck('id')->map(fn ($id) => (int) $id)->all();
         $metricsMap = $this->leagueRulesService->computeMetricsForStudents(
