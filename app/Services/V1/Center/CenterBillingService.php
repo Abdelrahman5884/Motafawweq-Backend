@@ -16,6 +16,7 @@ use App\Models\CenterSubscription;
 use App\Models\CenterTeacher;
 use App\Models\DiscountCoupon;
 use App\Models\GroupEnrollment;
+use App\Models\PlatformSubscriptionPlan;
 use App\Models\StudyGroup;
 use App\Models\User;
 use App\Services\BaseService;
@@ -57,7 +58,7 @@ class CenterBillingService extends BaseService
      */
     public function getPlansCatalog(): array
     {
-        return [
+        return PlatformSubscriptionPlan::overlayRoleCatalog('center', [
             [
                 'id' => 'plan-center-free',
                 'tier' => CenterPlanTier::FREE->value,
@@ -178,7 +179,7 @@ class CenterBillingService extends BaseService
                 'limitationsAr' => [],
                 'limitationsEn' => [],
             ],
-        ];
+        ]);
     }
 
     /**

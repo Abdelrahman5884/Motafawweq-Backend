@@ -10,6 +10,7 @@ use App\Enums\PaymentMethod;
 use App\Enums\StudentPlanTier;
 use App\Models\Course;
 use App\Models\DiscountCoupon;
+use App\Models\PlatformSubscriptionPlan;
 use App\Models\StudentDirectPayment;
 use App\Models\StudentInvoice;
 use App\Models\StudentSubscription;
@@ -56,7 +57,7 @@ class StudentBillingService extends BaseService
      */
     public function getPlansCatalog(): array
     {
-        return [
+        return PlatformSubscriptionPlan::overlayRoleCatalog('student', [
             [
                 'id' => 'plan-free',
                 'tier' => StudentPlanTier::FREE->value,
@@ -220,7 +221,7 @@ class StudentBillingService extends BaseService
                 'limitationsAr' => [],
                 'limitationsEn' => [],
             ],
-        ];
+        ]);
     }
 
     /**

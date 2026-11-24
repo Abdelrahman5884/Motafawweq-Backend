@@ -85,6 +85,48 @@ class AdminFinancialsPricingPayoutsAndCouponsTest extends TestCase
         $this->assertEquals(1630.0, (float) $res->json('data.gmvEgp'));
         // 630 subscriptions + 20% of 1000 direct = 830 EGP
         $this->assertEquals(830.0, (float) $res->json('data.platformCommissionEgp'));
+        $this->assertEquals(830.0, (float) $res->json('data.grossPlatformRevenueEgp'));
+
+        // Exact per-role revenue breakdown: Teacher = 150 sub + 200 comm = 350 | Student = 80 | Center = 400
+        $this->assertEquals(350.0, (float) $res->json('data.roleBreakdown.teacher.revenueEgp'));
+        $this->assertEquals(80.0, (float) $res->json('data.roleBreakdown.student.revenueEgp'));
+        $this->assertEquals(400.0, (float) $res->json('data.roleBreakdown.center.revenueEgp'));
+        $this->assertCount(3, $res->json('data.recentInvoices'));
+        $this->assertEquals(830.0, (float) $res->json('data.netProfitEgp'));
+
+        // Record manual cost with note -> immediately deducts from netProfitEgp
+        $expRes = $this->postJson('/api/v1/admin/financials/expenses', [
+            'title' => 'سيرفر استضافة سحابي <b>AWS</b>',
+            'category' => 'hosting',
+            'amountEgp' => 230,
+            'note' => 'فاتورة شهر نوفمبر للسيرفر الرئيسي وقاعدة البيانات',
+            'expenseDate' => now()->toDateString(),
+        ])->assertCreated()
+            ->assertJsonPath('data.amountEgp', 230)
+            ->assertJsonPath('data.note', 'فاتورة شهر نوفمبر للسيرفر الرئيسي وقاعدة البيانات');
+
+        $this->assertStringNotContainsString('<b>', (string) $expRes->json('data.title'));
+        $expUuid = (string) $expRes->json('data.id');
+
+        $afterExp = $this->getJson('/api/v1/admin/financials/overview')->assertOk();
+        $this->assertEquals(230.0, (float) $afterExp->json('data.manualExpensesEgp'));
+        $this->assertEquals(600.0, (float) $afterExp->json('data.netProfitEgp'));
+
+        // Update manual cost & note -> netProfitEgp updates live
+        $this->putJson("/api/v1/admin/financials/expenses/{$expUuid}", [
+            'amountEgp' => 330,
+            'note' => 'تحديث الفاتورة بعد إضافة مساحة النسخ الاحتياطي',
+        ])->assertOk()
+            ->assertJsonPath('data.amountEgp', 330)
+            ->assertJsonPath('data.note', 'تحديث الفاتورة بعد إضافة مساحة النسخ الاحتياطي');
+
+        $this->assertEquals(500.0, (float) $this->getJson('/api/v1/admin/financials/overview')->json('data.netProfitEgp'));
+
+        // Delete manual cost -> netProfitEgp returns to 830
+        $this->deleteJson("/api/v1/admin/financials/expenses/{$expUuid}")->assertOk();
+        $this->assertSoftDeleted('platform_expenses', ['uuid' => $expUuid]);
+        $this->assertEquals(830.0, (float) $this->getJson('/api/v1/admin/financials/overview')->json('data.netProfitEgp'));
+        $this->assertTrue(SecurityAuditLog::where('event', 'admin.expense.created')->exists());
     }
 
     public function test_subscription_plans_crud_reset_defaults_and_public_catalog(): void
@@ -92,9 +134,15 @@ class AdminFinancialsPricingPayoutsAndCouponsTest extends TestCase
         $admin = User::factory()->admin()->create();
         Sanctum::actingAs($admin, ['access']);
 
-        // First read auto-seeds 9 default plans (3 center, 3 teacher, 3 student)
+        // First read auto-seeds 9 default plans (3 center, 3 teacher, 3 student) with full features & 3-cycle prices
         $listRes = $this->getJson('/api/v1/admin/financials/plans')->assertOk();
         $this->assertCount(9, $listRes->json('data'));
+        $studentPlus = collect($listRes->json('data'))->firstWhere('slug', 'plan-student-plus');
+        $this->assertNotNull($studentPlus);
+        $this->assertEquals(50.0, (float) $studentPlus['priceEgp']);
+        $this->assertEquals(200.0, (float) $studentPlus['termPriceEgp']);
+        $this->assertEquals(350.0, (float) $studentPlus['annualPriceEgp']);
+        $this->assertGreaterThanOrEqual(5, count($studentPlus['featuresAr']));
 
         // Create custom VIP plan
         $createRes = $this->postJson('/api/v1/admin/financials/plans', [

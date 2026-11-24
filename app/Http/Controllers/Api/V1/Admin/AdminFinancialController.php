@@ -28,6 +28,77 @@ class AdminFinancialController extends BaseApiController
         );
     }
 
+    /* ── Manual Platform Expenses & Costs Ledger ── */
+
+    /**
+     * GET /api/v1/admin/financials/expenses
+     */
+    public function expenses(Request $request): JsonResponse
+    {
+        $result = $this->financialService->listExpenses([
+            'category' => $request->query('category'),
+            'search' => $request->query('search'),
+            'per_page' => $request->query('per_page', 50),
+        ]);
+
+        return $this->successResponse(
+            $result['items'],
+            'تم جلب سجل التكاليف والمصروفات بنجاح',
+            200,
+            array_merge($result['meta'], ['summary' => $result['summary']])
+        );
+    }
+
+    /**
+     * POST /api/v1/admin/financials/expenses
+     */
+    public function storeExpense(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:180'],
+            'category' => ['nullable', 'string', 'max:40'],
+            'amountEgp' => ['nullable', 'numeric', 'min:0.01', 'max:50000000'],
+            'amount_egp' => ['nullable', 'numeric', 'min:0.01', 'max:50000000'],
+            'note' => ['nullable', 'string', 'max:2000'],
+            'expenseDate' => ['nullable', 'date'],
+            'expense_date' => ['nullable', 'date'],
+        ]);
+
+        $expense = $this->financialService->createExpense($this->authenticatedUser(), $validated);
+
+        return $this->createdResponse($expense, 'تم تسجيل بند التكلفة وتحديث صافي الربح بنجاح');
+    }
+
+    /**
+     * PUT /api/v1/admin/financials/expenses/{uuid}
+     */
+    public function updateExpense(Request $request, string $uuid): JsonResponse
+    {
+        $validated = $request->validate([
+            'title' => ['sometimes', 'required', 'string', 'max:180'],
+            'category' => ['nullable', 'string', 'max:40'],
+            'amountEgp' => ['nullable', 'numeric', 'min:0.01', 'max:50000000'],
+            'amount_egp' => ['nullable', 'numeric', 'min:0.01', 'max:50000000'],
+            'note' => ['nullable', 'string', 'max:2000'],
+            'expenseDate' => ['nullable', 'date'],
+            'expense_date' => ['nullable', 'date'],
+        ]);
+
+        $expense = $this->financialService->updateExpense($this->authenticatedUser(), $uuid, $validated);
+
+        return $this->successResponse($expense, 'تم تحديث بند التكلفة وصافي الربح بنجاح');
+    }
+
+    /**
+     * DELETE /api/v1/admin/financials/expenses/{uuid}
+     */
+    public function destroyExpense(string $uuid): JsonResponse
+    {
+        $this->financialService->deleteExpense($this->authenticatedUser(), $uuid);
+
+        return $this->successResponse(null, 'تم حذف بند التكلفة وتحديث صافي الربح بنجاح');
+    }
+
     /* ── Subscription Plans ── */
 
     /**

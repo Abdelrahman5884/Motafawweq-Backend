@@ -99,4 +99,67 @@ class PlatformSubscriptionPlan extends Model
             'updatedAt' => $this->updated_at?->toIso8601String(),
         ];
     }
+
+    /**
+     * Overlay live database subscription plan names, badges, features, and prices onto a role's default catalog.
+     * Falls back cleanly to $defaultCatalog when `platform_subscription_plans` has no rows for $targetRole.
+     *
+     * @param  array<int, array<string, mixed>>  $defaultCatalog
+     * @return array<int, array<string, mixed>>
+     */
+    public static function overlayRoleCatalog(string $targetRole, array $defaultCatalog): array
+    {
+        $dbPlans = static::query()
+            ->where('target_role', $targetRole)
+            ->where('is_active', true)
+            ->orderBy('display_order')
+            ->get()
+            ->keyBy('tier_key');
+
+        if ($dbPlans->isEmpty()) {
+            return $defaultCatalog;
+        }
+
+        return array_values(array_map(function (array $card) use ($dbPlans): array {
+            $tier = (string) ($card['tier'] ?? '');
+            /** @var self|null $live */
+            $live = $dbPlans->get($tier);
+            if (! $live) {
+                return $card;
+            }
+
+            $monthly = (float) $live->price_egp;
+            $term = $live->term_price_egp !== null ? (float) $live->term_price_egp : round($monthly * 4, 2);
+            $annual = (float) $live->annual_price_egp;
+
+            $card['nameAr'] = $live->name_ar ?: $card['nameAr'];
+            $card['nameEn'] = $live->name_en ?: $card['nameEn'];
+            $card['popular'] = (bool) $live->is_popular;
+
+            if (is_array($live->features_ar) && ! empty($live->features_ar)) {
+                $card['featuresAr'] = array_values($live->features_ar);
+            }
+            if (is_array($live->features_en) && ! empty($live->features_en)) {
+                $card['featuresEn'] = array_values($live->features_en);
+            }
+
+            if (isset($card['pricing']['monthly'])) {
+                $card['pricing']['monthly']['priceEgp'] = $monthly;
+                if ($live->badge_ar) {
+                    $card['pricing']['monthly']['badgeAr'] = $live->badge_ar;
+                }
+                if ($live->badge_en) {
+                    $card['pricing']['monthly']['badgeEn'] = $live->badge_en;
+                }
+            }
+            if (isset($card['pricing']['term'])) {
+                $card['pricing']['term']['priceEgp'] = $term;
+            }
+            if (isset($card['pricing']['annual'])) {
+                $card['pricing']['annual']['priceEgp'] = $annual;
+            }
+
+            return $card;
+        }, $defaultCatalog));
+    }
 }

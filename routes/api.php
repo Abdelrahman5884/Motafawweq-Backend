@@ -527,10 +527,23 @@ Route::prefix('v1')->group(function () {
                         ->middleware('throttle:admin-write');
                 });
 
-                // Tab 5: Financials, Tier Pricing Plans, Payout Settlements & Discount Coupons
+                // Tab 5: Financials, Tier Pricing Plans, Manual Costs, Payout Settlements & Discount Coupons
                 Route::prefix('financials')->group(function () {
                     Route::get('/overview', [AdminFinancialController::class, 'overview'])
                         ->middleware('throttle:admin-read');
+
+                    Route::prefix('expenses')->group(function () {
+                        Route::get('/', [AdminFinancialController::class, 'expenses'])
+                            ->middleware('throttle:admin-read');
+                        Route::post('/', [AdminFinancialController::class, 'storeExpense'])
+                            ->middleware(['throttle:admin-financial', 'idempotent']);
+                        Route::put('/{uuid}', [AdminFinancialController::class, 'updateExpense'])
+                            ->whereUuid('uuid')
+                            ->middleware('throttle:admin-financial');
+                        Route::delete('/{uuid}', [AdminFinancialController::class, 'destroyExpense'])
+                            ->whereUuid('uuid')
+                            ->middleware('throttle:admin-financial');
+                    });
 
                     Route::prefix('plans')->group(function () {
                         Route::get('/', [AdminFinancialController::class, 'plans'])

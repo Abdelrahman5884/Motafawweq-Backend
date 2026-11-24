@@ -11,6 +11,7 @@ use App\Models\Course;
 use App\Models\DiscountCoupon;
 use App\Models\GroupEnrollment;
 use App\Models\Lesson;
+use App\Models\PlatformSubscriptionPlan;
 use App\Models\StudyGroup;
 use App\Models\TeacherInvoice;
 use App\Models\TeacherProfile;
@@ -62,7 +63,7 @@ class TeacherBillingService
      */
     public function getPlansCatalog(): array
     {
-        return [
+        return PlatformSubscriptionPlan::overlayRoleCatalog('teacher', [
             [
                 'id' => 'teacher-plan-free',
                 'tier' => TeacherPlanTier::FREE->value,
@@ -228,7 +229,7 @@ class TeacherBillingService
                 'limitationsAr' => [],
                 'limitationsEn' => [],
             ],
-        ];
+        ]);
     }
 
     /**
