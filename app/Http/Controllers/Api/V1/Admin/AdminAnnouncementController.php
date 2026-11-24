@@ -19,13 +19,21 @@ class AdminAnnouncementController extends BaseApiController
      */
     public function index(Request $request): JsonResponse
     {
-        $items = $this->announcementService->listAll([
+        $result = $this->announcementService->listAll([
             'audience' => $request->query('audience'),
             'priority' => $request->query('priority'),
             'active' => $request->query('active'),
+            'search' => $request->query('search'),
+            'page' => $request->query('page', 1),
+            'per_page' => $request->query('per_page', 15),
         ]);
 
-        return $this->successResponse($items, __('messages.admin.announcements_fetched'));
+        return $this->successResponse(
+            $result['items'],
+            __('messages.admin.announcements_fetched'),
+            200,
+            $result['meta']
+        );
     }
 
     /**

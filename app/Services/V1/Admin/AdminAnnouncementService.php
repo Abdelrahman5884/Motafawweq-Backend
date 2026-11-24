@@ -7,6 +7,8 @@ use App\Enums\AnnouncementPriority;
 use App\Models\PlatformAnnouncement;
 use App\Models\User;
 use App\Services\BaseService;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
 
 class AdminAnnouncementService extends BaseService
@@ -16,13 +18,17 @@ class AdminAnnouncementService extends BaseService
     ) {}
 
     /**
-     * List all platform announcements for admin management.
+     * List platform announcements for admin management with optional filters, search, and pagination.
      *
      * @param  array<string, mixed>  $filters
-     * @return list<array<string, mixed>>
+     * @return array{items: list<array<string, mixed>>, meta: array<string, mixed>}
      */
     public function listAll(array $filters = []): array
     {
+        $perPage = min(max((int) ($filters['per_page'] ?? 15), 1), 100);
+        $page = max((int) ($filters['page'] ?? 1), 1);
+        $search = isset($filters['search']) ? trim((string) $filters['search']) : null;
+
         $query = PlatformAnnouncement::query()->latest('id');
 
         if (! empty($filters['audience']) && in_array($filters['audience'], AnnouncementAudience::values(), true)) {
@@ -33,15 +39,43 @@ class AdminAnnouncementService extends BaseService
             $query->where('priority', $filters['priority']);
         }
 
-        if (isset($filters['active']) && $filters['active'] !== '') {
+        if (isset($filters['active']) && $filters['active'] !== '' && $filters['active'] !== 'all') {
             $query->where('is_active', filter_var($filters['active'], FILTER_VALIDATE_BOOLEAN));
         }
 
-        return $query->limit(200)
-            ->get()
-            ->map(fn (PlatformAnnouncement $a) => $a->toFrontendArray())
-            ->values()
-            ->all();
+        if ($search !== null && $search !== '') {
+            $safe = '%'.addcslashes($search, '%_\\').'%';
+            $query->where(function (Builder $q) use ($safe): void {
+                $q->where('title_ar', 'like', $safe)
+                    ->orWhere('title_en', 'like', $safe)
+                    ->orWhere('content_ar', 'like', $safe)
+                    ->orWhere('content_en', 'like', $safe);
+            });
+        }
+
+        /** @var LengthAwarePaginator $paginator */
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+
+        $summary = [
+            'total' => (int) PlatformAnnouncement::query()->count(),
+            'active' => (int) PlatformAnnouncement::query()->where('is_active', true)->count(),
+            'urgent' => (int) PlatformAnnouncement::query()->where('is_active', true)->where('priority', AnnouncementPriority::URGENT->value)->count(),
+        ];
+
+        return [
+            'items' => collect($paginator->items())
+                ->map(fn (PlatformAnnouncement $a) => $a->toFrontendArray())
+                ->values()
+                ->all(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+                'has_more' => $paginator->hasMorePages(),
+                'summary' => $summary,
+            ],
+        ];
     }
 
     /**

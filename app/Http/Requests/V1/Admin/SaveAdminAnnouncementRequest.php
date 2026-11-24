@@ -60,7 +60,7 @@ class SaveAdminAnnouncementRequest extends BaseApiRequest
             'priority' => ['sometimes', 'string', Rule::in(AnnouncementPriority::values())],
             'is_active' => ['sometimes', 'boolean'],
             'starts_at' => ['nullable', 'date'],
-            'expires_at' => ['nullable', 'date', 'after:starts_at'],
+            'expires_at' => ['nullable', 'date', $this->filled('starts_at') ? 'after:starts_at' : 'after:now'],
         ];
     }
 }
