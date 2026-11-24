@@ -49,9 +49,14 @@ class AdminUserController extends BaseApiController
 
     /**
      * GET /api/v1/admin/users/export
+     * Supports CSV (default for legacy compatibility) or Excel (.xlsx via ?format=xlsx).
      */
     public function exportCsv(Request $request): Response
     {
+        if (strtolower((string) $request->query('format')) === 'xlsx') {
+            return $this->exportExcel($request);
+        }
+
         $csv = $this->userService->exportUsersCsv($this->authenticatedUser(), [
             'search' => $request->query('search'),
             'role' => $request->query('role'),
@@ -61,6 +66,28 @@ class AdminUserController extends BaseApiController
         return response($csv, 200, [
             'Content-Type' => 'text/csv; charset=UTF-8',
             'Content-Disposition' => 'attachment; filename="motafawweq-users-'.now()->format('Y-m-d').'.csv"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    /**
+     * GET /api/v1/admin/users/export-excel
+     * Download a styled, RTL, multi-sheet Excel (.xlsx) workbook with users + subscription histories.
+     */
+    public function exportExcel(Request $request): Response
+    {
+        $binary = $this->userService->exportUsersExcel($this->authenticatedUser(), [
+            'search' => $request->query('search'),
+            'role' => $request->query('role'),
+            'status' => $request->query('status'),
+        ]);
+
+        $filename = 'motafawweq-users-'.now()->format('Y-m-d').'.xlsx';
+
+        return response($binary, 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            'Content-Length' => (string) strlen($binary),
             'X-Content-Type-Options' => 'nosniff',
         ]);
     }

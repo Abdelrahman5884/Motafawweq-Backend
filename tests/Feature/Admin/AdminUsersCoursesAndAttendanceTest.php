@@ -4,20 +4,27 @@ namespace Tests\Feature\Admin;
 
 use App\Enums\AttendanceRecordMethod;
 use App\Enums\AttendanceStatus;
+use App\Enums\BillingPeriod;
+use App\Enums\CenterPlanTier;
 use App\Enums\CourseStatus;
 use App\Enums\EnrollmentStatus;
+use App\Enums\StudentPlanTier;
+use App\Enums\TeacherPlanTier;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Enums\VerificationStatus;
 use App\Models\CenterProfile;
+use App\Models\CenterSubscription;
 use App\Models\Course;
 use App\Models\GroupAttendanceRecord;
 use App\Models\GroupAttendanceSession;
 use App\Models\GroupEnrollment;
 use App\Models\Lesson;
 use App\Models\SecurityAuditLog;
+use App\Models\StudentSubscription;
 use App\Models\StudyGroup;
 use App\Models\TeacherProfile;
+use App\Models\TeacherSubscription;
 use App\Models\User;
 use App\Notifications\Auth\ResetPasswordOtpNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -25,6 +32,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
+use ZipArchive;
 
 class AdminUsersCoursesAndAttendanceTest extends TestCase
 {
@@ -281,5 +289,137 @@ class AdminUsersCoursesAndAttendanceTest extends TestCase
         // Export CSV neutralizes formula characters
         $csvRes = $this->get('/api/v1/admin/attendance/gates/export')->assertOk();
         $this->assertStringContainsString("\"'+EVIL() كريم وائل\"", $csvRes->getContent());
+    }
+
+    public function test_admin_user_details_returns_full_subscription_history_and_native_excel_export_is_valid_and_safe(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        // Create a student with BOTH an active Pro plan and an older expired Plus plan
+        $student = User::factory()->create([
+            'name' => '=HYPERLINK("http://evil.test","خالد الطالب")',
+            'email' => 'khaled.subs@motafawweq.test',
+            'role' => UserRole::STUDENT,
+            'status' => UserStatus::ACTIVE,
+        ]);
+
+        StudentSubscription::create([
+            'student_id' => $student->id,
+            'plan_tier' => StudentPlanTier::PLUS->value,
+            'plan_name_ar' => 'باقة الطالب بلس',
+            'plan_name_en' => 'Student Plus',
+            'billing_period' => BillingPeriod::MONTHLY->value,
+            'amount_egp' => 150,
+            'starts_at' => now()->subDays(60),
+            'renews_at' => now()->subDays(30),
+            'status' => 'expired',
+        ]);
+
+        StudentSubscription::create([
+            'student_id' => $student->id,
+            'plan_tier' => StudentPlanTier::PRO->value,
+            'plan_name_ar' => 'باقة الطالب برو',
+            'plan_name_en' => 'Student Pro',
+            'billing_period' => BillingPeriod::ANNUAL->value,
+            'amount_egp' => 1200,
+            'starts_at' => now()->subDays(10),
+            'renews_at' => now()->addDays(355),
+            'status' => 'active',
+        ]);
+
+        // Create a teacher with an active Pro subscription
+        $teacher = User::factory()->create([
+            'name' => 'أ. محمود المعلم',
+            'role' => UserRole::TEACHER,
+            'status' => UserStatus::ACTIVE,
+        ]);
+        TeacherSubscription::create([
+            'teacher_id' => $teacher->id,
+            'plan_tier' => TeacherPlanTier::PRO->value,
+            'plan_name_ar' => 'باقة المعلم برو',
+            'plan_name_en' => 'Teacher Pro',
+            'billing_period' => BillingPeriod::MONTHLY->value,
+            'amount_egp' => 599,
+            'starts_at' => now()->subDays(5),
+            'renews_at' => now()->addDays(25),
+            'status' => 'active',
+        ]);
+
+        // Create a center with an active Plus subscription
+        $center = User::factory()->center()->create(['status' => UserStatus::ACTIVE]);
+        CenterSubscription::create([
+            'center_id' => $center->id,
+            'plan_tier' => CenterPlanTier::PLUS->value,
+            'plan_name_ar' => 'باقة السنتر بلس',
+            'plan_name_en' => 'Center Plus',
+            'billing_period' => BillingPeriod::MONTHLY->value,
+            'amount_egp' => 1500,
+            'starts_at' => now()->subDays(2),
+            'renews_at' => now()->addDays(28),
+            'status' => 'active',
+        ]);
+
+        // Non-admin cannot download Excel export
+        Sanctum::actingAs($student, ['access']);
+        $this->get('/api/v1/admin/users/export-excel')->assertStatus(403);
+
+        // Admin checks full student details -> gets BOTH subscriptions with start & expiry dates
+        Sanctum::actingAs($admin, ['access']);
+        $detailsRes = $this->getJson("/api/v1/admin/users/{$student->id}")
+            ->assertOk()
+            ->assertJsonPath('data.subscriptionsSummary.totalCount', 2)
+            ->assertJsonPath('data.subscriptionsSummary.activeCount', 1)
+            ->assertJsonPath('data.subscriptionsSummary.expiredCount', 1)
+            ->assertJsonPath('data.subscriptionsSummary.totalSpentEgp', 1350)
+            ->assertJsonPath('data.activeSubscription.planTier', 'pro');
+
+        $subs = $detailsRes->json('data.subscriptions');
+        $this->assertCount(2, $subs);
+        $this->assertNotEmpty($subs[0]['startsDate']);
+        $this->assertNotEmpty($subs[0]['endsDate']);
+        $this->assertGreaterThan(300, $subs[0]['daysRemaining']);
+        $this->assertSame('expired', $subs[1]['status']);
+
+        // Teacher & Center details return their subscriptions too
+        $this->getJson("/api/v1/admin/users/{$teacher->id}")
+            ->assertOk()
+            ->assertJsonPath('data.subscriptions.0.planNameAr', 'باقة المعلم برو');
+
+        $this->getJson("/api/v1/admin/users/{$center->id}")
+            ->assertOk()
+            ->assertJsonPath('data.subscriptions.0.planNameAr', 'باقة السنتر بلس');
+
+        // Users list includes currentSubscription cleanly
+        $listRes = $this->getJson('/api/v1/admin/users?role=student')->assertOk();
+        $this->assertSame('pro', $listRes->json('data.0.currentSubscription.planTier'));
+        $this->assertSame(2, $listRes->json('data.0.subscriptionsCount'));
+
+        // Export Excel (.xlsx) returns a genuine multi-sheet RTL workbook with formula neutralization
+        $excelRes = $this->get('/api/v1/admin/users/export-excel')->assertOk();
+        $this->assertStringContainsString(
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            (string) $excelRes->headers->get('Content-Type')
+        );
+
+        $binary = (string) $excelRes->getContent();
+        $this->assertStringStartsWith("PK\x03\x04", $binary);
+
+        $tmp = tempnam(sys_get_temp_dir(), 'test_xlsx_');
+        file_put_contents($tmp, $binary);
+
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($tmp) === true);
+        $sheet1 = (string) $zip->getFromName('xl/worksheets/sheet1.xml');
+        $sheet2 = (string) $zip->getFromName('xl/worksheets/sheet2.xml');
+        $zip->close();
+        @unlink($tmp);
+
+        $this->assertStringContainsString('rightToLeft="1"', $sheet1);
+        $this->assertStringContainsString('&apos;=HYPERLINK(', $sheet1); // Formula neutralized & XML-escaped!
+        $this->assertStringContainsString('باقة الطالب برو', $sheet1);
+        $this->assertStringContainsString('باقة الطالب بلس', $sheet2);
+        $this->assertStringContainsString('باقة المعلم برو', $sheet2);
+        $this->assertStringContainsString('باقة السنتر بلس', $sheet2);
+        $this->assertTrue(SecurityAuditLog::where('event', 'admin.users.exported_excel')->exists());
     }
 }

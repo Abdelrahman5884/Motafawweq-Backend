@@ -2,6 +2,7 @@
 
 namespace App\Services\V1\Admin;
 
+use App\Enums\BillingPeriod;
 use App\Enums\DirectPaymentStatus;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
@@ -9,19 +10,25 @@ use App\Enums\VerificationCodeType;
 use App\Enums\VerificationStatus;
 use App\Models\CenterBranch;
 use App\Models\CenterProfile;
+use App\Models\CenterSubscription;
 use App\Models\StoredFile;
 use App\Models\StudentDirectPayment;
 use App\Models\StudentProfile;
+use App\Models\StudentSubscription;
 use App\Models\TeacherProfile;
+use App\Models\TeacherSubscription;
 use App\Models\User;
 use App\Notifications\Auth\ResetPasswordOtpNotification;
 use App\Repositories\Contracts\UserRepositoryInterface;
 use App\Services\BaseService;
 use App\Services\V1\Auth\OtpService;
 use App\Services\V1\Auth\TokenService;
+use App\Support\ExcelWorkbookBuilder;
+use Carbon\Carbon;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -81,8 +88,15 @@ class AdminUserService extends BaseService
         /** @var LengthAwarePaginator $paginator */
         $paginator = $query->paginate($perPage);
 
-        $items = collect($paginator->items())
-            ->map(fn (User $u) => $this->formatUserRow($u, false))
+        $pageUsers = collect($paginator->items());
+        $subscriptionsByUser = $this->loadSubscriptionsBatch($pageUsers);
+
+        $items = $pageUsers
+            ->map(function (User $u) use ($subscriptionsByUser): array {
+                $userSubs = $subscriptionsByUser[$u->id] ?? [];
+
+                return $this->formatUserRow($u, false, $userSubs);
+            })
             ->values()
             ->all();
 
@@ -94,6 +108,8 @@ class AdminUserService extends BaseService
                 'per_page' => $paginator->perPage(),
                 'total' => $paginator->total(),
                 'last_page' => $paginator->lastPage(),
+                'from' => $paginator->firstItem() ?? 0,
+                'to' => $paginator->lastItem() ?? 0,
                 'has_more' => $paginator->hasMorePages(),
             ],
         ];
@@ -195,13 +211,19 @@ class AdminUserService extends BaseService
                 ->sum('amount_egp');
         }
 
-        $row = $this->formatUserRow($user, true);
+        $subscriptions = $this->loadAllSubscriptionsForUser($user);
+        $subscriptionsSummary = $this->summarizeSubscriptions($subscriptions);
+
+        $row = $this->formatUserRow($user, true, $subscriptions);
         $row['activeSessionsCount'] = $activeSessionsCount;
         $row['recentLogins'] = $recentLogins;
         $row['walletBalance'] = round($walletBalance, 2);
         $row['isLocked'] = $user->isLocked();
         $row['emailVerified'] = $user->hasVerifiedEmail();
         $row['lastLoginIp'] = $user->last_login_ip;
+        $row['subscriptions'] = $subscriptions;
+        $row['activeSubscription'] = $this->pickActiveSubscription($subscriptions);
+        $row['subscriptionsSummary'] = $subscriptionsSummary;
         $row['linkedChildren'] = $user->isParent()
             ? $user->children->map(fn (User $c) => [
                 'id' => $c->id,
@@ -806,6 +828,159 @@ class AdminUserService extends BaseService
     }
 
     /**
+     * Export filtered users & complete subscription history as a styled, RTL, formula-safe Excel (.xlsx) workbook.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function exportUsersExcel(User $admin, array $filters = []): string
+    {
+        $role = $this->normalizeRoleFilter($filters['role'] ?? null);
+        $status = isset($filters['status']) ? strtolower(trim((string) $filters['status'])) : null;
+        $search = isset($filters['search']) ? trim((string) $filters['search']) : null;
+
+        $query = User::query()
+            ->with(['studentProfile', 'teacherProfile', 'centerProfile'])
+            ->latest('id');
+
+        if ($role !== null && $role !== 'all') {
+            $query->where('role', $role);
+        }
+        if ($status !== null && $status !== '' && $status !== 'all') {
+            $this->applyStatusFilter($query, $status);
+        }
+        if ($search !== null && $search !== '') {
+            $safe = addcslashes($search, '%_\\');
+            $nidHash = User::blindIndexNationalId($search);
+            $query->where(function (Builder $q) use ($safe, $nidHash): void {
+                $q->where('name', 'like', "%{$safe}%")
+                    ->orWhere('email', 'like', "%{$safe}%")
+                    ->orWhere('phone', 'like', "%{$safe}%")
+                    ->orWhere('student_code', 'like', "%{$safe}%")
+                    ->orWhere('national_id_hash', $nidHash);
+            });
+        }
+
+        $users = $query->limit(3000)->get();
+        $subscriptionsByUser = $this->loadSubscriptionsBatch($users);
+
+        $roleAr = static fn (?UserRole $r): string => match ($r) {
+            UserRole::STUDENT => 'طالب',
+            UserRole::TEACHER => 'معلم',
+            UserRole::PARENT => 'ولي أمر',
+            UserRole::CENTER => 'سنتر تعليمي',
+            UserRole::ADMIN => 'مشرف المنصة',
+            default => '',
+        };
+
+        $effectiveStatusAr = static fn (string $st): string => match ($st) {
+            'verified' => 'موثق ومعتمد',
+            'pending_verification' => 'بانتظار الاعتماد',
+            'suspended' => 'حساب مجمد',
+            default => 'نشط',
+        };
+
+        $subStatusAr = static fn (string $st): string => match ($st) {
+            'active' => 'نشط',
+            'expired' => 'منتهي',
+            'cancelled' => 'ملغي',
+            'pending' => 'قيد الانتظار',
+            default => $st,
+        };
+
+        $userHeaders = [
+            'ID',
+            'الاسم',
+            'البريد الإلكتروني',
+            'الهاتف',
+            'الدور',
+            'حالة الحساب',
+            'كود الطالب',
+            'الرقم القومي (مقنّع)',
+            'الباقة الحالية',
+            'حالة الاشتراك',
+            'بداية الباقة',
+            'انتهاء الباقة',
+            'المتبقي (يوم)',
+            'إجمالي الاشتراكات',
+            'تاريخ الانضمام',
+        ];
+
+        $userRows = [];
+        $subscriptionRows = [];
+
+        foreach ($users as $u) {
+            $userSubs = $subscriptionsByUser[$u->id] ?? [];
+            $currentSub = $this->pickActiveSubscription($userSubs) ?? ($userSubs[0] ?? null);
+            $effectiveStatus = $this->resolveEffectiveStatus($u);
+
+            $userRows[] = [
+                (int) $u->id,
+                $u->name,
+                $u->email,
+                $u->phone ?? '',
+                $roleAr($u->role),
+                $effectiveStatusAr($effectiveStatus),
+                $u->student_code ?? '',
+                $u->maskedNationalId() ?? '',
+                $currentSub ? $currentSub['planNameAr'] : 'الباقة المجانية',
+                $currentSub ? $subStatusAr($currentSub['status']) : 'مجاني',
+                $currentSub['startsDate'] ?? '—',
+                $currentSub['endsDate'] ?? '—',
+                $currentSub ? (int) $currentSub['daysRemaining'] : 0,
+                count($userSubs),
+                $u->created_at?->toDateString() ?? '',
+            ];
+
+            foreach ($userSubs as $sub) {
+                $subscriptionRows[] = [
+                    (int) $u->id,
+                    $u->name,
+                    $u->email,
+                    $roleAr($u->role),
+                    $sub['planNameAr'],
+                    strtoupper((string) $sub['planTier']),
+                    $sub['billingPeriodLabelAr'],
+                    (float) $sub['amountEgp'],
+                    $subStatusAr($sub['status']),
+                    $sub['startsDate'] ?? '—',
+                    $sub['endsDate'] ?? '—',
+                    (int) $sub['daysRemaining'],
+                ];
+            }
+        }
+
+        $subHeaders = [
+            'رقم المستخدم',
+            'اسم المستخدم',
+            'البريد الإلكتروني',
+            'الدور',
+            'اسم الباقة',
+            'الفئة',
+            'دورة الفوترة',
+            'المبلغ (ج.م)',
+            'حالة الاشتراك',
+            'تاريخ الاشتراك',
+            'تاريخ الانتهاء',
+            'الأيام المتبقية',
+        ];
+
+        $workbook = (new ExcelWorkbookBuilder)
+            ->addSheet('المستخدمون', $userHeaders, $userRows, true)
+            ->addSheet('سجل الباقات والاشتراكات', $subHeaders, $subscriptionRows, true);
+
+        $binary = $workbook->buildBinary();
+
+        $this->logSecurityEvent('admin.users.exported_excel', [
+            'admin_id' => $admin->id,
+            'exported_users_count' => $users->count(),
+            'exported_subscriptions_count' => count($subscriptionRows),
+            'filters' => array_filter(['role' => $role, 'status' => $status]),
+        ], 'warning');
+
+        return $binary;
+    }
+
+    /**
      * SECURITY GUARD: Prevents an admin from modifying, suspending, deleting, or resetting themselves or peer admins.
      *
      * @throws AuthorizationException
@@ -834,9 +1009,12 @@ class AdminUserService extends BaseService
             ->pluck('total', 'role')
             ->all();
 
-        $pendingStatusCount = (int) User::query()->where('status', UserStatus::PENDING->value)->count();
-        $pendingTeacherCount = (int) TeacherProfile::query()
-            ->where('verification_status', VerificationStatus::PENDING->value)
+        $pendingVerifications = (int) User::query()
+            ->where(function (Builder $q): void {
+                $q->where('status', UserStatus::PENDING->value)
+                    ->orWhereHas('teacherProfile', fn (Builder $tp) => $tp->where('verification_status', VerificationStatus::PENDING->value))
+                    ->orWhereHas('centerProfile', fn (Builder $cp) => $cp->where('is_verified_center', false));
+            })
             ->count();
         $suspendedCount = (int) User::query()->where('status', UserStatus::SUSPENDED->value)->count();
 
@@ -853,7 +1031,7 @@ class AdminUserService extends BaseService
             'parents' => $parents,
             'centers' => $centers,
             'admins' => $admins,
-            'pendingVerifications' => max($pendingStatusCount, $pendingTeacherCount),
+            'pendingVerifications' => $pendingVerifications,
             'suspended' => $suspendedCount,
         ];
     }
@@ -881,7 +1059,8 @@ class AdminUserService extends BaseService
         if ($status === 'pending' || $status === 'pending_verification') {
             $query->where(function (Builder $q): void {
                 $q->where('status', UserStatus::PENDING->value)
-                    ->orWhereHas('teacherProfile', fn (Builder $tp) => $tp->where('verification_status', VerificationStatus::PENDING->value));
+                    ->orWhereHas('teacherProfile', fn (Builder $tp) => $tp->where('verification_status', VerificationStatus::PENDING->value))
+                    ->orWhereHas('centerProfile', fn (Builder $cp) => $cp->where('is_verified_center', false));
             });
         } elseif ($status === 'verified') {
             $query->where('status', UserStatus::ACTIVE->value)
@@ -938,11 +1117,273 @@ class AdminUserService extends BaseService
     }
 
     /**
-     * Format user row cleanly matching AdminUsersManager.jsx while keeping PII masked in list views.
+     * Batch-load all subscription rows for a collection of users in at most 3 indexed queries (zero N+1).
+     *
+     * @param  Collection<int, User>  $users
+     * @return array<int, list<array<string, mixed>>>
+     */
+    protected function loadSubscriptionsBatch(Collection $users): array
+    {
+        $studentIds = $users->filter(fn (User $u) => $u->isStudent())->pluck('id')->all();
+        $teacherIds = $users->filter(fn (User $u) => $u->isTeacher())->pluck('id')->all();
+        $centerIds = $users->filter(fn (User $u) => $u->isCenter())->pluck('id')->all();
+
+        $map = [];
+
+        if (! empty($studentIds)) {
+            $subs = StudentSubscription::query()
+                ->whereIn('student_id', $studentIds)
+                ->orderByDesc('starts_at')
+                ->orderByDesc('id')
+                ->get();
+
+            foreach ($subs as $sub) {
+                $map[(int) $sub->student_id][] = $this->formatSubscriptionRecord($sub, 'student');
+            }
+        }
+
+        if (! empty($teacherIds)) {
+            $subs = TeacherSubscription::query()
+                ->whereIn('teacher_id', $teacherIds)
+                ->orderByDesc('starts_at')
+                ->orderByDesc('id')
+                ->get();
+
+            foreach ($subs as $sub) {
+                $map[(int) $sub->teacher_id][] = $this->formatSubscriptionRecord($sub, 'teacher');
+            }
+        }
+
+        if (! empty($centerIds)) {
+            $subs = CenterSubscription::query()
+                ->whereIn('center_id', $centerIds)
+                ->orderByDesc('starts_at')
+                ->orderByDesc('id')
+                ->get();
+
+            foreach ($subs as $sub) {
+                $map[(int) $sub->center_id][] = $this->formatSubscriptionRecord($sub, 'center');
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * Load complete subscription history for a single user (including linked children's plans for parent accounts).
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function loadAllSubscriptionsForUser(User $user): array
+    {
+        if ($user->isStudent()) {
+            return StudentSubscription::query()
+                ->where('student_id', $user->id)
+                ->orderByDesc('starts_at')
+                ->orderByDesc('id')
+                ->get()
+                ->map(fn (StudentSubscription $s) => $this->formatSubscriptionRecord($s, 'student'))
+                ->values()
+                ->all();
+        }
+
+        if ($user->isTeacher()) {
+            return TeacherSubscription::query()
+                ->where('teacher_id', $user->id)
+                ->orderByDesc('starts_at')
+                ->orderByDesc('id')
+                ->get()
+                ->map(fn (TeacherSubscription $s) => $this->formatSubscriptionRecord($s, 'teacher'))
+                ->values()
+                ->all();
+        }
+
+        if ($user->isCenter()) {
+            return CenterSubscription::query()
+                ->where('center_id', $user->id)
+                ->orderByDesc('starts_at')
+                ->orderByDesc('id')
+                ->get()
+                ->map(fn (CenterSubscription $s) => $this->formatSubscriptionRecord($s, 'center'))
+                ->values()
+                ->all();
+        }
+
+        if ($user->isParent()) {
+            $childrenById = $user->relationLoaded('children')
+                ? $user->children->keyBy('id')
+                : $user->children()->get(['id', 'name', 'student_code'])->keyBy('id');
+
+            if ($childrenById->isEmpty()) {
+                return [];
+            }
+
+            return StudentSubscription::query()
+                ->whereIn('student_id', $childrenById->keys()->all())
+                ->orderByDesc('starts_at')
+                ->orderByDesc('id')
+                ->get()
+                ->map(function (StudentSubscription $s) use ($childrenById): array {
+                    $child = $childrenById->get($s->student_id);
+
+                    return $this->formatSubscriptionRecord(
+                        $s,
+                        'student',
+                        $child?->name,
+                        $child?->student_code
+                    );
+                })
+                ->values()
+                ->all();
+        }
+
+        return [];
+    }
+
+    /**
+     * Normalize StudentSubscription / TeacherSubscription / CenterSubscription into a single clean DTO.
      *
      * @return array<string, mixed>
      */
-    protected function formatUserRow(User $u, bool $includeDetailedPii): array
+    protected function formatSubscriptionRecord(
+        StudentSubscription|TeacherSubscription|CenterSubscription $sub,
+        string $scopeRole,
+        ?string $ownerName = null,
+        ?string $ownerCode = null
+    ): array {
+        $tierEnum = $sub->plan_tier;
+        $tierValue = is_object($tierEnum) ? (string) $tierEnum->value : strtolower((string) ($tierEnum ?? 'free'));
+
+        $periodEnum = $sub->billing_period instanceof BillingPeriod
+            ? $sub->billing_period
+            : (BillingPeriod::tryFrom((string) $sub->billing_period) ?? BillingPeriod::MONTHLY);
+
+        $periodEn = match ($periodEnum) {
+            BillingPeriod::ANNUAL => 'Annual',
+            BillingPeriod::TERM => 'Term / Half-Year',
+            default => 'Monthly',
+        };
+
+        $startsAt = $sub->starts_at ? Carbon::parse($sub->starts_at) : ($sub->created_at ? Carbon::parse($sub->created_at) : null);
+        $endsAt = $sub->renews_at ? Carbon::parse($sub->renews_at) : null;
+        $cancelledAt = isset($sub->cancelled_at) && $sub->cancelled_at ? Carbon::parse($sub->cancelled_at) : null;
+
+        $rawStatus = strtolower(trim((string) ($sub->status ?: 'active')));
+        $now = Carbon::now();
+
+        if ($cancelledAt !== null || $rawStatus === 'cancelled' || $rawStatus === 'canceled') {
+            $effectiveStatus = 'cancelled';
+        } elseif ($rawStatus === 'expired' || ($endsAt !== null && $endsAt->isPast() && $tierValue !== 'free')) {
+            $effectiveStatus = 'expired';
+        } elseif ($rawStatus === 'pending') {
+            $effectiveStatus = 'pending';
+        } else {
+            $effectiveStatus = 'active';
+        }
+
+        $totalDays = ($startsAt && $endsAt && $endsAt->gt($startsAt))
+            ? max(1, (int) ceil($startsAt->diffInHours($endsAt) / 24))
+            : $periodEnum->durationDays();
+
+        $daysRemaining = 0;
+        if ($effectiveStatus === 'active' && $endsAt !== null && $endsAt->isFuture()) {
+            $daysRemaining = max(1, (int) ceil($now->diffInHours($endsAt, false) / 24));
+        }
+
+        $daysElapsed = 0;
+        if ($startsAt !== null) {
+            $refEnd = ($effectiveStatus === 'active') ? $now : ($cancelledAt ?? $endsAt ?? $now);
+            $daysElapsed = min($totalDays, max(0, (int) floor(max(0, $startsAt->diffInSeconds($refEnd, false)) / 86400)));
+        }
+
+        $progressPercent = $effectiveStatus === 'active'
+            ? ($endsAt ? min(100, max(0, (int) round(($daysElapsed / max(1, $totalDays)) * 100))) : 0)
+            : 100;
+
+        $defaultNameAr = method_exists($tierEnum, 'labelAr') ? $tierEnum->labelAr() : strtoupper($tierValue);
+        $defaultNameEn = method_exists($tierEnum, 'labelEn') ? $tierEnum->labelEn() : strtoupper($tierValue);
+
+        return [
+            'id' => (string) ($sub->uuid ?? "{$scopeRole}-sub-{$sub->id}"),
+            'scopeRole' => $scopeRole,
+            'ownerName' => $ownerName,
+            'ownerCode' => $ownerCode,
+            'planTier' => $tierValue,
+            'planNameAr' => $sub->plan_name_ar ?: $defaultNameAr,
+            'planNameEn' => $sub->plan_name_en ?: $defaultNameEn,
+            'billingPeriod' => $periodEnum->value,
+            'billingPeriodLabelAr' => $periodEnum->label(),
+            'billingPeriodLabelEn' => $periodEn,
+            'amountEgp' => round((float) ($sub->amount_egp ?? 0), 2),
+            'status' => $effectiveStatus,
+            'isCurrent' => $effectiveStatus === 'active',
+            'startsAt' => $startsAt?->toIso8601String(),
+            'startsDate' => $startsAt?->toDateString(),
+            'endsAt' => $endsAt?->toIso8601String(),
+            'endsDate' => $endsAt?->toDateString(),
+            'cancelledAt' => $cancelledAt?->toIso8601String(),
+            'cancelledDate' => $cancelledAt?->toDateString(),
+            'totalDays' => $totalDays,
+            'daysElapsed' => $daysElapsed,
+            'daysRemaining' => $daysRemaining,
+            'progressPercent' => $progressPercent,
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $subscriptions
+     * @return array<string, mixed>|null
+     */
+    protected function pickActiveSubscription(array $subscriptions): ?array
+    {
+        foreach ($subscriptions as $sub) {
+            if (($sub['status'] ?? '') === 'active') {
+                return $sub;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $subscriptions
+     * @return array{totalCount: int, activeCount: int, expiredCount: int, cancelledCount: int, totalSpentEgp: float}
+     */
+    protected function summarizeSubscriptions(array $subscriptions): array
+    {
+        $active = 0;
+        $expired = 0;
+        $cancelled = 0;
+        $spent = 0.0;
+
+        foreach ($subscriptions as $sub) {
+            $st = (string) ($sub['status'] ?? '');
+            if ($st === 'active') {
+                $active++;
+            } elseif ($st === 'expired') {
+                $expired++;
+            } elseif ($st === 'cancelled') {
+                $cancelled++;
+            }
+            $spent += (float) ($sub['amountEgp'] ?? 0);
+        }
+
+        return [
+            'totalCount' => count($subscriptions),
+            'activeCount' => $active,
+            'expiredCount' => $expired,
+            'cancelledCount' => $cancelled,
+            'totalSpentEgp' => round($spent, 2),
+        ];
+    }
+
+    /**
+     * Format user row cleanly matching AdminUsersManager.jsx while keeping PII masked in list views.
+     *
+     * @param  list<array<string, mixed>>  $userSubscriptions
+     * @return array<string, mixed>
+     */
+    protected function formatUserRow(User $u, bool $includeDetailedPii, array $userSubscriptions = []): array
     {
         $sp = $u->studentProfile;
         $tp = $u->teacherProfile;
@@ -958,6 +1399,8 @@ class AdminUserService extends BaseService
                 $detailsAr = implode(' - ', array_filter([$cp->name_ar, $cp->address_ar]));
             }
         }
+
+        $currentSub = $this->pickActiveSubscription($userSubscriptions) ?? ($userSubscriptions[0] ?? null);
 
         return [
             'id' => $u->id,
@@ -986,6 +1429,8 @@ class AdminUserService extends BaseService
             'enrolledCourses' => (int) ($u->isTeacher() ? ($u->courses_count ?? 0) : ($u->group_enrollments_count ?? 0)),
             'linkedStudents' => $u->isParent() ? (int) ($u->children_count ?? 0) : null,
             'hallsCount' => $u->isCenter() ? (int) ($u->center_rooms_count ?? 0) : null,
+            'currentSubscription' => $currentSub,
+            'subscriptionsCount' => count($userSubscriptions),
             'joinDate' => $u->created_at?->toDateString(),
             'lastLoginAt' => $u->last_login_at?->toIso8601String(),
         ];

@@ -428,6 +428,8 @@ Route::prefix('v1')->group(function () {
                         ->middleware('throttle:admin-read');
                     Route::get('/export', [AdminUserController::class, 'exportCsv'])
                         ->middleware('throttle:admin-sensitive');
+                    Route::get('/export-excel', [AdminUserController::class, 'exportExcel'])
+                        ->middleware('throttle:admin-sensitive');
                     Route::post('/', [AdminUserController::class, 'store'])
                         ->middleware(['throttle:admin-write', 'idempotent']);
                     Route::get('/{id}', [AdminUserController::class, 'show'])
