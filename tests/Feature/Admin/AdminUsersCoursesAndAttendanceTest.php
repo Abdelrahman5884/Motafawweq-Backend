@@ -128,7 +128,7 @@ class AdminUsersCoursesAndAttendanceTest extends TestCase
         $this->getJson("/api/v1/admin/users/{$teacherId}")
             ->assertOk()
             ->assertJsonStructure([
-                'data' => ['id', 'name', 'email', 'activeSessionsCount', 'recentLogins', 'walletBalance'],
+                'data' => ['id', 'name', 'email', 'activeSessionsCount', 'recentLogins', 'subscriptions', 'subscriptionsSummary'],
             ]);
 
         $this->deleteJson("/api/v1/admin/users/{$teacherId}")->assertOk();
@@ -295,12 +295,20 @@ class AdminUsersCoursesAndAttendanceTest extends TestCase
     {
         $admin = User::factory()->admin()->create();
 
-        // Create a student with BOTH an active Pro plan and an older expired Plus plan
+        // Create a student with an older superseded Plus plan, an expired plan, AND a single active Pro plan
         $student = User::factory()->create([
             'name' => '=HYPERLINK("http://evil.test","خالد الطالب")',
             'email' => 'khaled.subs@motafawweq.test',
             'role' => UserRole::STUDENT,
             'status' => UserStatus::ACTIVE,
+            'avatar' => null,
+        ]);
+
+        $student->loginHistories()->create([
+            'email' => $student->email,
+            'status' => 'success',
+            'ip_address' => '192.168.1.50',
+            'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         ]);
 
         StudentSubscription::create([
@@ -310,9 +318,9 @@ class AdminUsersCoursesAndAttendanceTest extends TestCase
             'plan_name_en' => 'Student Plus',
             'billing_period' => BillingPeriod::MONTHLY->value,
             'amount_egp' => 150,
-            'starts_at' => now()->subDays(60),
-            'renews_at' => now()->subDays(30),
-            'status' => 'expired',
+            'starts_at' => now()->subDays(25),
+            'renews_at' => now()->addDays(5),
+            'status' => 'superseded',
         ]);
 
         StudentSubscription::create([
@@ -363,22 +371,31 @@ class AdminUsersCoursesAndAttendanceTest extends TestCase
         Sanctum::actingAs($student, ['access']);
         $this->get('/api/v1/admin/users/export-excel')->assertStatus(403);
 
-        // Admin checks full student details -> gets BOTH subscriptions with start & expiry dates
+        // Admin checks full student details -> ONLY ONE active subscription; previous plan is superseded
         Sanctum::actingAs($admin, ['access']);
         $detailsRes = $this->getJson("/api/v1/admin/users/{$student->id}")
             ->assertOk()
+            ->assertJsonMissingPath('data.walletBalance')
+            ->assertJsonPath('data.avatar', null)
+            ->assertJsonPath('data.recentLogins.0.deviceName', 'Chrome — Windows')
+            ->assertJsonMissingPath('data.recentLogins.0.ipAddress')
+            ->assertJsonMissingPath('data.recentLogins.0.status')
             ->assertJsonPath('data.subscriptionsSummary.totalCount', 2)
             ->assertJsonPath('data.subscriptionsSummary.activeCount', 1)
-            ->assertJsonPath('data.subscriptionsSummary.expiredCount', 1)
+            ->assertJsonPath('data.subscriptionsSummary.supersededCount', 1)
             ->assertJsonPath('data.subscriptionsSummary.totalSpentEgp', 1350)
             ->assertJsonPath('data.activeSubscription.planTier', 'pro');
 
         $subs = $detailsRes->json('data.subscriptions');
         $this->assertCount(2, $subs);
+        $this->assertSame('active', $subs[0]['status']);
+        $this->assertTrue($subs[0]['isCurrent']);
         $this->assertNotEmpty($subs[0]['startsDate']);
         $this->assertNotEmpty($subs[0]['endsDate']);
         $this->assertGreaterThan(300, $subs[0]['daysRemaining']);
-        $this->assertSame('expired', $subs[1]['status']);
+        $this->assertSame('superseded', $subs[1]['status']);
+        $this->assertFalse($subs[1]['isCurrent']);
+        $this->assertSame(0, $subs[1]['daysRemaining']);
 
         // Teacher & Center details return their subscriptions too
         $this->getJson("/api/v1/admin/users/{$teacher->id}")

@@ -3,7 +3,6 @@
 namespace App\Services\V1\Admin;
 
 use App\Enums\BillingPeriod;
-use App\Enums\DirectPaymentStatus;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Enums\VerificationCodeType;
@@ -12,7 +11,6 @@ use App\Models\CenterBranch;
 use App\Models\CenterProfile;
 use App\Models\CenterSubscription;
 use App\Models\StoredFile;
-use App\Models\StudentDirectPayment;
 use App\Models\StudentProfile;
 use App\Models\StudentSubscription;
 use App\Models\TeacherProfile;
@@ -193,23 +191,13 @@ class AdminUserService extends BaseService
         $recentLogins = $user->loginHistories()
             ->latest('created_at')
             ->limit(5)
-            ->get(['status', 'ip_address', 'user_agent', 'created_at'])
+            ->get(['user_agent', 'created_at'])
             ->map(fn ($h) => [
-                'status' => is_object($h->status) ? $h->status->value : (string) $h->status,
-                'ipAddress' => $h->ip_address,
-                'deviceName' => Str::limit((string) ($h->user_agent ?: 'Web'), 80),
+                'deviceName' => $this->parseFriendlyDeviceName($h->user_agent),
                 'createdAt' => $h->created_at?->toIso8601String(),
             ])
             ->values()
             ->all();
-
-        $walletBalance = 0.0;
-        if ($user->isTeacher()) {
-            $walletBalance = (float) StudentDirectPayment::query()
-                ->where('teacher_id', $user->id)
-                ->where('status', DirectPaymentStatus::CONFIRMED->value)
-                ->sum('amount_egp');
-        }
 
         $subscriptions = $this->loadAllSubscriptionsForUser($user);
         $subscriptionsSummary = $this->summarizeSubscriptions($subscriptions);
@@ -217,7 +205,6 @@ class AdminUserService extends BaseService
         $row = $this->formatUserRow($user, true, $subscriptions);
         $row['activeSessionsCount'] = $activeSessionsCount;
         $row['recentLogins'] = $recentLogins;
-        $row['walletBalance'] = round($walletBalance, 2);
         $row['isLocked'] = $user->isLocked();
         $row['emailVerified'] = $user->hasVerifiedEmail();
         $row['lastLoginIp'] = $user->last_login_ip;
@@ -881,6 +868,7 @@ class AdminUserService extends BaseService
 
         $subStatusAr = static fn (string $st): string => match ($st) {
             'active' => 'نشط',
+            'superseded' => 'تم استبدالها (باقة سابقة)',
             'expired' => 'منتهي',
             'cancelled' => 'ملغي',
             'pending' => 'قيد الانتظار',
@@ -1166,18 +1154,23 @@ class AdminUserService extends BaseService
             }
         }
 
+        foreach ($map as $uid => $list) {
+            $map[$uid] = $this->enforceSingleActiveSubscription($list);
+        }
+
         return $map;
     }
 
     /**
      * Load complete subscription history for a single user (including linked children's plans for parent accounts).
+     * Guarantees at most ONE active subscription per subscriber at any time.
      *
      * @return list<array<string, mixed>>
      */
     protected function loadAllSubscriptionsForUser(User $user): array
     {
         if ($user->isStudent()) {
-            return StudentSubscription::query()
+            $subs = StudentSubscription::query()
                 ->where('student_id', $user->id)
                 ->orderByDesc('starts_at')
                 ->orderByDesc('id')
@@ -1185,10 +1178,12 @@ class AdminUserService extends BaseService
                 ->map(fn (StudentSubscription $s) => $this->formatSubscriptionRecord($s, 'student'))
                 ->values()
                 ->all();
+
+            return $this->enforceSingleActiveSubscription($subs);
         }
 
         if ($user->isTeacher()) {
-            return TeacherSubscription::query()
+            $subs = TeacherSubscription::query()
                 ->where('teacher_id', $user->id)
                 ->orderByDesc('starts_at')
                 ->orderByDesc('id')
@@ -1196,10 +1191,12 @@ class AdminUserService extends BaseService
                 ->map(fn (TeacherSubscription $s) => $this->formatSubscriptionRecord($s, 'teacher'))
                 ->values()
                 ->all();
+
+            return $this->enforceSingleActiveSubscription($subs);
         }
 
         if ($user->isCenter()) {
-            return CenterSubscription::query()
+            $subs = CenterSubscription::query()
                 ->where('center_id', $user->id)
                 ->orderByDesc('starts_at')
                 ->orderByDesc('id')
@@ -1207,6 +1204,8 @@ class AdminUserService extends BaseService
                 ->map(fn (CenterSubscription $s) => $this->formatSubscriptionRecord($s, 'center'))
                 ->values()
                 ->all();
+
+            return $this->enforceSingleActiveSubscription($subs);
         }
 
         if ($user->isParent()) {
@@ -1218,7 +1217,7 @@ class AdminUserService extends BaseService
                 return [];
             }
 
-            return StudentSubscription::query()
+            $subs = StudentSubscription::query()
                 ->whereIn('student_id', $childrenById->keys()->all())
                 ->orderByDesc('starts_at')
                 ->orderByDesc('id')
@@ -1230,11 +1229,14 @@ class AdminUserService extends BaseService
                         $s,
                         'student',
                         $child?->name,
-                        $child?->student_code
+                        $child?->student_code,
+                        (int) $s->student_id
                     );
                 })
                 ->values()
                 ->all();
+
+            return $this->enforceSingleActiveSubscription($subs);
         }
 
         return [];
@@ -1249,7 +1251,8 @@ class AdminUserService extends BaseService
         StudentSubscription|TeacherSubscription|CenterSubscription $sub,
         string $scopeRole,
         ?string $ownerName = null,
-        ?string $ownerCode = null
+        ?string $ownerCode = null,
+        ?int $ownerId = null
     ): array {
         $tierEnum = $sub->plan_tier;
         $tierValue = is_object($tierEnum) ? (string) $tierEnum->value : strtolower((string) ($tierEnum ?? 'free'));
@@ -1271,14 +1274,18 @@ class AdminUserService extends BaseService
         $rawStatus = strtolower(trim((string) ($sub->status ?: 'active')));
         $now = Carbon::now();
 
-        if ($cancelledAt !== null || $rawStatus === 'cancelled' || $rawStatus === 'canceled') {
+        if ($rawStatus === 'superseded') {
+            $effectiveStatus = 'superseded';
+        } elseif ($cancelledAt !== null || $rawStatus === 'cancelled' || $rawStatus === 'canceled') {
             $effectiveStatus = 'cancelled';
         } elseif ($rawStatus === 'expired' || ($endsAt !== null && $endsAt->isPast() && $tierValue !== 'free')) {
             $effectiveStatus = 'expired';
         } elseif ($rawStatus === 'pending') {
             $effectiveStatus = 'pending';
-        } else {
+        } elseif ($rawStatus === 'active') {
             $effectiveStatus = 'active';
+        } else {
+            $effectiveStatus = 'expired';
         }
 
         $totalDays = ($startsAt && $endsAt && $endsAt->gt($startsAt))
@@ -1306,6 +1313,7 @@ class AdminUserService extends BaseService
         return [
             'id' => (string) ($sub->uuid ?? "{$scopeRole}-sub-{$sub->id}"),
             'scopeRole' => $scopeRole,
+            'ownerId' => $ownerId,
             'ownerName' => $ownerName,
             'ownerCode' => $ownerCode,
             'planTier' => $tierValue,
@@ -1331,6 +1339,92 @@ class AdminUserService extends BaseService
     }
 
     /**
+     * Guarantee that each subscriber (per ownerId) has at most ONE active package (newest wins; older active ones become superseded).
+     *
+     * @param  list<array<string, mixed>>  $subscriptions
+     * @return list<array<string, mixed>>
+     */
+    protected function enforceSingleActiveSubscription(array $subscriptions): array
+    {
+        $seenActiveByOwner = [];
+
+        foreach ($subscriptions as &$sub) {
+            $ownerKey = (string) ($sub['ownerId'] ?? 'self');
+            if (($sub['status'] ?? '') === 'active') {
+                if (isset($seenActiveByOwner[$ownerKey])) {
+                    $sub['status'] = 'superseded';
+                    $sub['isCurrent'] = false;
+                    $sub['daysRemaining'] = 0;
+                    $sub['progressPercent'] = 100;
+                } else {
+                    $seenActiveByOwner[$ownerKey] = true;
+                    $sub['isCurrent'] = true;
+                }
+            } else {
+                $sub['isCurrent'] = false;
+            }
+        }
+        unset($sub);
+
+        return $subscriptions;
+    }
+
+    /**
+     * Parse raw HTTP User-Agent string into a clean, concise device + browser label.
+     */
+    protected function parseFriendlyDeviceName(?string $userAgent): string
+    {
+        $ua = trim((string) $userAgent);
+        if ($ua === '') {
+            return 'متصفح ويب';
+        }
+
+        $lower = strtolower($ua);
+
+        $browser = match (true) {
+            str_contains($lower, 'edg/') || str_contains($lower, 'edge/') => 'Edge',
+            str_contains($lower, 'opr/') || str_contains($lower, 'opera') => 'Opera',
+            str_contains($lower, 'samsungbrowser') => 'Samsung Internet',
+            str_contains($lower, 'firefox/') || str_contains($lower, 'fxios') => 'Firefox',
+            str_contains($lower, 'chrome/') || str_contains($lower, 'crios') => 'Chrome',
+            str_contains($lower, 'safari/') => 'Safari',
+            str_contains($lower, 'postman') => 'Postman',
+            str_contains($lower, 'curl') => 'CLI Client',
+            default => null,
+        };
+
+        $device = match (true) {
+            str_contains($lower, 'iphone') => 'iPhone',
+            str_contains($lower, 'ipad') => 'iPad',
+            str_contains($lower, 'android') => 'Android',
+            str_contains($lower, 'windows') => 'Windows',
+            str_contains($lower, 'macintosh') || str_contains($lower, 'mac os') => 'Mac',
+            str_contains($lower, 'cros') => 'Chromebook',
+            str_contains($lower, 'linux') => 'Linux',
+            default => null,
+        };
+
+        if ($browser && $device) {
+            return "{$browser} — {$device}";
+        }
+
+        if ($device) {
+            return $device;
+        }
+
+        if ($browser) {
+            return $browser;
+        }
+
+        // If already a clean short custom device name (e.g. "iPhone 15 Pro"), return it cleanly
+        if (! str_contains($lower, 'mozilla/') && mb_strlen($ua) <= 36) {
+            return $ua;
+        }
+
+        return 'متصفح ويب';
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $subscriptions
      * @return array<string, mixed>|null
      */
@@ -1347,11 +1441,12 @@ class AdminUserService extends BaseService
 
     /**
      * @param  list<array<string, mixed>>  $subscriptions
-     * @return array{totalCount: int, activeCount: int, expiredCount: int, cancelledCount: int, totalSpentEgp: float}
+     * @return array{totalCount: int, activeCount: int, supersededCount: int, expiredCount: int, cancelledCount: int, totalSpentEgp: float}
      */
     protected function summarizeSubscriptions(array $subscriptions): array
     {
         $active = 0;
+        $superseded = 0;
         $expired = 0;
         $cancelled = 0;
         $spent = 0.0;
@@ -1360,6 +1455,8 @@ class AdminUserService extends BaseService
             $st = (string) ($sub['status'] ?? '');
             if ($st === 'active') {
                 $active++;
+            } elseif ($st === 'superseded') {
+                $superseded++;
             } elseif ($st === 'expired') {
                 $expired++;
             } elseif ($st === 'cancelled') {
@@ -1371,6 +1468,7 @@ class AdminUserService extends BaseService
         return [
             'totalCount' => count($subscriptions),
             'activeCount' => $active,
+            'supersededCount' => $superseded,
             'expiredCount' => $expired,
             'cancelledCount' => $cancelled,
             'totalSpentEgp' => round($spent, 2),
@@ -1411,7 +1509,7 @@ class AdminUserService extends BaseService
             'roleLabel' => $u->role?->label(),
             'email' => $u->email,
             'phone' => $u->phone,
-            'avatar' => $u->avatar,
+            'avatar' => $u->avatar ?: ($u->isCenter() ? $cp?->logo_url : null),
             'studentCode' => $u->student_code,
             'status' => $this->resolveEffectiveStatus($u),
             'accountStatus' => $u->status?->value,
