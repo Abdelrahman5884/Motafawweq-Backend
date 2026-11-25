@@ -86,19 +86,30 @@ class AdminSystemService extends BaseService
      */
     public function getSystemOverview(): array
     {
-        // 1. Live Database Health, Latency & Real Connection Limits
+        // 1. Live Database Health, Median 3-Probe Latency, Real Connection Limits & DB Size
         $dbDriver = (string) DB::connection()->getDriverName();
         $dbLatencyMs = 0.0;
         $dbHealthy = true;
         $dbMaxConnections = $dbDriver === 'mysql' ? 151 : 100;
         $dbActiveConnections = 1;
         $dbThreadsRunning = 1;
+        $dbSizeMb = 0.0;
+        $innodbBufferPoolMb = 128.0;
         $dbErrorMessage = null;
 
         try {
-            $t0 = hrtime(true);
-            DB::select('SELECT 1');
-            $dbLatencyMs = round((hrtime(true) - $t0) / 1_000_000, 2);
+            $samples = [];
+            for ($i = 0; $i < 3; $i++) {
+                $t0 = hrtime(true);
+                if ($i === 1) {
+                    DB::table('users')->limit(1)->value('id');
+                } else {
+                    DB::select('SELECT 1');
+                }
+                $samples[] = (hrtime(true) - $t0) / 1_000_000;
+            }
+            sort($samples);
+            $dbLatencyMs = round($samples[1], 2); // Median of 3 real probes eliminates cold-start jitter
 
             if ($dbDriver === 'mysql') {
                 $maxRow = DB::selectOne("SHOW VARIABLES LIKE 'max_connections'");
@@ -114,6 +125,18 @@ class AdminSystemService extends BaseService
                 $runningRow = DB::selectOne("SHOW STATUS LIKE 'Threads_running'");
                 if ($runningRow && isset($runningRow->Value) && is_numeric($runningRow->Value)) {
                     $dbThreadsRunning = max(1, (int) $runningRow->Value);
+                }
+
+                $poolRow = DB::selectOne("SHOW VARIABLES LIKE 'innodb_buffer_pool_size'");
+                if ($poolRow && isset($poolRow->Value) && is_numeric($poolRow->Value)) {
+                    $innodbBufferPoolMb = round(((float) $poolRow->Value) / (1024 * 1024), 1);
+                }
+
+                $sizeRow = DB::selectOne(
+                    'SELECT COALESCE(SUM(data_length + index_length), 0) AS bytes FROM information_schema.TABLES WHERE table_schema = DATABASE()'
+                );
+                if ($sizeRow && isset($sizeRow->bytes) && is_numeric($sizeRow->bytes)) {
+                    $dbSizeMb = round(((float) $sizeRow->bytes) / (1024 * 1024), 2);
                 }
             }
         } catch (Throwable $e) {
@@ -223,6 +246,8 @@ class AdminSystemService extends BaseService
                 'dbHealthy' => $dbHealthy,
                 'dbDriver' => $dbDriver,
                 'dbLatencyMs' => $dbLatencyMs,
+                'dbSizeMb' => $dbSizeMb,
+                'innodbBufferPoolMb' => $innodbBufferPoolMb,
                 'dbMaxConnections' => $dbMaxConnections,
                 'dbActiveConnections' => $dbActiveConnections,
                 'dbThreadsRunning' => $dbThreadsRunning,
@@ -656,8 +681,9 @@ class AdminSystemService extends BaseService
         $currentUsedRps += $onlineAdmins15 * 0.04;
 
         $remainingRps = max(0.0, $safeRps - $currentUsedRps);
+        $rawUtilPct = $safeRps > 0 ? ($currentUsedRps / $safeRps) * 100.0 : 100.0;
         $utilizationPct = $safeRps > 0
-            ? round(min(100.0, ($currentUsedRps / $safeRps) * 100.0), 2)
+            ? ($currentOnlineTotal > 0 ? round(max(0.01, min(100.0, $rawUtilPct)), 2) : 0.0)
             : 100.0;
 
         $loadStatus = match (true) {
@@ -777,6 +803,8 @@ class AdminSystemService extends BaseService
                 'titleEn' => 'Database Connection Failed',
                 'detailAr' => $ctx['dbErrorMessage'] ?: 'تعذر تنفيذ استعلام الفحص الأساسي على قاعدة البيانات.',
                 'detailEn' => $ctx['dbErrorMessage'] ?: 'Health probe query failed against the database.',
+                'solutionAr' => 'تأكد من تشغيل خدمة MySQL وصحة بيانات الاتصال ثم اضغط «فحص الآن».',
+                'solutionEn' => 'Verify MySQL service is running and connection credentials are valid.',
             ];
         } elseif ($ctx['dbLatencyMs'] > 120) {
             $alerts[] = [
@@ -786,6 +814,8 @@ class AdminSystemService extends BaseService
                 'titleEn' => 'High Database Latency',
                 'detailAr' => "زمن الاستجابة الحالي {$ctx['dbLatencyMs']} مللي ثانية (المثالي أقل من 120ms).",
                 'detailEn' => "Current latency is {$ctx['dbLatencyMs']} ms (recommended < 120 ms).",
+                'solutionAr' => 'افحص الاستعلامات البطيئة وفعّل Redis للكاش لتقليل الضغط على قاعدة البيانات.',
+                'solutionEn' => 'Check slow queries and enable Redis cache to offload DB reads.',
             ];
         }
 
@@ -797,6 +827,8 @@ class AdminSystemService extends BaseService
                 'titleEn' => 'High Database Connection Usage',
                 'detailAr' => "المستخدم حالياً {$ctx['dbActiveConnections']} من أصل {$ctx['dbMaxConnections']} اتصال ({$ctx['dbConnectionLoadPct']}%).",
                 'detailEn' => "{$ctx['dbActiveConnections']} of {$ctx['dbMaxConnections']} connections active ({$ctx['dbConnectionLoadPct']}%).",
+                'solutionAr' => 'ارفع قيمة max_connections في إعدادات MySQL أو فعّل Connection Pooling.',
+                'solutionEn' => 'Increase MySQL max_connections or enable connection pooling.',
             ];
         }
 
@@ -808,6 +840,8 @@ class AdminSystemService extends BaseService
                 'titleEn' => 'Cache Store Unhealthy',
                 'detailAr' => $ctx['cacheErrorMessage'] ?: 'فشلت عملية القراءة والكتابة التجريبية على محرك الكاش.',
                 'detailEn' => $ctx['cacheErrorMessage'] ?: 'Cache read/write health probe failed.',
+                'solutionAr' => 'تأكد من عمل محرك الكاش (Redis أو جدول cache في قاعدة البيانات).',
+                'solutionEn' => 'Verify your configured cache driver (Redis or cache table) is operational.',
             ];
         }
 
@@ -817,8 +851,10 @@ class AdminSystemService extends BaseService
                 'severity' => 'critical',
                 'titleAr' => 'مجلد التخزين غير قابل للكتابة',
                 'titleEn' => 'Storage Directory Not Writable',
-                'detailAr' => 'تحقق من صلاحيات الكتابة على مجلد storage/app و storage/logs.',
-                'detailEn' => 'Check write permissions on storage/app and storage/logs.',
+                'detailAr' => 'تعذر الكتابة في مجلدات storage/app أو storage/logs.',
+                'detailEn' => 'Cannot write to storage/app or storage/logs.',
+                'solutionAr' => 'امْنَح صلاحيات القراءة والكتابة لمجلد storage على السيرفر.',
+                'solutionEn' => 'Grant write permissions on the storage directory.',
             ];
         }
 
@@ -826,10 +862,12 @@ class AdminSystemService extends BaseService
             $alerts[] = [
                 'code' => 'FAILED_JOBS',
                 'severity' => $ctx['failedJobs'] >= 10 ? 'critical' : 'warning',
-                'titleAr' => "يوجد {$ctx['failedJobs']} مهمة فاشلة في الطابور",
-                'titleEn' => "{$ctx['failedJobs']} Failed Queue Jobs",
-                'detailAr' => 'يمكنك مراجعة سبب كل مهمة وإعادة تشغيلها أو مسحها مباشرة من القسم بالأسفل.',
-                'detailEn' => 'Inspect, retry, or flush failed jobs directly from the section below.',
+                'titleAr' => "يوجد {$ctx['failedJobs']} مهمة خلفية متوقفة (Failed Jobs)",
+                'titleEn' => "{$ctx['failedJobs']} Failed Background Jobs",
+                'detailAr' => 'بعض المهام التلقائية (مثل إرسال رسائل البريد أو الإشعارات) لم تكتمل بنجاح.',
+                'detailEn' => 'Some background tasks (such as email/notification delivery) failed to complete.',
+                'solutionAr' => 'راجع السبب الموضح في قائمة «المهام الفاشلة» بالأسفل، ثم اضغط «إعادة» أو «مسح الكل».',
+                'solutionEn' => 'Review the cause in Failed Jobs below, fix it, then click Retry or Flush All.',
             ];
         }
 
@@ -837,10 +875,12 @@ class AdminSystemService extends BaseService
             $alerts[] = [
                 'code' => 'DISK_LOW',
                 'severity' => $ctx['diskUsedPct'] >= 95 ? 'critical' : 'warning',
-                'titleAr' => 'مساحة القرص المتبقية منخفضة',
-                'titleEn' => 'Low Disk Space',
-                'detailAr' => "المساحة المستخدمة {$ctx['diskUsedPct']}% والمتبقي {$ctx['diskFreeGb']} جيجابايت فقط.",
-                'detailEn' => "{$ctx['diskUsedPct']}% disk used ({$ctx['diskFreeGb']} GB free).",
+                'titleAr' => 'مساحة القرص على السيرفر شبه ممتلئة',
+                'titleEn' => 'Low Disk Space on Server',
+                'detailAr' => "تم استهلاك {$ctx['diskUsedPct']}% من مساحة القرص ولم يتبقَ سوى {$ctx['diskFreeGb']} جيجابايت فقط.",
+                'detailEn' => "{$ctx['diskUsedPct']}% disk used — only {$ctx['diskFreeGb']} GB free.",
+                'solutionAr' => 'فرّغ الملفات المؤقتة أو السجلات القديمة أو وسّع مساحة القرص لتجنب توقف رفع الملفات وقاعدة البيانات.',
+                'solutionEn' => 'Free temporary files/old logs or expand server disk space to prevent write failures.',
             ];
         }
 
@@ -852,6 +892,8 @@ class AdminSystemService extends BaseService
                 'titleEn' => 'High Server Capacity Load',
                 'detailAr' => "نسبة الاستهلاك الحالية {$ctx['capacityUtilizationPct']}% من السعة القصوى المتاحة.",
                 'detailEn' => "Server utilization is at {$ctx['capacityUtilizationPct']}% of estimated capacity.",
+                'solutionAr' => 'قم بزيادة عدد عمال PHP أو ترقية موارد السيرفر (CPU/RAM).',
+                'solutionEn' => 'Scale PHP workers or upgrade server CPU/RAM resources.',
             ];
         }
 
@@ -863,6 +905,8 @@ class AdminSystemService extends BaseService
                 'titleEn' => 'Maintenance Mode Active',
                 'detailAr' => 'المنصة مغلقة مؤقتاً أمام جميع المستخدمين عدا الإدارة العليا.',
                 'detailEn' => 'Platform is temporarily locked for non-admin users.',
+                'solutionAr' => 'أوقف وضع الصيانة عند انتهاء أعمال التحديث لعودة دخول المستخدمين.',
+                'solutionEn' => 'Disable maintenance mode once updates are complete.',
             ];
         }
 
@@ -920,12 +964,17 @@ class AdminSystemService extends BaseService
                 $jobName = is_array($payload) ? class_basename((string) ($payload['displayName'] ?? 'QueuedJob')) : 'QueuedJob';
                 $firstLine = strtok((string) ($row->exception ?? ''), "\r\n") ?: 'Job execution failed';
                 $cleanErr = $this->redactSecrets(mb_substr($firstLine, 0, 260));
+                $diagnosis = $this->classifyServerError($cleanErr);
 
                 $failedJobsList[] = [
                     'id' => (int) $row->id,
                     'uuid' => (string) ($row->uuid ?? ''),
                     'queue' => (string) ($row->queue ?? 'default'),
                     'jobName' => $jobName,
+                    'titleAr' => $diagnosis['titleAr'],
+                    'titleEn' => $diagnosis['titleEn'],
+                    'solutionAr' => $diagnosis['solutionAr'],
+                    'solutionEn' => $diagnosis['solutionEn'],
                     'error' => $cleanErr,
                     'failedAt' => (string) $row->failed_at,
                 ];
@@ -1021,11 +1070,17 @@ class AdminSystemService extends BaseService
             }
             $seen[$dedupeKey] = true;
 
+            $diagnosis = $this->classifyServerError($redacted);
+
             $filtered[] = [
                 'id' => 'log-'.$idx.'-'.md5($dedupeKey),
                 'source' => 'server_log',
                 'level' => strtolower($m[3]),
                 'timestamp' => $m[1],
+                'titleAr' => $diagnosis['titleAr'],
+                'titleEn' => $diagnosis['titleEn'],
+                'solutionAr' => $diagnosis['solutionAr'],
+                'solutionEn' => $diagnosis['solutionEn'],
                 'message' => $redacted,
                 'location' => $location ?: 'laravel.log',
                 '_ts' => strtotime($m[1]) ?: 0,
@@ -1037,6 +1092,68 @@ class AdminSystemService extends BaseService
         }
 
         return $filtered;
+    }
+
+    /**
+     * Translate raw server exceptions into clear Arabic/English diagnosis & actionable solutions.
+     *
+     * @return array{titleAr: string, titleEn: string, solutionAr: string, solutionEn: string}
+     */
+    protected function classifyServerError(string $message): array
+    {
+        $lower = strtolower($message);
+
+        if (str_contains($lower, 'brevo') && (str_contains($lower, 'unrecognised ip') || str_contains($lower, '401'))) {
+            return [
+                'titleAr' => 'رفض خدمة البريد (Brevo) لعنوان الـ IP الحالي للسيرفر',
+                'titleEn' => 'Brevo Mail API Rejected Server IP (401)',
+                'solutionAr' => 'افتح لوحة Brevo ← Security ← Authorised IPs وأضف عنوان الـ IP الحالي للسيرفر، ثم اضغط «إعادة» للمهام الفاشلة.',
+                'solutionEn' => 'Whitelist this server IP in Brevo Dashboard → Security → Authorised IPs, then retry failed jobs.',
+            ];
+        }
+
+        if (str_contains($lower, 'could not resolve host') || str_contains($lower, 'curl error') || str_contains($lower, 'timed out')) {
+            return [
+                'titleAr' => 'تعذر الاتصال بخدمة خارجية (انقطاع إنترنت أو DNS)',
+                'titleEn' => 'External Service Connection / DNS Failure',
+                'solutionAr' => 'تأكد من اتصال السيرفر بالإنترنت وعدم حجب المنفذ الخارجي ثم أعد المحاولة.',
+                'solutionEn' => 'Check server internet connectivity and DNS resolution, then retry.',
+            ];
+        }
+
+        if (str_contains($lower, 'sqlstate') || str_contains($lower, 'unknown column') || str_contains($lower, 'base table')) {
+            return [
+                'titleAr' => 'خطأ في قاعدة البيانات أو بنية الجداول',
+                'titleEn' => 'Database Query / Schema Error',
+                'solutionAr' => 'تأكد من تشغيل أحدث الهجرات (php artisan migrate) ومطابقة أعمدة قاعدة البيانات.',
+                'solutionEn' => 'Run pending migrations (php artisan migrate) and verify DB schema consistency.',
+            ];
+        }
+
+        if (str_contains($lower, 'parse error') || str_contains($lower, 'syntax error')) {
+            return [
+                'titleAr' => 'خطأ صياغة برمجية (غالباً من أمر Tinker/CLI)',
+                'titleEn' => 'PHP Syntax / CLI Parse Error',
+                'solutionAr' => 'إذا كان الخطأ من أمر طرفي فلا يؤثر على الموقع؛ وإن كان في ملف برمجي راجع الملف المذكور.',
+                'solutionEn' => 'Harmless if triggered from CLI/Tinker; otherwise inspect the referenced PHP file.',
+            ];
+        }
+
+        if (str_contains($lower, 'allowed memory size')) {
+            return [
+                'titleAr' => 'تجاوز حد الذاكرة المتاح لـ PHP',
+                'titleEn' => 'PHP Memory Limit Exceeded',
+                'solutionAr' => 'ارفع قيمة memory_limit في php.ini أو حسّن استعلام البيانات الضخمة.',
+                'solutionEn' => 'Increase PHP memory_limit or paginate heavy queries.',
+            ];
+        }
+
+        return [
+            'titleAr' => 'خطأ تشغيل مسجّل في السيرفر',
+            'titleEn' => 'Server Runtime Error',
+            'solutionAr' => 'افتح التفاصيل التقنية بالأسفل لمراجعة رسالة الخطأ الدقيقة وملف التنفيذ.',
+            'solutionEn' => 'Expand technical details below to inspect the exact error trace.',
+        ];
     }
 
     /**
