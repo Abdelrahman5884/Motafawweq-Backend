@@ -42,6 +42,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Trust reverse proxies (Cloudflare Tunnel / Vercel Edge / Nginx) for accurate client IP & HTTPS detection
+        $middleware->trustProxies(at: '*');
+
         // Enforce Locale, JSON, Security Headers, Sanitization & Maintenance Policy on all API requests
         $middleware->api(prepend: [
             SetLocale::class,

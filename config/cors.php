@@ -21,17 +21,33 @@ return [
 
     'allowed_origins' => array_filter(array_unique([
         env('FRONTEND_URL', 'http://localhost:5173'),
+        'https://motafawweq.vercel.app',
         'http://localhost:5173',
         'http://localhost:3000',
         'http://127.0.0.1:5173',
         'http://127.0.0.1:3000',
     ])),
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '#^https://motafawweq(-[a-z0-9-]+)?\.vercel\.app$#',
+    ],
 
-    'allowed_headers' => ['Content-Type', 'X-Requested-With', 'Authorization', 'Accept', 'Accept-Language', 'X-Locale', 'X-XSRF-TOKEN'],
+    'allowed_headers' => [
+        'Content-Type',
+        'X-Requested-With',
+        'Authorization',
+        'Accept',
+        'Accept-Language',
+        'X-Locale',
+        'X-XSRF-TOKEN',
+        'Idempotency-Key',
+    ],
 
-    'exposed_headers' => ['Authorization'],
+    'exposed_headers' => [
+        'Authorization',
+        'X-Idempotent-Replayed',
+        'Content-Disposition',
+    ],
 
     'max_age' => 86400,
 
