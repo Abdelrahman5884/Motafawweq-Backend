@@ -14,6 +14,8 @@ class PlatformSettingsService extends BaseService
 
     public const SETTINGS_CACHE_KEY = 'platform:settings:map:v1';
 
+    private const REQUEST_MEMO_KEY = '_motafawweq_platform_settings_snake';
+
     /**
      * Authoritative schema of allowed platform settings (strictly whitelisted).
      *
@@ -115,7 +117,15 @@ class PlatformSettingsService extends BaseService
      */
     public function allSnake(): array
     {
-        return Cache::remember(self::SETTINGS_CACHE_KEY, now()->addMinutes(15), function (): array {
+        $req = app()->bound('request') ? app('request') : null;
+        if ($req && $req->attributes->has(self::REQUEST_MEMO_KEY)) {
+            $cached = $req->attributes->get(self::REQUEST_MEMO_KEY);
+            if (is_array($cached)) {
+                return $cached;
+            }
+        }
+
+        $result = Cache::remember(self::SETTINGS_CACHE_KEY, now()->addMinutes(15), function (): array {
             $defaults = [];
             foreach (self::DEFINITIONS as $key => $def) {
                 $defaults[$key] = $def['default'];
@@ -134,6 +144,12 @@ class PlatformSettingsService extends BaseService
 
             return $defaults;
         });
+
+        if ($req) {
+            $req->attributes->set(self::REQUEST_MEMO_KEY, $result);
+        }
+
+        return $result;
     }
 
     /**
@@ -213,6 +229,9 @@ class PlatformSettingsService extends BaseService
             }
         });
 
+        if (app()->bound('request')) {
+            app('request')->attributes->remove(self::REQUEST_MEMO_KEY);
+        }
         Cache::forget(self::SETTINGS_CACHE_KEY);
         $this->bumpCacheEpoch();
 
@@ -236,6 +255,9 @@ class PlatformSettingsService extends BaseService
      */
     public function flushApplicationCache(User $admin): array
     {
+        if (app()->bound('request')) {
+            app('request')->attributes->remove(self::REQUEST_MEMO_KEY);
+        }
         Cache::forget(self::SETTINGS_CACHE_KEY);
         $newEpoch = $this->bumpCacheEpoch();
 

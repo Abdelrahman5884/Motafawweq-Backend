@@ -626,7 +626,17 @@ Route::prefix('v1')->group(function () {
                         ->middleware('throttle:admin-read');
                     Route::put('/settings', [AdminSystemController::class, 'updateSettings'])
                         ->middleware('throttle:admin-sensitive');
+                    Route::put('/password', [AdminSystemController::class, 'changePassword'])
+                        ->middleware('throttle:admin-sensitive');
                     Route::post('/cache/flush', [AdminSystemController::class, 'flushCache'])
+                        ->middleware('throttle:admin-sensitive');
+                    Route::post('/failed-jobs/flush', [AdminSystemController::class, 'flushFailedJobs'])
+                        ->middleware('throttle:admin-sensitive');
+                    Route::post('/failed-jobs/{id}/retry', [AdminSystemController::class, 'retryFailedJob'])
+                        ->whereNumber('id')
+                        ->middleware('throttle:admin-sensitive');
+                    Route::delete('/failed-jobs/{id}', [AdminSystemController::class, 'deleteFailedJob'])
+                        ->whereNumber('id')
                         ->middleware('throttle:admin-sensitive');
                     Route::get('/audit-logs', [AdminSystemController::class, 'auditLogs'])
                         ->middleware('throttle:admin-read');

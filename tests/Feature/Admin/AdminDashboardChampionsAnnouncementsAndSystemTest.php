@@ -8,7 +8,10 @@ use App\Models\LoginHistory;
 use App\Models\SecurityAuditLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -238,5 +241,106 @@ class AdminDashboardChampionsAnnouncementsAndSystemTest extends TestCase
         $this->postJson('/api/v1/admin/leagues/republic/stop')->assertOk();
         $this->assertTrue(SecurityAuditLog::where('event', 'admin.republic_league.started')->exists());
         $this->assertTrue(SecurityAuditLog::where('event', 'admin.republic_league.stopped')->exists());
+    }
+
+    public function test_system_capacity_per_role_issues_and_admin_password_change(): void
+    {
+        $admin = User::factory()->admin()->create([
+            'password' => Hash::make('OldAdmin@2026!'),
+        ]);
+        User::factory()->create(['role' => UserRole::STUDENT]);
+        User::factory()->create(['role' => UserRole::TEACHER]);
+        User::factory()->center()->create();
+
+        // Create two real tokens so we can verify revoking other sessions keeps current one
+        $otherToken = $admin->createToken('other-device', ['access']);
+        $currentToken = $admin->createToken('current-device', ['access']);
+        $admin->withAccessToken($currentToken->accessToken);
+
+        $this->actingAs($admin, 'sanctum');
+
+        // 1. Overview returns live server capacity (total + 4 roles) and exact issues structure
+        $ov = $this->getJson('/api/v1/admin/system/overview')
+            ->assertOk()
+            ->assertJsonStructure([
+                'data' => [
+                    'telemetry' => ['overallStatus', 'dbHealthy', 'dbDriver', 'dbLatencyMs', 'dbMaxConnections', 'cpuCores', 'memoryLimitMb', 'diskFreeGb'],
+                    'capacity' => [
+                        'maxConcurrentUsers',
+                        'maxTotalPlatformUsers',
+                        'totalRegisteredNow',
+                        'remainingTotalPlatformUsers',
+                        'currentOnlineTotal',
+                        'currentOnline5Min',
+                        'remainingCapacity',
+                        'utilizationPct',
+                        'loadStatus',
+                        'bottleneck',
+                        'safeRps',
+                        'avgRequestTimeMs',
+                        'effectiveWorkers',
+                        'productionPotential' => ['workers', 'safeRps', 'mixedConcurrentUsers', 'totalPlatformUsers'],
+                        'byRole' => [
+                            '*' => ['role', 'weight', 'reqPerSecPerUser', 'registeredCount', 'onlineNow', 'maxStandaloneConcurrent', 'recommendedConcurrent', 'remainingNow', 'totalPlatformCapacity', 'remainingTotalCapacity'],
+                        ],
+                    ],
+                    'issues' => ['totalAlerts', 'criticalCount', 'warningCount', 'failedJobsCount', 'recentErrorsCount', 'services', 'alerts', 'failedJobsList', 'recentErrors'],
+                ],
+            ]);
+
+        $this->assertCount(4, $ov->json('data.capacity.byRole'));
+        $this->assertGreaterThan(0, (int) $ov->json('data.capacity.maxConcurrentUsers'));
+        $this->assertGreaterThan(0, (float) $ov->json('data.capacity.safeRps'));
+
+        // Failed jobs delete & flush endpoints work atomically
+        $jobId1 = DB::table('failed_jobs')->insertGetId([
+            'uuid' => (string) Str::uuid(),
+            'connection' => 'database',
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'TestJob']),
+            'exception' => 'RuntimeException: Test failure',
+            'failed_at' => now(),
+        ]);
+        DB::table('failed_jobs')->insert([
+            'uuid' => (string) Str::uuid(),
+            'connection' => 'database',
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'TestJob2']),
+            'exception' => 'RuntimeException: Test failure 2',
+            'failed_at' => now(),
+        ]);
+
+        $this->deleteJson("/api/v1/admin/system/failed-jobs/{$jobId1}")
+            ->assertOk()
+            ->assertJsonPath('data.deleted', true)
+            ->assertJsonPath('data.remainingFailedJobs', 1);
+
+        $this->postJson('/api/v1/admin/system/failed-jobs/flush')
+            ->assertOk()
+            ->assertJsonPath('data.flushedCount', 1)
+            ->assertJsonPath('data.remainingFailedJobs', 0);
+
+        // 2. Wrong current password rejected
+        $this->putJson('/api/v1/admin/system/password', [
+            'currentPassword' => 'WrongPassword@999',
+            'newPassword' => 'NewStrong@2027!',
+            'newPasswordConfirmation' => 'NewStrong@2027!',
+        ])->assertStatus(422);
+
+        // 3. Valid password change succeeds, updates hash, revokes other session, and logs critical audit event
+        $this->putJson('/api/v1/admin/system/password', [
+            'currentPassword' => 'OldAdmin@2026!',
+            'newPassword' => 'NewStrong@2027!',
+            'newPasswordConfirmation' => 'NewStrong@2027!',
+            'revokeOtherSessions' => true,
+        ])->assertOk()
+            ->assertJsonPath('data.changed', true)
+            ->assertJsonPath('data.revokedOtherSessionsCount', 1);
+
+        $admin->refresh();
+        $this->assertTrue(Hash::check('NewStrong@2027!', (string) $admin->password));
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $otherToken->accessToken->id]);
+        $this->assertDatabaseHas('personal_access_tokens', ['id' => $currentToken->accessToken->id]);
+        $this->assertTrue(SecurityAuditLog::where('event', 'admin.password.changed')->exists());
     }
 }

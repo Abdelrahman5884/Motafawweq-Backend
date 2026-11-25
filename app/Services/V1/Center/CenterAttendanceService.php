@@ -15,6 +15,7 @@ use App\Models\GroupScheduleSlot;
 use App\Models\StudyGroup;
 use App\Models\User;
 use App\Services\BaseService;
+use App\Services\V1\Admin\PlatformSettingsService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Validation\ValidationException;
@@ -582,11 +583,49 @@ class CenterAttendanceService extends BaseService
                 ->first();
 
             $alreadyRecorded = false;
+            $antiPassbackTriggered = false;
             $methodEnum = AttendanceRecordMethod::tryFrom($method) ?? AttendanceRecordMethod::QR_SCAN;
+            $isBarcodeScan = in_array($methodEnum, [AttendanceRecordMethod::QR_SCAN, AttendanceRecordMethod::BARCODE_INPUT], true);
+
+            $platformSettings = app(PlatformSettingsService::class);
+            $antiPassbackEnabled = (bool) $platformSettings->get('anti_passback', true);
+            $antiPassbackMinutes = max(5, (int) $platformSettings->get('anti_passback_minutes', 45));
+
+            // Cross-gate Anti-Passback check: block duplicate barcode scan for the same student
+            // in another session within the configured cooldown window.
+            if ($antiPassbackEnabled && $isBarcodeScan && ! $existing && $enrollment->student_id) {
+                $cutoff = now()->subMinutes($antiPassbackMinutes);
+                $recentOther = GroupAttendanceRecord::query()
+                    ->where('student_id', $enrollment->student_id)
+                    ->where('attendance_session_id', '!=', $session->id)
+                    ->whereIn('status', [AttendanceStatus::PRESENT->value, AttendanceStatus::LATE->value])
+                    ->where('scanned_at', '>=', $cutoff)
+                    ->latest('scanned_at')
+                    ->first();
+
+                if ($recentOther) {
+                    $minsAgo = max(1, (int) $recentOther->scanned_at->diffInMinutes(now()));
+                    $remainingMins = max(1, $antiPassbackMinutes - $minsAgo);
+
+                    $this->logSecurityEvent('center.attendance.anti_passback_blocked', [
+                        'student_id' => $enrollment->student_id,
+                        'group_uuid' => $group->uuid,
+                        'window_minutes' => $antiPassbackMinutes,
+                        'remaining_minutes' => $remainingMins,
+                    ], 'warning', $recentOther);
+
+                    throw ValidationException::withMessages([
+                        'code' => ["تم حظر تكرار مسح الباركود (Anti-Passback): تم مسح كود الطالب منذ {$minsAgo} دقيقة. يرجى الانتظار {$remainingMins} دقيقة."],
+                    ]);
+                }
+            }
 
             if ($existing && in_array($existing->status, [AttendanceStatus::PRESENT, AttendanceStatus::LATE], true)) {
                 $alreadyRecorded = true;
                 $record = $existing;
+                if ($antiPassbackEnabled && $isBarcodeScan && $existing->scanned_at && $existing->scanned_at->gte(now()->subMinutes($antiPassbackMinutes))) {
+                    $antiPassbackTriggered = true;
+                }
             } else {
                 $record = GroupAttendanceRecord::updateOrCreate(
                     [
@@ -627,6 +666,7 @@ class CenterAttendanceService extends BaseService
                 'enrollmentId' => $enrollment->uuid,
                 'alreadyRecorded' => $alreadyRecorded,
                 'isDuplicateNotice' => $alreadyRecorded,
+                'antiPassbackTriggered' => $antiPassbackTriggered,
                 'status' => $record->status instanceof AttendanceStatus ? $record->status->value : (string) $record->status,
                 'scannedAt' => $record->scanned_at?->toIso8601String(),
                 'student' => [

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Api\BaseApiController;
+use App\Http\Requests\V1\Admin\ChangeAdminPasswordRequest;
 use App\Http\Requests\V1\Admin\UpdateAdminSystemSettingsRequest;
 use App\Services\V1\Admin\AdminSystemService;
 use App\Services\V1\Admin\PlatformSettingsService;
@@ -45,6 +46,49 @@ class AdminSystemController extends BaseApiController
         $result = $this->settingsService->flushApplicationCache($this->authenticatedUser());
 
         return $this->successResponse($result, __('messages.admin.cache_flushed'));
+    }
+
+    /**
+     * POST /api/v1/admin/system/failed-jobs/{id}/retry
+     */
+    public function retryFailedJob(int $id): JsonResponse
+    {
+        $result = $this->systemService->retryFailedJob($this->authenticatedUser(), $id);
+
+        return $this->successResponse($result, 'تمت إعادة جدولة المهمة الفاشلة بنجاح');
+    }
+
+    /**
+     * DELETE /api/v1/admin/system/failed-jobs/{id}
+     */
+    public function deleteFailedJob(int $id): JsonResponse
+    {
+        $result = $this->systemService->deleteFailedJob($this->authenticatedUser(), $id);
+
+        return $this->successResponse($result, 'تم حذف المهمة الفاشلة بنجاح');
+    }
+
+    /**
+     * POST /api/v1/admin/system/failed-jobs/flush
+     */
+    public function flushFailedJobs(): JsonResponse
+    {
+        $result = $this->systemService->flushFailedJobs($this->authenticatedUser());
+
+        return $this->successResponse($result, 'تم مسح جميع المهام الفاشلة بنجاح');
+    }
+
+    /**
+     * PUT /api/v1/admin/system/password
+     */
+    public function changePassword(ChangeAdminPasswordRequest $request): JsonResponse
+    {
+        $result = $this->systemService->changeAdminPassword(
+            $this->authenticatedUser(),
+            $request->validated()
+        );
+
+        return $this->successResponse($result, 'تم تحديث كلمة المرور بنجاح');
     }
 
     /**
