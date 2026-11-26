@@ -132,11 +132,14 @@ class ParentPortalService extends BaseService
                 : null;
             $activeChild = $activeChild ?: $children->first();
 
+            $inquiriesPayload = $this->listInquiries($parent, null, 10);
+
             $payload['activeChildId'] = $activeChild ? (int) $activeChild->id : null;
             $payload['activeChildDashboard'] = $activeChild
                 ? $this->assembleChildDashboardFromPrefetched($activeChild, $prefetched)
                 : null;
-            $payload['inquiries'] = $this->listInquiries($parent, null, 10)['items'];
+            $payload['inquiries'] = $inquiriesPayload['items'];
+            $payload['inquiriesPagination'] = $inquiriesPayload['pagination'];
         }
 
         return $payload;
@@ -477,19 +480,25 @@ class ParentPortalService extends BaseService
     {
         $profile = $this->ensureParentProfile($parent);
 
-        $this->transaction(function () use ($parent, $profile, $data): void {
+        $changedFields = [];
+
+        $this->transaction(function () use ($parent, $profile, $data, &$changedFields): void {
             $userUpdates = [];
-            if (array_key_exists('name', $data)) {
+            if (array_key_exists('name', $data) && $data['name'] !== $parent->name) {
                 $userUpdates['name'] = $data['name'];
             }
             if (array_key_exists('phone', $data)) {
-                $userUpdates['phone'] = $data['phone'] !== '' ? $data['phone'] : null;
+                $normalizedPhone = $data['phone'] !== '' ? $data['phone'] : null;
+                if ($normalizedPhone !== $parent->phone) {
+                    $userUpdates['phone'] = $normalizedPhone;
+                }
             }
-            if (array_key_exists('email', $data)) {
+            if (array_key_exists('email', $data) && $data['email'] !== $parent->email) {
                 $userUpdates['email'] = $data['email'];
             }
             if ($userUpdates !== []) {
                 $parent->fill($userUpdates)->save();
+                $changedFields = array_merge($changedFields, array_keys($userUpdates));
             }
 
             $profileUpdates = [];
@@ -500,27 +509,30 @@ class ParentPortalService extends BaseService
                 'preferred_lang',
                 'preferred_theme',
             ] as $field) {
-                if (array_key_exists($field, $data)) {
+                if (array_key_exists($field, $data) && $profile->{$field} !== $data[$field]) {
                     $profileUpdates[$field] = $data[$field];
                 }
             }
             if ($profileUpdates !== []) {
                 $profile->fill($profileUpdates)->save();
+                $changedFields = array_merge($changedFields, array_keys($profileUpdates));
             }
         });
 
         $parent->refresh();
         $profile->refresh();
 
-        $this->logSecurityEvent(
-            'parent.settings_updated',
-            [
-                'parent_id' => $parent->id,
-                'updated_fields' => array_keys($data),
-            ],
-            'info',
-            $parent
-        );
+        if ($changedFields !== []) {
+            $this->logSecurityEvent(
+                'parent.settings_updated',
+                [
+                    'parent_id' => $parent->id,
+                    'updated_fields' => $changedFields,
+                ],
+                'info',
+                $parent
+            );
+        }
 
         return $this->formatParentSettings($parent, $profile);
     }
@@ -1256,6 +1268,12 @@ class ParentPortalService extends BaseService
                             ? 'أداء استثنائي وحصول على الدرجة النهائية.'
                             : ($sub->is_passed ? 'أداء جيد ومستوى مستقر في الاختبار.' : 'يحتاج لمراجعة الأجزاء غير المكتملة مع المعلم.'))
                         : 'تم التسليم وبانتظار مراجعة ورصد الدرجة من المعلم.'),
+                'notesEn' => $sub->teacher_feedback
+                    ?: ($isGraded
+                        ? ($sub->is_full_mark
+                            ? 'Outstanding performance with a full mark.'
+                            : ($sub->is_passed ? 'Solid performance and steady progress.' : 'Needs review on missed topics with the teacher.'))
+                        : 'Submitted and awaiting teacher grading.'),
             ];
         })->values()->all();
 
@@ -1357,6 +1375,9 @@ class ParentPortalService extends BaseService
             $deadlineAr = $status === 'graded'
                 ? 'تم التسليم والتصحيح'
                 : ($deadlineStr ? ($hw->due_time ? "{$deadlineStr} ({$hw->due_time})" : $deadlineStr) : 'مفتوح');
+            $deadlineEn = $status === 'graded'
+                ? 'Submitted & Graded'
+                : ($deadlineStr ? ($hw->due_time ? "{$deadlineStr} ({$hw->due_time})" : $deadlineStr) : 'Open');
 
             $earnedScore = $status === 'graded' && $sub?->score !== null ? round((float) $sub->score, 1) : null;
             $notesAr = $sub?->feedback_ar ?: match ($status) {
@@ -1367,6 +1388,14 @@ class ParentPortalService extends BaseService
                     ? 'تجاوز هذا الواجب موعد التسليم المحدد — يرجى متابعة الطالب لإنجازه.'
                     : 'واجب مسند للطالب وبانتظار التسليم قبل الموعد المحدد.',
             };
+            $notesEn = $sub?->feedback_ar ?: match ($status) {
+                'graded' => 'Homework graded and score recorded.',
+                'submitted' => 'Submitted by student and awaiting teacher review.',
+                'rejected' => 'Teacher requested revisions and resubmission.',
+                default => $isOverdue
+                    ? 'This assignment is past due — please follow up with the student.'
+                    : 'Assigned to the student and due before the deadline.',
+            };
 
             $allItems[] = [
                 'id' => $hw->uuid,
@@ -1375,6 +1404,7 @@ class ParentPortalService extends BaseService
                 'teacherAr' => $hw->teacher?->name ?: 'المعلم',
                 'deadline' => $deadlineStr,
                 'deadlineAr' => $deadlineAr,
+                'deadlineEn' => $deadlineEn,
                 'isOverdue' => $isOverdue,
                 'status' => $status,
                 'statusAr' => $statusAr,
@@ -1382,6 +1412,7 @@ class ParentPortalService extends BaseService
                 'maxScore' => (int) ($sub?->max_score ?: ($hw->max_grade ?: 20)),
                 'earnedScore' => $earnedScore,
                 'notesAr' => $notesAr,
+                'notesEn' => $notesEn,
             ];
         }
 

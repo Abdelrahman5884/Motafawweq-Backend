@@ -475,4 +475,168 @@ class ParentPortalTest extends TestCase
             ->assertJsonPath('data.emergencyPhone', '01001122334')
             ->assertJsonPath('data.notifyTuitionRenewal', false);
     }
+
+    public function test_individual_tab_endpoints_filters_pagination_and_center_paid_financials(): void
+    {
+        $parent = $this->createVerifiedUser(UserRole::PARENT);
+        $teacher = $this->createVerifiedUser(UserRole::TEACHER, ['name' => 'أ. خالد محمود']);
+        $center = $this->createVerifiedUser(UserRole::CENTER, ['name' => 'سنتر النخبة']);
+        $student = $this->createVerifiedUser(UserRole::STUDENT, ['name' => 'سارة طارق', 'student_code' => 'STD-TABS01']);
+        $parent->children()->attach($student->id);
+
+        // Standalone offline center group (paid at center reception without StudentDirectPayment)
+        $group = StudyGroup::create([
+            'teacher_id' => $teacher->id,
+            'center_id' => $center->id,
+            'name_ar' => 'مجموعة الفيزياء - فرع الدقي',
+            'subject_ar' => 'الفيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'center_name' => 'سنتر النخبة',
+            'hall_name' => 'قاعة 3',
+            'price_egp' => 400,
+            'status' => 'active',
+        ]);
+
+        $enrollment = GroupEnrollment::create([
+            'study_group_id' => $group->id,
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::ENROLLED,
+            'attendance_rate' => 50,
+            'attended_sessions' => 1,
+            'total_sessions' => 2,
+            'payment_status' => 'paid',
+            'due_amount_egp' => 0,
+            'enrolled_at' => now()->subDays(5),
+        ]);
+
+        // 2 attendance records: 1 present, 1 absent
+        $session1 = GroupAttendanceSession::create([
+            'study_group_id' => $group->id,
+            'teacher_id' => $teacher->id,
+            'center_id' => $center->id,
+            'session_date' => now()->subDays(2)->toDateString(),
+            'title_ar' => 'حصة 1',
+            'status' => 'completed',
+        ]);
+        $session2 = GroupAttendanceSession::create([
+            'study_group_id' => $group->id,
+            'teacher_id' => $teacher->id,
+            'center_id' => $center->id,
+            'session_date' => now()->subDay()->toDateString(),
+            'title_ar' => 'حصة 2',
+            'status' => 'completed',
+        ]);
+
+        GroupAttendanceRecord::create([
+            'attendance_session_id' => $session1->id,
+            'study_group_id' => $group->id,
+            'group_enrollment_id' => $enrollment->id,
+            'student_id' => $student->id,
+            'status' => AttendanceStatus::PRESENT,
+            'recorded_method' => AttendanceRecordMethod::QR_SCAN,
+            'scanned_at' => now()->subDays(2),
+            'recorded_by' => $center->id,
+        ]);
+        GroupAttendanceRecord::create([
+            'attendance_session_id' => $session2->id,
+            'study_group_id' => $group->id,
+            'group_enrollment_id' => $enrollment->id,
+            'student_id' => $student->id,
+            'status' => AttendanceStatus::ABSENT,
+            'recorded_method' => AttendanceRecordMethod::MANUAL_TOGGLE,
+            'scanned_at' => now()->subDay(),
+            'recorded_by' => $center->id,
+        ]);
+
+        // 2 homeworks: 1 graded, 1 pending (not submitted)
+        $hw1 = Homework::create([
+            'teacher_id' => $teacher->id,
+            'course_title_ar' => 'الفيزياء',
+            'title_ar' => 'واجب التيار الكهربي',
+            'type' => HomeworkType::TEXT,
+            'max_grade' => 20,
+            'due_date' => now()->addDays(2)->toDateString(),
+        ]);
+        Homework::create([
+            'teacher_id' => $teacher->id,
+            'course_title_ar' => 'الفيزياء',
+            'title_ar' => 'واجب قانون أوم',
+            'type' => HomeworkType::TEXT,
+            'max_grade' => 20,
+            'due_date' => now()->subDay()->toDateString(),
+        ]);
+        HomeworkSubmission::create([
+            'homework_id' => $hw1->id,
+            'student_id' => $student->id,
+            'status' => HomeworkSubmissionStatus::GRADED,
+            'score' => 18,
+            'max_score' => 20,
+            'submitted_at' => now()->subHour(),
+            'graded_at' => now(),
+        ]);
+
+        // 1 submitted (ungraded) exam
+        $exam = Exam::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'كويز الفصل الأول',
+            'course_title_ar' => 'الفيزياء',
+            'full_mark' => 30,
+            'pass_score' => 15,
+            'status' => ExamStatus::ACTIVE,
+        ]);
+        ExamSubmission::create([
+            'exam_id' => $exam->id,
+            'student_id' => $student->id,
+            'full_mark' => 30,
+            'status' => ExamSubmissionStatus::SUBMITTED,
+            'submitted_at' => now(),
+        ]);
+
+        Sanctum::actingAs($parent, ['access']);
+
+        // Tab 2: Courses (includes standalone offline group!)
+        $this->getJson("/api/v1/parent/children/{$student->id}/courses")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.items.0.source', 'group')
+            ->assertJsonPath('data.items.0.progress', 50);
+
+        // Tab 3: Attendance with server-side status filter
+        $this->getJson("/api/v1/parent/children/{$student->id}/attendance?status=absent")
+            ->assertOk()
+            ->assertJsonPath('data.summary.presentCount', 1)
+            ->assertJsonPath('data.summary.absentCount', 1)
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.items.0.status', 'absent');
+
+        // Tab 4: Exams (pending submitted exam + pagination metadata)
+        $this->getJson("/api/v1/parent/children/{$student->id}/exams?per_page=10")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.items.0.status', 'submitted')
+            ->assertJsonPath('data.pagination.total', 1);
+
+        // Tab 5: Homework with status filter + overdue tracking
+        $this->getJson("/api/v1/parent/children/{$student->id}/homework?status=pending")
+            ->assertOk()
+            ->assertJsonPath('data.summary.total', 2)
+            ->assertJsonPath('data.summary.graded', 1)
+            ->assertJsonPath('data.summary.pending', 1)
+            ->assertJsonPath('data.summary.overdue', 1)
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.items.0.isOverdue', true);
+
+        // Tab 6: Financials reflects center-paid enrollment (400 EGP) without needing StudentDirectPayment
+        $this->getJson("/api/v1/parent/children/{$student->id}/financials")
+            ->assertOk()
+            ->assertJsonPath('data.summary.totalPaidEgp', 400)
+            ->assertJsonPath('data.summary.dueAmountEgp', 0)
+            ->assertJsonPath('data.invoices.0.source', 'group_enrollment')
+            ->assertJsonPath('data.invoices.0.status', 'paid');
+
+        // Overview with include_child=1 also includes inquiriesPagination
+        $this->getJson('/api/v1/parent/overview?include_child=1')
+            ->assertOk()
+            ->assertJsonPath('data.inquiriesPagination.currentPage', 1);
+    }
 }
