@@ -18,10 +18,10 @@ use DateTimeZone;
  * Rules:
  * - Opening the platform on consecutive calendar days keeps the streak incrementing (+1 per new day).
  * - Multiple opens on the same calendar day keep the streak unchanged while continuing to accumulate active time.
- * - Missing a full calendar day breaks the streak (0 while absent; starts fresh at 1 upon returning on a new day,
- *   while preserving the all-time longest_streak_days record).
- * - Active platform seconds are bounded by real wall-clock elapsed time since the previous heartbeat
- *   inside a serialized transaction to prevent multi-tab double-counting or client tampering.
+ * - Missing a full calendar day breaks the streak immediately:
+ *   - While absent after missing yesterday, effective streak is strictly 0 everywhere (Student, Parent, Teacher, Leagues).
+ *   - When the student returns on a new day, the streak starts fresh from Day 1 (streakWasReset = true),
+ *     while preserving the all-time longest_streak_days record.
  */
 class StudentActivityService extends BaseService
 {
@@ -36,6 +36,65 @@ class StudentActivityService extends BaseService
     public const MAX_HEARTBEAT_DELTA_SECONDS = 90;
 
     public const VISIT_GAP_SECONDS = 1800;
+
+    /**
+     * Authoritative helper for any read path (Profile, Parent, Teacher, Leagues):
+     * returns 0 immediately if the student missed yesterday (last_active_date < yesterday in their timezone).
+     */
+    public static function resolveEffectiveStreak(?StudentProfile $profile, ?Carbon $now = null): int
+    {
+        if (! $profile) {
+            return 0;
+        }
+
+        $stored = max(0, (int) ($profile->current_streak_days ?? 0));
+        if ($stored === 0) {
+            return 0;
+        }
+
+        $lastActive = $profile->last_active_date?->toDateString();
+        if ($lastActive === null) {
+            return 0;
+        }
+
+        $tz = ($profile->timezone && in_array($profile->timezone, DateTimeZone::listIdentifiers(), true))
+            ? $profile->timezone
+            : self::DEFAULT_TIMEZONE;
+
+        $refNow = $now ? $now->copy()->setTimezone($tz) : Carbon::now($tz);
+        $yesterdayDate = $refNow->copy()->startOfDay()->subDay()->toDateString();
+
+        return $lastActive >= $yesterdayDate ? $stored : 0;
+    }
+
+    /**
+     * Batch-expire all stale streaks in the database for students who missed a full calendar day
+     * and synchronize their active league participations down to 0.
+     */
+    public function expireStaleStreaks(): int
+    {
+        $expiredCount = 0;
+
+        StudentProfile::query()
+            ->where('current_streak_days', '>', 0)
+            ->chunkById(200, function ($profiles) use (&$expiredCount): void {
+                foreach ($profiles as $profile) {
+                    if (self::resolveEffectiveStreak($profile) === 0) {
+                        $profile->current_streak_days = 0;
+                        $profile->save();
+
+                        $this->leagueRulesService->syncStudentStreakToActiveLeagues(
+                            (int) $profile->student_id,
+                            0
+                        );
+
+                        $expiredCount++;
+                    }
+                }
+            });
+
+        return $expiredCount;
+    }
 
     /**
      * Resolve a valid IANA timezone for the student.
@@ -91,10 +150,6 @@ class StudentActivityService extends BaseService
 
             $now = Carbon::now();
             $todayDate = $now->copy()->setTimezone($timezone)->toDateString();
-            $yesterdayDate = Carbon::parse($todayDate, $timezone)->subDay()->toDateString();
-
-            $previousStreak = (int) $profile->current_streak_days;
-            $previousLastActiveDate = $profile->last_active_date?->toDateString();
 
             /** @var StudentDailyActivity|null $activity */
             $activity = StudentDailyActivity::where('student_id', $student->id)
@@ -102,7 +157,6 @@ class StudentActivityService extends BaseService
                 ->first();
 
             $reportedDelta = max(0, min(self::MAX_HEARTBEAT_DELTA_SECONDS, $deltaSeconds));
-            $isFirstOpenToday = $activity === null;
 
             if (! $activity) {
                 $initialDelta = min($reportedDelta, 60);
@@ -146,11 +200,6 @@ class StudentActivityService extends BaseService
                 }
             }
 
-            $streakWasReset = $isFirstOpenToday
-                && $previousStreak > 0
-                && $previousLastActiveDate !== null
-                && $previousLastActiveDate < $yesterdayDate;
-
             $streakState = $this->syncStreakFromActivities($student, $profile, $todayDate);
 
             return [
@@ -162,8 +211,8 @@ class StudentActivityService extends BaseService
                 'streakDays' => $streakState['currentStreakDays'],
                 'longestStreakDays' => $streakState['longestStreakDays'],
                 'isActiveToday' => $streakState['isActiveToday'],
-                'streakWasReset' => $streakWasReset,
-                'previousStreakDays' => $streakWasReset ? $previousStreak : $streakState['currentStreakDays'],
+                'streakWasReset' => $streakState['streakWasReset'],
+                'previousStreakDays' => $streakState['previousStreakDays'],
                 'lastActiveDate' => $streakState['lastActiveDate'],
                 'dailyGoalMinutes' => (int) ($profile->daily_study_goal_minutes ?: 120),
             ];
@@ -172,7 +221,7 @@ class StudentActivityService extends BaseService
 
     /**
      * Read-only snapshot of the student's current streak and today's active time (does NOT record a visit).
-     * Automatically evaluates to 0 streak if the student missed yesterday and hasn't opened today.
+     * Automatically evaluates to 0 streak (and clears stale profile/league streak) if the student missed yesterday.
      */
     public function getActivitySnapshot(User $student, ?string $requestedTimezone = null): array
     {
@@ -182,6 +231,21 @@ class StudentActivityService extends BaseService
 
         $dates = $this->getDistinctActivityDatesAsc($student->id, $todayDate);
         $computed = $this->computeStreakFromDates($dates, $todayDate);
+
+        // Immediately clear stale persisted streak in DB if the student missed yesterday
+        if ($profile && (int) $profile->current_streak_days !== $computed['currentStreakDays']) {
+            $profile->current_streak_days = $computed['currentStreakDays'];
+            $profile->longest_streak_days = max((int) $profile->longest_streak_days, $computed['longestStreakDays']);
+            if ($computed['lastActiveDate'] !== null) {
+                $profile->last_active_date = $computed['lastActiveDate'];
+            }
+            $profile->save();
+
+            $this->leagueRulesService->syncStudentStreakToActiveLeagues(
+                (int) $student->id,
+                $computed['currentStreakDays']
+            );
+        }
 
         $todayRecord = StudentDailyActivity::forStudent($student->id)
             ->whereDate('activity_date', $todayDate)
@@ -199,8 +263,8 @@ class StudentActivityService extends BaseService
             'streakDays' => $computed['currentStreakDays'],
             'longestStreakDays' => $longestStreak,
             'isActiveToday' => $computed['isActiveToday'],
-            'streakWasReset' => false,
-            'previousStreakDays' => $computed['currentStreakDays'],
+            'streakWasReset' => $computed['streakWasReset'],
+            'previousStreakDays' => $computed['previousStreakDays'],
             'lastActiveDate' => $computed['lastActiveDate'],
             'dailyGoalMinutes' => (int) ($profile?->daily_study_goal_minutes ?? 120),
         ];
@@ -277,7 +341,7 @@ class StudentActivityService extends BaseService
     /**
      * Recompute streak authoritatively from student_daily_activities and sync profile + leagues.
      *
-     * @return array{currentStreakDays: int, longestStreakDays: int, isActiveToday: bool, lastActiveDate: ?string}
+     * @return array{currentStreakDays: int, longestStreakDays: int, isActiveToday: bool, lastActiveDate: ?string, streakWasReset: bool, previousStreakDays: int}
      */
     protected function syncStreakFromActivities(User $student, StudentProfile $profile, string $todayDate): array
     {
@@ -308,6 +372,8 @@ class StudentActivityService extends BaseService
             'longestStreakDays' => $longestStreak,
             'isActiveToday' => $computed['isActiveToday'],
             'lastActiveDate' => $computed['lastActiveDate'],
+            'streakWasReset' => $computed['streakWasReset'],
+            'previousStreakDays' => $computed['previousStreakDays'],
         ];
     }
 
@@ -337,7 +403,7 @@ class StudentActivityService extends BaseService
      * Pure calendar-day streak calculator.
      *
      * @param  array<int, string>  $sortedDatesAsc
-     * @return array{currentStreakDays: int, longestStreakDays: int, isActiveToday: bool, lastActiveDate: ?string}
+     * @return array{currentStreakDays: int, longestStreakDays: int, isActiveToday: bool, lastActiveDate: ?string, streakWasReset: bool, previousStreakDays: int}
      */
     public function computeStreakFromDates(array $sortedDatesAsc, string $todayDate): array
     {
@@ -347,6 +413,8 @@ class StudentActivityService extends BaseService
                 'longestStreakDays' => 0,
                 'isActiveToday' => false,
                 'lastActiveDate' => null,
+                'streakWasReset' => false,
+                'previousStreakDays' => 0,
             ];
         }
 
@@ -377,6 +445,7 @@ class StudentActivityService extends BaseService
         $yesterdayDate = $todayCarbon->copy()->subDay()->toDateString();
 
         $isActiveToday = isset($dateSet[$todayDate]);
+        $isActiveYesterday = isset($dateSet[$yesterdayDate]);
         $current = 0;
 
         if ($isActiveToday) {
@@ -385,7 +454,7 @@ class StudentActivityService extends BaseService
                 $current++;
                 $cursor->subDay();
             }
-        } elseif (isset($dateSet[$yesterdayDate])) {
+        } elseif ($isActiveYesterday) {
             $cursor = $todayCarbon->copy()->subDay();
             while (isset($dateSet[$cursor->toDateString()])) {
                 $current++;
@@ -394,6 +463,27 @@ class StudentActivityService extends BaseService
         }
         // Otherwise neither today nor yesterday was active -> current streak is strictly 0 (broken).
 
+        // 3. Determine whether a prior streak was broken because the student missed yesterday (or more days)
+        $priorDatesBeforeYesterday = array_values(array_filter(
+            $sortedDatesAsc,
+            fn (string $d) => $d < $yesterdayDate
+        ));
+
+        $streakWasReset = false;
+        $previousStreakDays = $current;
+
+        if (! $isActiveYesterday && ! empty($priorDatesBeforeYesterday)) {
+            $streakWasReset = true;
+            $priorLastStr = $priorDatesBeforeYesterday[count($priorDatesBeforeYesterday) - 1];
+            $priorCursor = Carbon::createFromFormat('Y-m-d', $priorLastStr, 'UTC')->startOfDay();
+            $priorRun = 0;
+            while (isset($dateSet[$priorCursor->toDateString()])) {
+                $priorRun++;
+                $priorCursor->subDay();
+            }
+            $previousStreakDays = $priorRun;
+        }
+
         $lastActiveDate = $sortedDatesAsc[count($sortedDatesAsc) - 1];
 
         return [
@@ -401,6 +491,8 @@ class StudentActivityService extends BaseService
             'longestStreakDays' => max($longest, $current),
             'isActiveToday' => $isActiveToday,
             'lastActiveDate' => $lastActiveDate,
+            'streakWasReset' => $streakWasReset,
+            'previousStreakDays' => $previousStreakDays,
         ];
     }
 

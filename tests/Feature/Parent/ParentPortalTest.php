@@ -191,6 +191,7 @@ class ParentPortalTest extends TestCase
             'school_name' => 'مدرسة السعيدية الثانوية',
             'center_name' => 'سنتر الدقي النخبة',
             'current_streak_days' => 14,
+            'last_active_date' => now()->toDateString(),
         ]);
 
         $parent->children()->attach($student->id);

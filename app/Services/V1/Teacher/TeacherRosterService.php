@@ -21,6 +21,7 @@ use App\Repositories\Contracts\StudyGroupRepositoryInterface;
 use App\Services\BaseService;
 use App\Services\V1\Center\CenterBillingService;
 use App\Services\V1\Student\StudentAccessService;
+use App\Services\V1\Student\StudentActivityService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -67,8 +68,9 @@ class TeacherRosterService extends BaseService
 
         $studentIds = $enrolled->pluck('student_id')->filter()->unique()->values()->all();
         if (! empty($studentIds)) {
-            $streaksByStudent = StudentProfile::whereIn('student_id', $studentIds)
-                ->pluck('current_streak_days', 'student_id');
+            $profilesByStudent = StudentProfile::whereIn('student_id', $studentIds)
+                ->get(['student_id', 'current_streak_days', 'last_active_date', 'timezone'])
+                ->keyBy('student_id');
 
             $examStatsByStudent = ExamSubmission::query()
                 ->join('exams', 'exams.id', '=', 'exam_submissions.exam_id')
@@ -86,7 +88,7 @@ class TeacherRosterService extends BaseService
 
             foreach ($enrolled as $item) {
                 $sid = (int) $item->student_id;
-                $liveStreak = max((int) $item->streak_days, (int) ($streaksByStudent[$sid] ?? 0));
+                $liveStreak = StudentActivityService::resolveEffectiveStreak($profilesByStudent->get($sid));
                 $examRow = $examStatsByStudent->get($sid);
                 $gradedCount = (int) ($examRow?->graded_count ?? 0);
                 $liveAvgQuiz = $gradedCount > 0

@@ -18,6 +18,7 @@ use App\Models\StudentDailyActivity;
 use App\Models\StudentLessonProgress;
 use App\Models\StudentProfile;
 use App\Models\User;
+use App\Services\V1\Student\StudentActivityService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -366,7 +367,7 @@ class LeagueRulesService
 
         // 1. Profiles (real streak & school name)
         $profiles = StudentProfile::whereIn('student_id', $ids)
-            ->get(['student_id', 'current_streak_days', 'school_name', 'center_name', 'governorate'])
+            ->get(['student_id', 'current_streak_days', 'last_active_date', 'timezone', 'school_name', 'center_name', 'governorate'])
             ->keyBy('student_id');
 
         // 2. Enrollments (real attendance rate & group name)
@@ -530,10 +531,7 @@ class LeagueRulesService
             /** @var GroupEnrollment|null $firstEnrollment */
             $firstEnrollment = $stdEnrollments->first();
 
-            $streakDays = max(
-                (int) ($prof?->current_streak_days ?? 0),
-                (int) ($stdEnrollments->max('streak_days') ?? 0)
-            );
+            $streakDays = StudentActivityService::resolveEffectiveStreak($prof);
             $windowActiveDays = (int) ($windowActiveDaysByStudent[$sid] ?? 0);
             $windowStreakDays = $since !== null
                 ? (($until !== null && $until->isPast()) ? $windowActiveDays : min($streakDays, $windowActiveDays))
@@ -723,7 +721,7 @@ class LeagueRulesService
 
             $participant->update($updates);
 
-            if ($isLeagueActive && $deltaDays > 0) {
+            if ($isLeagueActive && $deltaDays !== 0) {
                 $league->recalculateRanksAndMetrics();
             }
         }
@@ -826,7 +824,7 @@ class LeagueRulesService
                 }
 
                 $updates = [];
-                if ((int) $p->streak_days !== (int) $m['streakDays'] && $m['streakDays'] > 0) {
+                if ((int) $p->streak_days !== (int) $m['streakDays']) {
                     $updates['streak_days'] = (int) $m['streakDays'];
                 }
                 if ((int) $p->exams_solved_count !== (int) $m['examsSolved']) {

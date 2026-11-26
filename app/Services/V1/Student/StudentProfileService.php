@@ -377,7 +377,7 @@ class StudentProfileService extends BaseService
             'dailyStudyGoalMinutes' => (int) ($profile->daily_study_goal_minutes ?: 120),
             'weeklyExamsGoal' => (int) ($profile->weekly_exams_goal ?: 3),
             'targetScorePercent' => (int) ($profile->target_score_percent ?: 90),
-            'currentStreakDays' => (int) ($profile->current_streak_days ?? 0),
+            'currentStreakDays' => StudentActivityService::resolveEffectiveStreak($profile),
             'longestStreakDays' => (int) ($profile->longest_streak_days ?? 0),
             'lastActiveDate' => $profile->last_active_date?->toDateString(),
             'timezone' => $profile->timezone ?: StudentActivityService::DEFAULT_TIMEZONE,

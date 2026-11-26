@@ -15,6 +15,7 @@ use App\Models\RepublicLeague;
 use App\Models\User;
 use App\Services\BaseService;
 use App\Services\V1\LeagueRulesService;
+use App\Services\V1\Student\StudentActivityService;
 use Carbon\Carbon;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
@@ -623,14 +624,20 @@ class AdminRepublicLeagueService extends BaseService
             ])
             ->groupBy('sxl.student_id');
 
-        // ANSI SQL expression for window streak (compatible with both MySQL and SQLite)
+        // ANSI SQL expression for live effective streak (strictly 0 if student missed yesterday)
+        $yesterdayDate = Carbon::now(StudentActivityService::DEFAULT_TIMEZONE)
+            ->startOfDay()
+            ->subDay()
+            ->toDateString();
+        $liveStreakSql = "(CASE WHEN sp.last_active_date >= '{$yesterdayDate}' THEN COALESCE(sp.current_streak_days, 0) ELSE 0 END)";
+
         $isConcluded = $league && (! $league->is_active || ($league->ends_at && $league->ends_at->isPast()));
         if ($since === null) {
-            $streakExpr = 'COALESCE(sp.current_streak_days, 0)';
+            $streakExpr = $liveStreakSql;
         } elseif ($isConcluded) {
             $streakExpr = 'COALESCE(act_agg.active_days, 0)';
         } else {
-            $streakExpr = 'CASE WHEN COALESCE(sp.current_streak_days, 0) < COALESCE(act_agg.active_days, 0) THEN COALESCE(sp.current_streak_days, 0) ELSE COALESCE(act_agg.active_days, 0) END';
+            $streakExpr = "CASE WHEN {$liveStreakSql} < COALESCE(act_agg.active_days, 0) THEN {$liveStreakSql} ELSE COALESCE(act_agg.active_days, 0) END";
         }
 
         $ruleXpExpr = "(COALESCE(ans_agg.answer_xp, 0) + (COALESCE(ex_agg.perfect_exams, 0) * {$fullMarkPts}) + (({$streakExpr}) * {$streakPts}) + COALESCE(xp_agg.bonus_xp, 0))";
@@ -657,7 +664,7 @@ class AdminRepublicLeagueService extends BaseService
                 'sp.governorate',
                 'sp.center_name',
                 'sp.parent_phone',
-                DB::raw('COALESCE(sp.current_streak_days, 0) as current_streak_days'),
+                DB::raw("{$liveStreakSql} as current_streak_days"),
                 DB::raw("{$streakExpr} as streak_days"),
                 DB::raw('COALESCE(ex_agg.exams_solved, 0) as exams_solved'),
                 DB::raw('COALESCE(ex_agg.perfect_exams, 0) as perfect_exams'),

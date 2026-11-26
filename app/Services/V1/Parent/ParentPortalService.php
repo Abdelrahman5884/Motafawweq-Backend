@@ -33,6 +33,7 @@ use App\Models\StudentSubscription;
 use App\Models\User;
 use App\Services\BaseService;
 use App\Services\V1\Student\StudentAccessService;
+use App\Services\V1\Student\StudentActivityService;
 use App\Services\V1\Student\StudentBillingService;
 use Carbon\Carbon;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -899,10 +900,7 @@ class ParentPortalService extends BaseService
             ->values()
             ->all();
 
-        $streakDays = max(
-            (int) ($profile?->current_streak_days ?? 0),
-            (int) ($enrollments->max('streak_days') ?? 0)
-        );
+        $streakDays = StudentActivityService::resolveEffectiveStreak($profile);
 
         return [
             'id' => (int) $child->id,
