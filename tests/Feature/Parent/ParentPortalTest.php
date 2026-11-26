@@ -404,6 +404,14 @@ class ParentPortalTest extends TestCase
             ->assertJsonPath('data.financials.summary.dueAmountEgp', 150)
             ->assertJsonCount(3, 'data.financials.invoices');
 
+        // Single round-trip overview with include_child=1 embeds activeChildDashboard + inquiries
+        $this->getJson('/api/v1/parent/overview?include_child=1')
+            ->assertOk()
+            ->assertJsonPath('data.activeChildId', $student->id)
+            ->assertJsonPath('data.activeChildDashboard.summary.id', $student->id)
+            ->assertJsonPath('data.activeChildDashboard.courses.items.0.progress', 50)
+            ->assertJsonPath('data.activeChildDashboard.financials.summary.totalPaidEgp', 449);
+
         // CSV Export works & sanitizes leading '=' formula injection!
         $csvRes = $this->get("/api/v1/parent/children/{$student->id}/exams/export")->assertOk();
         $csvBody = $csvRes->getContent();
@@ -429,6 +437,18 @@ class ParentPortalTest extends TestCase
             ->assertStatus(201)
             ->assertJsonPath('data.studentId', $student->id)
             ->assertJsonPath('data.status', 'open');
+
+        // Reject unrelated teacher_id in inquiry with 422
+        $otherTeacher = $this->createVerifiedUser(UserRole::TEACHER);
+        $this->postJson('/api/v1/parent/inquiries', [
+            'student_id' => $student->id,
+            'teacher_id' => $otherTeacher->id,
+            'recipient_type' => 'teacher',
+            'subject' => 'معلم غير مرتبط',
+            'message' => 'محاولة إرسال استفسار لمعلم لا يدرّس للطالب.',
+        ], ['Idempotency-Key' => 'par-inq-bad-teacher'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['teacher_id']);
 
         // List inquiries
         $this->getJson('/api/v1/parent/inquiries')

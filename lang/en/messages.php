@@ -453,6 +453,7 @@ return [
         'child_unlinked' => 'Student unlinked from your parent profile successfully.',
         'inquiries_fetched' => 'Parent inquiries history retrieved successfully.',
         'inquiry_created' => 'Your inquiry has been submitted and will be reviewed shortly.',
+        'invalid_teacher_selection' => 'The selected teacher is not assigned to any of this student’s active groups.',
         'settings_fetched' => 'Parent profile and preferences retrieved successfully.',
         'settings_updated' => 'Parent profile and notification preferences saved successfully.',
     ],

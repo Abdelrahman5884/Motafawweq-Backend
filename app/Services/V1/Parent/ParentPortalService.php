@@ -37,7 +37,6 @@ use App\Services\V1\Student\StudentBillingService;
 use Carbon\Carbon;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ParentPortalService extends BaseService
@@ -91,9 +90,14 @@ class ParentPortalService extends BaseService
 
     /**
      * Get the authenticated parent profile + summaries for all linked children.
+     * When $includeInitialDashboard is true, also embeds the active child's full
+     * dashboard snapshot and recent inquiries in a single HTTP round-trip (zero waterfall).
      */
-    public function getOverview(User $parent): array
-    {
+    public function getOverview(
+        User $parent,
+        bool $includeInitialDashboard = false,
+        ?int $preferredChildId = null
+    ): array {
         $profile = $this->ensureParentProfile($parent);
 
         /** @var Collection<int, User> $children */
@@ -103,7 +107,7 @@ class ParentPortalService extends BaseService
             ->orderBy('parent_student.created_at')
             ->get();
 
-        $childIds = $children->pluck('id')->all();
+        $childIds = $children->pluck('id')->map(fn ($id) => (int) $id)->all();
         $prefetched = $this->prefetchChildrenMetrics($childIds);
 
         $childrenSummaries = $children
@@ -115,11 +119,27 @@ class ParentPortalService extends BaseService
             ->where('parent_id', $parent->id)
             ->count();
 
-        return [
+        $payload = [
             'parent' => $this->formatParentSettings($parent, $profile),
             'children' => $childrenSummaries,
             'inquiriesCount' => $inquiriesCount,
         ];
+
+        if ($includeInitialDashboard) {
+            /** @var User|null $activeChild */
+            $activeChild = $preferredChildId !== null
+                ? $children->first(fn (User $c) => (int) $c->id === $preferredChildId)
+                : null;
+            $activeChild = $activeChild ?: $children->first();
+
+            $payload['activeChildId'] = $activeChild ? (int) $activeChild->id : null;
+            $payload['activeChildDashboard'] = $activeChild
+                ? $this->assembleChildDashboardFromPrefetched($activeChild, $prefetched)
+                : null;
+            $payload['inquiries'] = $this->listInquiries($parent, null, 10)['items'];
+        }
+
+        return $payload;
     }
 
     /**
@@ -128,16 +148,9 @@ class ParentPortalService extends BaseService
     public function getChildDashboard(User $parent, int $studentId): array
     {
         $child = $this->resolveLinkedChild($parent, $studentId);
-        $prefetched = $this->prefetchChildrenMetrics([$child->id]);
+        $prefetched = $this->prefetchChildrenMetrics([(int) $child->id]);
 
-        return [
-            'summary' => $this->buildChildSummary($child, $prefetched),
-            'courses' => $this->buildChildCoursesPayload($child),
-            'attendance' => $this->buildChildAttendancePayload($child, null, 30),
-            'exams' => $this->buildChildExamsPayload($child, 30),
-            'homework' => $this->buildChildHomeworkPayload($child, null),
-            'financials' => $this->buildChildFinancialsPayload($child),
-        ];
+        return $this->assembleChildDashboardFromPrefetched($child, $prefetched);
     }
 
     public function getChildCourses(User $parent, int $studentId): array
@@ -290,7 +303,7 @@ class ParentPortalService extends BaseService
             $student
         );
 
-        $prefetched = $this->prefetchChildrenMetrics([$student->id]);
+        $prefetched = $this->prefetchChildrenMetrics([(int) $student->id]);
 
         return $this->buildChildSummary($student, $prefetched);
     }
@@ -396,12 +409,19 @@ class ParentPortalService extends BaseService
 
             if (! empty($data['teacher_id'])) {
                 $requestedTeacherId = (int) $data['teacher_id'];
-                if (in_array($requestedTeacherId, $allowedTeacherIds, true)) {
-                    $teacherId = $requestedTeacherId;
+                if (! in_array($requestedTeacherId, $allowedTeacherIds, true)) {
+                    throw ValidationException::withMessages([
+                        'teacher_id' => [__('messages.parent.invalid_teacher_selection')],
+                    ]);
                 }
+                $teacherId = $requestedTeacherId;
             } elseif (in_array($data['recipient_type'], ['teacher', 'both'], true) && ! empty($allowedTeacherIds)) {
                 $teacherId = $allowedTeacherIds[0];
             }
+        } elseif (! empty($data['teacher_id'])) {
+            throw ValidationException::withMessages([
+                'teacher_id' => [__('messages.parent.invalid_teacher_selection')],
+            ]);
         }
 
         /** @var ParentInquiry $inquiry */
@@ -506,7 +526,7 @@ class ParentPortalService extends BaseService
     }
 
     /* ===================================================================== */
-    /* Internal Aggregation Builders (Zero-N+1, Real DB Data Only) */
+    /* Internal Aggregation Builders (True Zero-N+1, Real DB Data Only) */
     /* ===================================================================== */
 
     protected function ensureParentProfile(User $parent): ParentProfile
@@ -523,8 +543,33 @@ class ParentPortalService extends BaseService
     }
 
     /**
-     * Batch-prefetch enrollments, attendance, exam metrics, lesson progress,
-     * risk signals, and absence alerts for a set of children to avoid N+1 queries.
+     * Assemble a full child dashboard snapshot reusing already-prefetched collections
+     * so we avoid duplicate queries across summary + tab payloads.
+     */
+    protected function assembleChildDashboardFromPrefetched(User $child, array $prefetched): array
+    {
+        $entitlements = $prefetched['entitlementsByChild'][$child->id]
+            ?? $this->studentAccessService->getEntitlements($child);
+        $enrollments = $prefetched['enrollments']->get($child->id, collect());
+
+        return [
+            'summary' => $this->buildChildSummary($child, $prefetched),
+            'courses' => $this->buildChildCoursesPayload(
+                $child,
+                $entitlements,
+                $enrollments,
+                $prefetched['lessonCountsByCourse'] ?? null
+            ),
+            'attendance' => $this->buildChildAttendancePayload($child, null, 30),
+            'exams' => $this->buildChildExamsPayload($child, 30),
+            'homework' => $this->buildChildHomeworkPayload($child, null, $entitlements),
+            'financials' => $this->buildChildFinancialsPayload($child, $enrollments),
+        ];
+    }
+
+    /**
+     * Batch-prefetch enrollments, entitlements, lesson counts, attendance, exam metrics,
+     * lesson progress, risk signals, and absence alerts for a set of children (ZERO N+1).
      *
      * @param  array<int>  $childIds
      */
@@ -539,6 +584,8 @@ class ParentPortalService extends BaseService
                 'riskSignals' => collect(),
                 'absenceAlerts' => collect(),
                 'homeworkSubmissions' => collect(),
+                'entitlementsByChild' => [],
+                'lessonCountsByCourse' => collect(),
             ];
         }
 
@@ -556,6 +603,90 @@ class ParentPortalService extends BaseService
             ])
             ->get()
             ->groupBy('student_id');
+
+        // Batch confirmed payments for entitlement resolution across ALL linked children in 1 query
+        $confirmedPaymentsByChild = StudentDirectPayment::query()
+            ->whereIn('student_id', $childIds)
+            ->where('status', DirectPaymentStatus::CONFIRMED)
+            ->get(['student_id', 'teacher_id', 'course_id', 'study_group_id'])
+            ->groupBy('student_id');
+
+        // Collect every teacher ID across all children to fetch published courses in 1 query
+        $allTeacherIds = [];
+        foreach ($childIds as $cid) {
+            /** @var Collection<int, GroupEnrollment> $childEnrs */
+            $childEnrs = $enrollments->get($cid, collect());
+            foreach ($childEnrs as $enr) {
+                if ($enr->group && $enr->group->status === 'active' && $enr->group->teacher_id) {
+                    $allTeacherIds[] = (int) $enr->group->teacher_id;
+                }
+            }
+            foreach ($confirmedPaymentsByChild->get($cid, collect()) as $pay) {
+                if ($pay->teacher_id) {
+                    $allTeacherIds[] = (int) $pay->teacher_id;
+                }
+            }
+        }
+        $allTeacherIds = array_values(array_unique($allTeacherIds));
+
+        $publishedCoursesByTeacher = ! empty($allTeacherIds)
+            ? Course::query()
+                ->whereIn('teacher_id', $allTeacherIds)
+                ->where('status', CourseStatus::PUBLISHED)
+                ->get(['id', 'teacher_id'])
+                ->groupBy('teacher_id')
+            : collect();
+
+        $entitlementsByChild = [];
+        $allCourseIds = [];
+
+        foreach ($childIds as $cid) {
+            $childEnrs = $enrollments->get($cid, collect())
+                ->filter(fn (GroupEnrollment $e) => $e->group && $e->group->status === 'active');
+            $childPays = $confirmedPaymentsByChild->get($cid, collect());
+
+            $groupIds = array_values(array_unique(array_filter(array_merge(
+                $childEnrs->pluck('study_group_id')->all(),
+                $childPays->pluck('study_group_id')->all()
+            ))));
+
+            $teacherIds = array_values(array_unique(array_filter(array_merge(
+                $childEnrs->pluck('group.teacher_id')->all(),
+                $childPays->pluck('teacher_id')->all()
+            ))));
+
+            $directCourseIds = array_filter(array_merge(
+                $childEnrs->pluck('group.course_id')->all(),
+                $childPays->pluck('course_id')->all()
+            ));
+
+            $teacherCourseIds = [];
+            foreach ($teacherIds as $tid) {
+                foreach ($publishedCoursesByTeacher->get($tid, collect()) as $c) {
+                    $teacherCourseIds[] = (int) $c->id;
+                }
+            }
+
+            $courseIds = array_values(array_unique(array_map('intval', array_merge($directCourseIds, $teacherCourseIds))));
+            $allCourseIds = array_merge($allCourseIds, $courseIds);
+
+            $entitlementsByChild[$cid] = [
+                'group_ids' => array_map('intval', $groupIds),
+                'teacher_ids' => array_map('intval', $teacherIds),
+                'course_ids' => $courseIds,
+            ];
+        }
+
+        $allCourseIds = array_values(array_unique($allCourseIds));
+
+        $lessonCountsByCourse = ! empty($allCourseIds)
+            ? Lesson::query()
+                ->whereIn('course_id', $allCourseIds)
+                ->where('status', LessonStatus::PUBLISHED)
+                ->selectRaw('course_id, COUNT(*) as total')
+                ->groupBy('course_id')
+                ->pluck('total', 'course_id')
+            : collect();
 
         $attendanceRecords = GroupAttendanceRecord::query()
             ->whereIn('student_id', $childIds)
@@ -619,6 +750,8 @@ class ParentPortalService extends BaseService
             'riskSignals' => $riskSignals,
             'absenceAlerts' => $absenceAlerts,
             'homeworkSubmissions' => $homeworkSubmissions,
+            'entitlementsByChild' => $entitlementsByChild,
+            'lessonCountsByCourse' => $lessonCountsByCourse,
         ];
     }
 
@@ -639,6 +772,11 @@ class ParentPortalService extends BaseService
         $absenceAlerts = $prefetched['absenceAlerts']->get($child->id, collect());
         /** @var Collection<int, HomeworkSubmission> $homeworkSubmissions */
         $homeworkSubmissions = $prefetched['homeworkSubmissions']->get($child->id, collect());
+
+        $entitlements = $prefetched['entitlementsByChild'][$child->id]
+            ?? ['group_ids' => [], 'teacher_ids' => [], 'course_ids' => []];
+        /** @var Collection<int, int> $lessonCountsByCourse */
+        $lessonCountsByCourse = $prefetched['lessonCountsByCourse'] ?? collect();
 
         // Attendance stats: prefer real GroupAttendanceRecord rows; fall back to GroupEnrollment aggregates
         $totalAttendanceRecords = $attendanceRecords->count();
@@ -671,15 +809,27 @@ class ParentPortalService extends BaseService
 
         [$gradeStandingAr, $gradeStandingEn] = $this->resolveGradeStanding($avgQuizScore, $gradedCount > 0);
 
-        // Lesson completion counts
+        /** @var ExamSubmission|null $latestExamSub */
+        $latestExamSub = $gradedExams->first() ?: $examSubmissions->first();
+        $latestExam = $latestExamSub ? [
+            'titleAr' => $latestExamSub->exam?->title_ar ?: 'اختبار دوري',
+            'subjectAr' => $latestExamSub->exam?->course?->subject_ar ?: ($latestExamSub->exam?->course_title_ar ?: 'اختبار'),
+            'score' => $latestExamSub->score !== null ? round((float) $latestExamSub->score, 1) : null,
+            'maxScore' => (int) ($latestExamSub->full_mark ?: ($latestExamSub->exam?->full_mark ?: 100)),
+            'percent' => $latestExamSub->percentage !== null ? (int) round((float) $latestExamSub->percentage) : null,
+            'isPassed' => $latestExamSub->is_passed,
+            'date' => ($latestExamSub->submitted_at ?: $latestExamSub->created_at)?->format('Y-m-d'),
+        ] : null;
+
+        // Lesson completion counts (100% prefetched — zero extra DB query!)
         $completedLessons = $lessonProgress->where('is_completed', true)->count();
-        $entitlements = $this->studentAccessService->getEntitlements($child);
-        $totalLessons = ! empty($entitlements['course_ids'])
-            ? Lesson::query()
-                ->whereIn('course_id', $entitlements['course_ids'])
-                ->where('status', LessonStatus::PUBLISHED)
-                ->count()
-            : 0;
+        $totalLessons = 0;
+        foreach ($entitlements['course_ids'] as $cid) {
+            $totalLessons += (int) ($lessonCountsByCourse->get($cid) ?? 0);
+        }
+
+        // Outstanding enrollment dues summary
+        $dueAmountEgp = round((float) $enrollments->sum(fn (GroupEnrollment $e) => max(0.0, (float) ($e->due_amount_egp ?? 0))), 2);
 
         // Grade, School & Center resolution
         $gradeAr = $profile?->grade_ar
@@ -767,6 +917,8 @@ class ParentPortalService extends BaseService
             'gradedExamsCount' => $gradedCount,
             'gradeStandingAr' => $gradeStandingAr,
             'gradeStandingEn' => $gradeStandingEn,
+            'latestExam' => $latestExam,
+            'dueAmountEgp' => $dueAmountEgp,
             'streakDays' => $streakDays,
             'completedLessons' => $completedLessons,
             'totalLessons' => $totalLessons,
@@ -795,11 +947,15 @@ class ParentPortalService extends BaseService
         ];
     }
 
-    protected function buildChildCoursesPayload(User $child): array
-    {
-        $entitlements = $this->studentAccessService->getEntitlements($child);
+    protected function buildChildCoursesPayload(
+        User $child,
+        ?array $entitlements = null,
+        ?Collection $prefetchedEnrollments = null,
+        ?Collection $prefetchedLessonCounts = null
+    ): array {
+        $entitlements = $entitlements ?? $this->studentAccessService->getEntitlements($child);
 
-        $enrollments = GroupEnrollment::query()
+        $enrollments = $prefetchedEnrollments ?? GroupEnrollment::query()
             ->where('student_id', $child->id)
             ->where('status', EnrollmentStatus::ENROLLED)
             ->with([
@@ -827,15 +983,15 @@ class ParentPortalService extends BaseService
 
         $courseIds = $courses->pluck('id')->all();
 
-        // Batch lesson counts & student progress per course
-        $lessonCountsByCourse = ! empty($courseIds)
+        // Reuse prefetched lesson counts when available
+        $lessonCountsByCourse = $prefetchedLessonCounts ?? (! empty($courseIds)
             ? Lesson::query()
                 ->whereIn('course_id', $courseIds)
                 ->where('status', LessonStatus::PUBLISHED)
                 ->selectRaw('course_id, COUNT(*) as total')
                 ->groupBy('course_id')
                 ->pluck('total', 'course_id')
-            : collect();
+            : collect());
 
         $progressRows = ! empty($courseIds)
             ? StudentLessonProgress::query()
@@ -1120,9 +1276,12 @@ class ParentPortalService extends BaseService
         ];
     }
 
-    protected function buildChildHomeworkPayload(User $child, ?string $statusFilter = null): array
-    {
-        $entitlements = $this->studentAccessService->getEntitlements($child);
+    protected function buildChildHomeworkPayload(
+        User $child,
+        ?string $statusFilter = null,
+        ?array $entitlements = null
+    ): array {
+        $entitlements = $entitlements ?? $this->studentAccessService->getEntitlements($child);
 
         $homeworks = (! empty($entitlements['teacher_ids']) || ! empty($entitlements['course_ids']))
             ? Homework::query()
@@ -1236,7 +1395,7 @@ class ParentPortalService extends BaseService
         ];
     }
 
-    protected function buildChildFinancialsPayload(User $child): array
+    protected function buildChildFinancialsPayload(User $child, ?Collection $prefetchedEnrollments = null): array
     {
         $activeTier = $this->studentBillingService->resolveActivePlanTier($child);
         $activeSub = StudentSubscription::query()
@@ -1260,20 +1419,17 @@ class ParentPortalService extends BaseService
             ->limit(50)
             ->get();
 
-        $enrollmentsWithDues = GroupEnrollment::query()
+        $enrollments = $prefetchedEnrollments ?? GroupEnrollment::query()
             ->where('student_id', $child->id)
             ->where('status', EnrollmentStatus::ENROLLED)
-            ->where(function ($q): void {
-                $q->where('due_amount_egp', '>', 0)
-                    ->orWhereIn('payment_status', ['overdue', 'pending']);
-            })
-            ->with(['group:id,name_ar,subject_ar,center_name'])
+            ->with(['group:id,name_ar,name_en,subject_ar,center_name,price_egp'])
             ->get();
 
         $ledger = collect();
         $totalPaid = 0.0;
         $pendingAmount = 0.0;
         $dueAmount = 0.0;
+        $paidGroupIdsFromDirect = [];
 
         foreach ($platformInvoices as $inv) {
             $statusVal = $inv->status instanceof InvoiceStatus ? $inv->status->value : (string) $inv->status;
@@ -1320,6 +1476,9 @@ class ParentPortalService extends BaseService
 
             if ($statusVal === DirectPaymentStatus::CONFIRMED->value) {
                 $totalPaid += $amount;
+                if ($pay->study_group_id) {
+                    $paidGroupIdsFromDirect[] = (int) $pay->study_group_id;
+                }
             } elseif ($statusVal === DirectPaymentStatus::PENDING->value) {
                 $pendingAmount += $amount;
             }
@@ -1358,31 +1517,61 @@ class ParentPortalService extends BaseService
             ]);
         }
 
-        foreach ($enrollmentsWithDues as $enr) {
-            $amount = round((float) $enr->due_amount_egp, 2);
-            if ($amount <= 0) {
-                continue;
-            }
-            $dueAmount += $amount;
-            $dateObj = $enr->payment_due_since ?: $enr->updated_at;
-            $groupTitle = $enr->group?->name_ar ?: ($enr->group?->subject_ar ?: 'مجموعة دراسية');
+        // Reflect GroupEnrollment dues AND center-reception paid enrollments not already duplicated in StudentDirectPayment
+        foreach ($enrollments as $enr) {
+            $group = $enr->group;
+            $groupTitle = $group?->name_ar ?: ($group?->subject_ar ?: 'مجموعة دراسية');
+            $pStatus = strtolower((string) ($enr->payment_status ?: ''));
+            $enrDue = round(max(0.0, (float) ($enr->due_amount_egp ?? 0)), 2);
 
-            $ledger->push([
-                'id' => 'due-'.$enr->uuid,
-                'source' => 'group_due',
-                'receiptNo' => 'DUE-'.$enr->id,
-                'date' => $dateObj?->format('Y-m-d') ?? '',
-                'sortTs' => $dateObj?->timestamp ?? 0,
-                'descriptionAr' => "مستحق اشتراك المجموعة — {$groupTitle}",
-                'descriptionEn' => "Outstanding group tuition — {$groupTitle}",
-                'methodAr' => 'استقبال السنتر / إلكتروني',
-                'methodEn' => 'Center Reception / Online',
-                'amountEgp' => $amount,
-                'amountFormatted' => number_format($amount, 0).' ج.م',
-                'status' => 'overdue',
-                'statusAr' => 'مستحق السداد',
-                'statusEn' => 'Due',
-            ]);
+            if ($enrDue > 0 || in_array($pStatus, ['due', 'partial', 'overdue', 'pending'], true)) {
+                $effectiveDue = $enrDue > 0 ? $enrDue : round((float) ($group?->price_egp ?? 0), 2);
+                if ($effectiveDue > 0) {
+                    $dueAmount += $effectiveDue;
+                    $dateObj = $enr->payment_due_since ?: $enr->updated_at;
+                    $ledger->push([
+                        'id' => 'due-'.$enr->uuid,
+                        'source' => 'group_due',
+                        'receiptNo' => 'DUE-'.$enr->id,
+                        'date' => $dateObj?->format('Y-m-d') ?? '',
+                        'sortTs' => $dateObj?->timestamp ?? 0,
+                        'descriptionAr' => "مستحق اشتراك المجموعة — {$groupTitle}",
+                        'descriptionEn' => "Outstanding group tuition — {$groupTitle}",
+                        'methodAr' => 'استقبال السنتر / إلكتروني',
+                        'methodEn' => 'Center Reception / Online',
+                        'amountEgp' => $effectiveDue,
+                        'amountFormatted' => number_format($effectiveDue, 0).' ج.م',
+                        'status' => 'overdue',
+                        'statusAr' => $pStatus === 'partial' ? 'متبقي للسداد' : 'مستحق السداد',
+                        'statusEn' => $pStatus === 'partial' ? 'Balance Due' : 'Due',
+                    ]);
+                }
+            } elseif (
+                $pStatus === 'paid'
+                && $group
+                && (float) $group->price_egp > 0
+                && ! in_array((int) $enr->study_group_id, $paidGroupIdsFromDirect, true)
+            ) {
+                $paidAmt = round((float) $group->price_egp, 2);
+                $totalPaid += $paidAmt;
+                $dateObj = $enr->enrolled_at ?: $enr->created_at;
+                $ledger->push([
+                    'id' => 'enr-paid-'.$enr->uuid,
+                    'source' => 'group_enrollment',
+                    'receiptNo' => 'CTR-'.$enr->id,
+                    'date' => $dateObj?->format('Y-m-d') ?? '',
+                    'sortTs' => $dateObj?->timestamp ?? 0,
+                    'descriptionAr' => "اشتراك المجموعة — {$groupTitle}",
+                    'descriptionEn' => 'Group Enrollment — '.($group->name_en ?: $groupTitle),
+                    'methodAr' => 'سداد بالسنتر',
+                    'methodEn' => 'Center Reception',
+                    'amountEgp' => $paidAmt,
+                    'amountFormatted' => number_format($paidAmt, 0).' ج.م',
+                    'status' => 'paid',
+                    'statusAr' => 'مسدد بالسنتر',
+                    'statusEn' => 'Paid at Center',
+                ]);
+            }
         }
 
         $sortedLedger = $ledger
@@ -1551,13 +1740,12 @@ class ParentPortalService extends BaseService
                     $hall = $slot->hall_name ?: ($group->centerRoom?->name_ar ?: ($group->hall_name ?: ''));
                     $timeAr = str_replace(['AM', 'PM'], ['ص', 'م'], $candidate->format('h:i A'));
                     $timeEn = $candidate->format('h:i A');
-                    $hallSuffixAr = $hall ? " ({$hall})" : '';
-                    $hallSuffixEn = $hall ? " ({$hall})" : '';
+                    $hallSuffix = $hall ? " ({$hall})" : '';
                     $dayPrefixAr = $daysAhead === 0 ? 'اليوم' : ($daysAhead === 1 ? 'غداً' : $dayEnum->labelAr());
                     $dayPrefixEn = $daysAhead === 0 ? 'Today' : ($daysAhead === 1 ? 'Tomorrow' : $dayEnum->labelEn());
 
-                    $bestAr = "{$dayPrefixAr} {$timeAr} — {$subjectAr}{$hallSuffixAr}";
-                    $bestEn = "{$dayPrefixEn} {$timeEn} — {$subjectEn}{$hallSuffixEn}";
+                    $bestAr = "{$dayPrefixAr} {$timeAr} — {$subjectAr}{$hallSuffix}";
+                    $bestEn = "{$dayPrefixEn} {$timeEn} — {$subjectEn}{$hallSuffix}";
                 }
             }
         }

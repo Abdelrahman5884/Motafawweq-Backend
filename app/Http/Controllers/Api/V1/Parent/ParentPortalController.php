@@ -17,9 +17,16 @@ class ParentPortalController extends BaseApiController
         protected ParentPortalService $parentPortalService
     ) {}
 
-    public function overview(): JsonResponse
+    public function overview(Request $request): JsonResponse
     {
-        $data = $this->parentPortalService->getOverview($this->authenticatedUser());
+        $includeChild = $request->boolean('include_child');
+        $childId = $request->query('child_id');
+
+        $data = $this->parentPortalService->getOverview(
+            $this->authenticatedUser(),
+            $includeChild,
+            is_numeric($childId) ? (int) $childId : null
+        );
 
         return $this->successResponse($data, __('messages.parent.overview_fetched'));
     }
