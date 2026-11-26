@@ -16,7 +16,9 @@ use App\Models\StudentInvoice;
 use App\Models\TeacherInvoice;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -363,5 +365,144 @@ class AdminFinancialsPricingPayoutsAndCouponsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('meta.total', 1)
             ->assertJsonPath('data.0.invoiceNumber', 'INV-C-103');
+    }
+
+    public function test_admin_plan_discounts_temporary_free_promo_and_cross_role_subscription_approvals(): void
+    {
+        Storage::fake('local');
+        $admin = User::factory()->admin()->create();
+        $student = User::factory()->create(['name' => 'طالب المراجعة', 'role' => UserRole::STUDENT]);
+        $teacher = User::factory()->create(['name' => 'معلم المراجعة', 'role' => UserRole::TEACHER]);
+        $center = User::factory()->center()->create(['name' => 'سنتر المراجعة']);
+
+        // 1. Seed default plans and apply compare-at strikethrough discount (100 -> 60 = 40% off) on Student Plus
+        Sanctum::actingAs($admin, ['access']);
+        $plansRes = $this->getJson('/api/v1/admin/financials/plans')->assertOk();
+        $studentPlus = collect($plansRes->json('data'))->firstWhere('slug', 'plan-student-plus');
+        $this->assertNotNull($studentPlus);
+        $planUuid = (string) $studentPlus['id'];
+
+        $this->putJson("/api/v1/admin/financials/plans/{$planUuid}", [
+            'priceEgp' => 60,
+            'originalPriceEgp' => 100,
+        ])->assertOk()
+            ->assertJsonPath('data.priceEgp', 60)
+            ->assertJsonPath('data.originalPriceEgp', 100)
+            ->assertJsonPath('data.discountPercent', 40);
+
+        // Public catalog & student billing reflect live discount
+        $pubStudentPlus = collect($this->getJson('/api/v1/public/pricing-plans?role=student')->assertOk()->json('data'))
+            ->firstWhere('slug', 'plan-student-plus');
+        $this->assertEquals(100.0, (float) $pubStudentPlus['originalPriceEgp']);
+        $this->assertEquals(60.0, (float) $pubStudentPlus['priceEgp']);
+        $this->assertEquals(40.0, (float) $pubStudentPlus['discountPercent']);
+
+        // Clear compare-at offer back to null cleanly
+        $this->putJson("/api/v1/admin/financials/plans/{$planUuid}", [
+            'originalPriceEgp' => null,
+            'discountPercent' => null,
+        ])->assertOk()
+            ->assertJsonPath('data.originalPriceEgp', null)
+            ->assertJsonPath('data.discountPercent', null);
+
+        // Enable temporary free promo -> effectivePriceEgp becomes 0
+        $this->putJson("/api/v1/admin/financials/plans/{$planUuid}", [
+            'freePromoEnabled' => true,
+            'freePromoUntil' => now()->addDays(5)->toIso8601String(),
+            'freePromoLabelAr' => 'عرض البداية المجاني',
+        ])->assertOk()
+            ->assertJsonPath('data.isFreePromoActive', true)
+            ->assertJsonPath('data.effectivePriceEgp', 0);
+
+        // Disable free promo before paid queue test
+        $this->putJson("/api/v1/admin/financials/plans/{$planUuid}", [
+            'freePromoEnabled' => false,
+            'freePromoUntil' => null,
+        ])->assertOk()
+            ->assertJsonPath('data.isFreePromoActive', false);
+
+        // 2. Submit paid subscription requests across ALL 3 roles (Student, Teacher, Center)
+        $pngBytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+        $pdfBytes = "%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n";
+
+        Sanctum::actingAs($student, ['access']);
+        $stdReq = $this->post('/api/v1/student/billing/subscribe', [
+            'plan_tier' => 'plus',
+            'billing_period' => 'monthly',
+            'payment_method' => 'vodafone',
+            'sender_phone' => '01012345678',
+            'transaction_ref' => 'TXN-STD-777',
+            'receipt' => UploadedFile::fake()->createWithContent('std-rec.png', $pngBytes),
+        ], ['Accept' => 'application/json'])->assertCreated();
+        $stdSubUuid = (string) $stdReq->json('data.pendingRequest.id');
+
+        Sanctum::actingAs($teacher, ['access']);
+        $tReq = $this->post('/api/v1/teacher/billing/subscribe', [
+            'plan_tier' => 'pro',
+            'billing_period' => 'monthly',
+            'payment_method' => 'instapay',
+            'sender_ipa' => 't@instapay',
+            'transaction_ref' => 'TXN-TCH-888',
+            'receipt' => UploadedFile::fake()->createWithContent('tch-rec.png', $pngBytes),
+        ], ['Accept' => 'application/json'])->assertOk();
+        $tchSubUuid = (string) $tReq->json('data.pendingRequest.id');
+
+        Sanctum::actingAs($center, ['access']);
+        $cReq = $this->post('/api/v1/center/billing/subscribe', [
+            'plan_tier' => 'plus',
+            'billing_period' => 'monthly',
+            'payment_method' => 'fawry',
+            'transaction_ref' => 'TXN-CTR-999',
+            'receipt' => UploadedFile::fake()->createWithContent('ctr-rec.pdf', $pdfBytes),
+        ], ['Accept' => 'application/json'])->assertOk();
+        $ctrSubUuid = (string) $cReq->json('data.pendingRequest.id');
+
+        // 3. Super Admin overview & unified subscription requests queue show all 3 pending requests
+        Sanctum::actingAs($admin, ['access']);
+        $this->getJson('/api/v1/admin/financials/overview')
+            ->assertOk()
+            ->assertJsonPath('data.pendingSubscriptionRequestsCount', 3);
+
+        $queueRes = $this->getJson('/api/v1/admin/financials/subscription-requests?status=pending_review')
+            ->assertOk()
+            ->assertJsonPath('meta.summary.pendingCount', 3);
+        $this->assertCount(3, $queueRes->json('data'));
+
+        // Stream signed receipt URL -> 200 OK with nosniff header; tampered/unsigned URL -> 403
+        $stdItem = collect($queueRes->json('data'))->firstWhere('id', $stdSubUuid);
+        $this->assertNotEmpty($stdItem['receiptUrl']);
+        $this->get($stdItem['receiptUrl'])
+            ->assertOk()
+            ->assertHeader('X-Content-Type-Options', 'nosniff');
+
+        $this->get("/api/v1/media/admin/subscription-receipts/student/{$stdSubUuid}")
+            ->assertForbidden();
+
+        // 4. Approve Student -> active; double approval returns 409 SUBSCRIPTION_ALREADY_PROCESSED
+        $this->postJson("/api/v1/admin/financials/subscription-requests/student/{$stdSubUuid}/approve")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'active');
+
+        $this->postJson("/api/v1/admin/financials/subscription-requests/student/{$stdSubUuid}/approve")
+            ->assertStatus(409)
+            ->assertJsonPath('error_code', 'SUBSCRIPTION_ALREADY_PROCESSED');
+
+        // 5. Reject Teacher with reason & approve Center
+        $this->postJson("/api/v1/admin/financials/subscription-requests/teacher/{$tchSubUuid}/reject", [
+            'reason' => 'كود العملية غير مطابق للتحويل',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'rejected')
+            ->assertJsonPath('data.rejectionReason', 'كود العملية غير مطابق للتحويل');
+
+        $this->postJson("/api/v1/admin/financials/subscription-requests/center/{$ctrSubUuid}/approve")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'active');
+
+        $this->getJson('/api/v1/admin/financials/overview')
+            ->assertOk()
+            ->assertJsonPath('data.pendingSubscriptionRequestsCount', 0);
+
+        $this->assertTrue(SecurityAuditLog::where('event', 'admin.subscription.approved')->exists());
+        $this->assertTrue(SecurityAuditLog::where('event', 'admin.subscription.rejected')->exists());
     }
 }

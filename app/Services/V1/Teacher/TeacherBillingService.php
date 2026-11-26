@@ -18,9 +18,11 @@ use App\Models\TeacherProfile;
 use App\Models\TeacherSubscription;
 use App\Models\User;
 use App\Repositories\Contracts\TeacherProfileRepositoryInterface;
+use App\Services\V1\SubscriptionReceiptService;
 use App\Traits\HasSecurityAudit;
 use Carbon\Carbon;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
@@ -30,9 +32,9 @@ class TeacherBillingService
     use HasSecurityAudit;
 
     /**
-     * Authoritative server-side pricing matrix (EGP) for the 3 teacher subscription tiers:
+     * Authoritative fallback pricing matrix (EGP) for the 3 teacher subscription tiers:
      * Free (0 EGP), Plus (120 / 480 / 900 EGP), Pro (150 / 600 / 1,125 EGP).
-     * Term = 5 months (-20% vs monthly), Annual = 10 academic months (-25% vs monthly).
+     * Live DB values (including Super Admin discounts & temporary free promos) always take precedence.
      */
     public const PRICING = [
         'free' => [
@@ -53,7 +55,8 @@ class TeacherBillingService
     ];
 
     public function __construct(
-        protected TeacherProfileRepositoryInterface $profileRepository
+        protected TeacherProfileRepositoryInterface $profileRepository,
+        protected SubscriptionReceiptService $receiptService
     ) {}
 
     /**
@@ -374,6 +377,7 @@ class TeacherBillingService
             'billingPeriod' => $period->value,
             'status' => $active?->status ?? 'active',
             'isFree' => $isFree,
+            'isFreePromo' => (bool) ($active?->is_free_promo ?? false),
             'canCancel' => ! $isFree,
             'mustCancelToSwitch' => ! $isFree,
             'startsAt' => $active?->starts_at?->toDateString() ?? $teacher->created_at?->toDateString(),
@@ -388,6 +392,68 @@ class TeacherBillingService
     }
 
     /**
+     * @return array<string, mixed>|null
+     */
+    protected function formatSubscriptionRequest(?TeacherSubscription $sub): ?array
+    {
+        if (! $sub) {
+            return null;
+        }
+
+        $tierVal = $sub->plan_tier instanceof TeacherPlanTier ? $sub->plan_tier->value : (string) $sub->plan_tier;
+        $periodVal = $sub->billing_period instanceof BillingPeriod ? $sub->billing_period->value : (string) $sub->billing_period;
+        $pmEnum = PaymentMethod::tryFrom((string) ($sub->payment_method ?? ''));
+
+        return [
+            'id' => $sub->uuid,
+            'planTier' => $tierVal,
+            'planNameAr' => $sub->plan_name_ar,
+            'planNameEn' => $sub->plan_name_en ?: $sub->plan_name_ar,
+            'billingPeriod' => $periodVal,
+            'amountEgp' => (float) $sub->amount_egp,
+            'baseAmountEgp' => (float) ($sub->base_amount_egp ?? $sub->amount_egp),
+            'discountAmountEgp' => (float) ($sub->discount_amount_egp ?? 0),
+            'couponCode' => $sub->coupon_code,
+            'paymentMethod' => (string) ($sub->payment_method ?? ''),
+            'paymentMethodLabelAr' => $pmEnum?->label() ?? (string) ($sub->payment_method ?? ''),
+            'transactionReference' => $sub->transaction_reference,
+            'senderReference' => $sub->sender_reference,
+            'hasReceipt' => ! empty($sub->receipt_path),
+            'status' => (string) $sub->status,
+            'rejectionReason' => $sub->rejection_reason,
+            'submittedAt' => $sub->created_at?->toIso8601String(),
+            'submittedDate' => $sub->created_at?->format('Y-m-d H:i'),
+            'reviewedAt' => $sub->reviewed_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array{pendingRequest: array<string, mixed>|null, latestRejectedRequest: array<string, mixed>|null}
+     */
+    protected function resolvePendingAndRejectedRequests(User $teacher): array
+    {
+        $pending = TeacherSubscription::where('teacher_id', $teacher->id)
+            ->where('status', 'pending_review')
+            ->latest('id')
+            ->first();
+
+        $latestActiveOrPendingId = TeacherSubscription::where('teacher_id', $teacher->id)
+            ->whereIn('status', ['active', 'pending_review'])
+            ->max('id') ?? 0;
+
+        $rejected = TeacherSubscription::where('teacher_id', $teacher->id)
+            ->where('status', 'rejected')
+            ->where('id', '>', (int) $latestActiveOrPendingId)
+            ->latest('id')
+            ->first();
+
+        return [
+            'pendingRequest' => $this->formatSubscriptionRequest($pending),
+            'latestRejectedRequest' => $this->formatSubscriptionRequest($rejected),
+        ];
+    }
+
+    /**
      * Get active plan, plan catalog, usage quotas, and invoice history for the teacher.
      *
      * @return array<string, mixed>
@@ -395,6 +461,7 @@ class TeacherBillingService
     public function getBillingSummary(User $teacher): array
     {
         $activeSub = $this->getActiveSubscription($teacher);
+        $requestState = $this->resolvePendingAndRejectedRequests($teacher);
         $usage = $this->getUsageStats($teacher);
         $plans = $this->getPlansCatalog();
 
@@ -405,7 +472,8 @@ class TeacherBillingService
             ->map(function (TeacherInvoice $inv) {
                 $methodValue = $inv->payment_method?->value ?? 'vodafone';
                 $methodAr = $inv->payment_method?->label() ?? 'فودافون كاش';
-                $statusValue = $inv->status?->value ?? 'paid';
+                $rawStatus = $inv->status?->value ?? 'paid';
+                $statusValue = $rawStatus === 'failed' ? 'rejected' : $rawStatus;
                 $amountNum = (float) $inv->final_amount_egp;
 
                 return [
@@ -428,8 +496,10 @@ class TeacherBillingService
                     'methodLabelAr' => $methodAr,
                     'methodAr' => $methodAr,
                     'methodEn' => ucfirst($methodValue),
+                    'transactionReference' => $inv->transaction_reference,
                     'status' => $statusValue,
                     'statusLabelAr' => $inv->status?->label() ?? 'مدفوع',
+                    'rejectionReason' => $inv->rejection_reason,
                     'paidAt' => $inv->paid_at?->format('Y-m-d H:i') ?? $inv->created_at?->format('Y-m-d H:i'),
                 ];
             })
@@ -438,6 +508,8 @@ class TeacherBillingService
 
         return [
             'activeSub' => $activeSub,
+            'pendingRequest' => $requestState['pendingRequest'],
+            'latestRejectedRequest' => $requestState['latestRejectedRequest'],
             'plans' => $plans,
             'pricingMatrix' => self::PRICING,
             'usage' => $usage,
@@ -522,8 +594,10 @@ class TeacherBillingService
     }
 
     /**
-     * Activate a paid teacher subscription atomically.
-     * STRICT RULE: A teacher with an active paid subscription MUST cancel it before subscribing to another plan.
+     * Subscribe to a teacher tier (Plus / Pro).
+     * - STRICT rule: active paid plan OR pending request must be cancelled first.
+     * - Free effective price (Super Admin temporary free promo / 100% coupon): activates immediately without receipt.
+     * - Paid effective price (> 0 EGP): requires transaction reference + payment receipt & waits for Super Admin approval.
      */
     public function subscribeOrUpgrade(User $teacher, array $data): array
     {
@@ -540,6 +614,20 @@ class TeacherBillingService
             throw ValidationException::withMessages([
                 'plan_tier' => [__('messages.billing.cannot_subscribe_free')],
             ]);
+        }
+
+        $existingPending = TeacherSubscription::where('teacher_id', $teacher->id)
+            ->where('status', 'pending_review')
+            ->latest('id')
+            ->first();
+
+        if ($existingPending) {
+            throw new HttpResponseException(response()->json([
+                'success' => false,
+                'message' => 'لديك طلب اشتراك قيد المراجعة حالياً. يرجى انتظار اعتماد الإدارة أو إلغاء الطلب المعلّق أولاً.',
+                'error_code' => 'PENDING_SUBSCRIPTION_EXISTS',
+                'pending_request' => $this->formatSubscriptionRequest($existingPending),
+            ], Response::HTTP_CONFLICT));
         }
 
         // Enforce mandatory cancel-before-switch rule
@@ -561,16 +649,29 @@ class TeacherBillingService
         $rawPeriod = strtolower(trim((string) ($data['billing_period'] ?? $data['billingPeriod'] ?? 'monthly')));
         $period = BillingPeriod::tryFrom($rawPeriod) ?? BillingPeriod::MONTHLY;
 
-        $basePrice = (float) (self::PRICING[$tier->value][$period->value] ?? 120.0);
+        $fallbackPrice = (float) (self::PRICING[$tier->value][$period->value] ?? 120.0);
+        $resolvedPricing = PlatformSubscriptionPlan::resolveAuthoritativePrice(
+            'teacher',
+            $tier->value,
+            $period->value,
+            $fallbackPrice
+        );
+        $basePrice = (float) $resolvedPricing['basePrice'];
+        $isFreePromo = (bool) $resolvedPricing['isFreePromo'];
+
         $paymentMethodRaw = strtolower(trim((string) ($data['payment_method'] ?? 'vodafone')));
         $paymentMethod = PaymentMethod::tryFrom($paymentMethodRaw) ?? PaymentMethod::VODAFONE;
 
+        $transactionRef = trim(strip_tags((string) ($data['transaction_ref'] ?? $data['transaction_reference'] ?? '')));
         $senderRefParts = array_filter([
             ! empty($data['sender_phone']) ? trim(strip_tags((string) $data['sender_phone'])) : null,
             ! empty($data['sender_ipa']) ? trim(strip_tags((string) $data['sender_ipa'])) : null,
-            ! empty($data['transaction_ref']) ? trim(strip_tags((string) $data['transaction_ref'])) : null,
+            $transactionRef !== '' ? $transactionRef : null,
         ]);
         $senderReference = ! empty($senderRefParts) ? implode(' | ', $senderRefParts) : null;
+
+        /** @var UploadedFile|null $receiptFile */
+        $receiptFile = ($data['receipt_file'] ?? null) instanceof UploadedFile ? $data['receipt_file'] : null;
 
         $periodLabelAr = match ($period) {
             BillingPeriod::MONTHLY => 'شهرياً',
@@ -578,31 +679,39 @@ class TeacherBillingService
             BillingPeriod::ANNUAL => 'سنة دراسية كاملة',
         };
 
-        $planNameAr = "{$tier->labelAr()} — {$periodLabelAr}";
-        $planNameEn = "{$tier->labelEn()} ({$period->value})";
+        $displayTierAr = $resolvedPricing['planNameAr'] ?: $tier->labelAr();
+        $displayTierEn = $resolvedPricing['planNameEn'] ?: $tier->labelEn();
+        $planNameAr = "{$displayTierAr} — {$periodLabelAr}";
+        $planNameEn = "{$displayTierEn} ({$period->value})";
 
         $startsAt = Carbon::now();
-        $renewsAt = $startsAt->copy()->addDays($period->durationDays());
+        $renewsAt = $isFreePromo && $resolvedPricing['freePromoUntil'] instanceof Carbon && $resolvedPricing['freePromoUntil']->isFuture()
+            ? $resolvedPricing['freePromoUntil']->copy()
+            : $startsAt->copy()->addDays($period->durationDays());
 
         /** @var TeacherSubscription $subscription */
         /** @var TeacherInvoice $invoice */
-        [$subscription, $invoice] = DB::transaction(function () use (
+        /** @var bool $requiresApproval */
+        [$subscription, $invoice, $requiresApproval] = DB::transaction(function () use (
             $teacher,
             $tier,
             $period,
             $basePrice,
+            $isFreePromo,
             $startsAt,
             $renewsAt,
             $planNameAr,
             $planNameEn,
             $paymentMethod,
+            $transactionRef,
             $senderReference,
+            $receiptFile,
             $data
         ) {
             $discountAmount = 0.0;
             $appliedCoupon = null;
 
-            if (! empty($data['coupon_code'])) {
+            if ($basePrice > 0 && ! empty($data['coupon_code'])) {
                 $cleanCode = strtoupper(trim(strip_tags((string) $data['coupon_code'])));
                 /** @var DiscountCoupon|null $dbCoupon */
                 $dbCoupon = DiscountCoupon::where('code', $cleanCode)->lockForUpdate()->first();
@@ -623,11 +732,30 @@ class TeacherBillingService
             }
 
             $finalPrice = max(0.0, round($basePrice - $discountAmount, 2));
+            $needsReview = $finalPrice > 0.0;
 
-            // Close any residual active free rows before activating the paid subscription
-            TeacherSubscription::where('teacher_id', $teacher->id)
-                ->where('status', 'active')
-                ->update(['status' => 'superseded']);
+            if ($needsReview) {
+                if (mb_strlen($transactionRef) < 3) {
+                    throw ValidationException::withMessages([
+                        'transaction_ref' => ['يرجى إدخال كود العملية / الرقم المرجعي للتحويل (3 أحرف على الأقل).'],
+                    ]);
+                }
+                if (! $receiptFile) {
+                    throw ValidationException::withMessages([
+                        'receipt' => ['يرجى إرفاق صورة أو ملف إيصال التحويل ليتم مراجعته واعتماده من إدارة المنصة.'],
+                    ]);
+                }
+            }
+
+            $receiptMeta = $receiptFile
+                ? $this->receiptService->storeReceipt($receiptFile, 'teacher', (int) $teacher->id)
+                : null;
+
+            if (! $needsReview) {
+                TeacherSubscription::where('teacher_id', $teacher->id)
+                    ->where('status', 'active')
+                    ->update(['status' => 'superseded']);
+            }
 
             $sub = TeacherSubscription::create([
                 'teacher_id' => $teacher->id,
@@ -636,13 +764,25 @@ class TeacherBillingService
                 'plan_name_en' => $planNameEn,
                 'billing_period' => $period,
                 'amount_egp' => $finalPrice,
+                'base_amount_egp' => $basePrice,
+                'discount_amount_egp' => $discountAmount,
+                'coupon_code' => $appliedCoupon,
+                'payment_method' => $needsReview ? $paymentMethod->value : 'free_promo',
+                'transaction_reference' => $transactionRef !== '' ? $transactionRef : null,
+                'sender_reference' => $senderReference,
+                'receipt_path' => $receiptMeta['path'] ?? null,
+                'receipt_disk' => $receiptMeta['disk'] ?? 'local',
+                'receipt_original_name' => $receiptMeta['original_name'] ?? null,
+                'receipt_mime_type' => $receiptMeta['mime_type'] ?? null,
+                'is_free_promo' => $isFreePromo,
                 'starts_at' => $startsAt,
                 'renews_at' => $renewsAt,
-                'status' => 'active',
+                'status' => $needsReview ? 'pending_review' : 'active',
             ]);
 
-            // Ensure teacher profile exists and stays synced with active tier
-            $this->syncProfilePlanTier($teacher, $tier, true);
+            if (! $needsReview) {
+                $this->syncProfilePlanTier($teacher, $tier, true);
+            }
 
             $inv = TeacherInvoice::create([
                 'invoice_number' => TeacherInvoice::generateUniqueInvoiceNumber(),
@@ -656,22 +796,26 @@ class TeacherBillingService
                 'coupon_code' => $appliedCoupon,
                 'payment_method' => $paymentMethod,
                 'sender_reference' => $senderReference,
-                'status' => InvoiceStatus::PAID,
-                'paid_at' => $startsAt,
+                'transaction_reference' => $transactionRef !== '' ? $transactionRef : null,
+                'receipt_path' => $receiptMeta['path'] ?? null,
+                'status' => $needsReview ? InvoiceStatus::PENDING : InvoiceStatus::PAID,
+                'paid_at' => $needsReview ? null : $startsAt,
             ]);
 
-            return [$sub, $inv];
+            return [$sub, $inv, $needsReview];
         });
 
         $this->logSecurityEvent(
-            'teacher.plan_subscribed',
+            $requiresApproval ? 'teacher.subscription.submitted_for_review' : 'teacher.plan_subscribed',
             [
                 'teacher_id' => $teacher->id,
                 'tier' => $tier->value,
                 'period' => $period->value,
                 'invoice_number' => $invoice->invoice_number,
                 'final_price' => $invoice->final_amount_egp,
+                'is_free_promo' => $isFreePromo,
                 'payment_method' => $paymentMethod->value,
+                'transaction_reference' => $transactionRef !== '' ? $transactionRef : null,
                 'coupon_code' => $invoice->coupon_code,
             ],
             'info',
@@ -682,17 +826,54 @@ class TeacherBillingService
             'subscription' => $subscription,
             'invoice' => $invoice,
             'activeSub' => $this->getActiveSubscription($teacher),
+            'pendingRequest' => $requiresApproval ? $this->formatSubscriptionRequest($subscription) : null,
+            'requiresApproval' => $requiresApproval,
+            'status' => $subscription->status,
             'usage' => $this->getUsageStats($teacher),
             'daysRemaining' => $period->durationDays(),
-            'messageAr' => __('messages.billing.subscribed_successfully'),
+            'messageAr' => $requiresApproval
+                ? "تم إرسال طلب اشتراك {$planNameAr} وإيصال الدفع للمراجعة بنجاح — سيتم تفعيل الباقة فور اعتماد الإدارة."
+                : "تم تفعيل {$planNameAr} مجاناً بنجاح فوراً بدون انتظار!",
         ];
     }
 
     /**
-     * Cancel the teacher's active paid subscription and revert their account to the Free tier.
+     * Cancel either a pending approval subscription request OR the teacher's active paid subscription.
      */
     public function cancelSubscription(User $teacher): array
     {
+        $pending = TeacherSubscription::where('teacher_id', $teacher->id)
+            ->where('status', 'pending_review')
+            ->latest('id')
+            ->first();
+
+        if ($pending) {
+            DB::transaction(function () use ($pending): void {
+                $pending->update([
+                    'status' => 'cancelled',
+                    'cancelled_at' => Carbon::now(),
+                ]);
+
+                TeacherInvoice::where('subscription_id', $pending->id)
+                    ->where('status', InvoiceStatus::PENDING->value)
+                    ->update(['status' => InvoiceStatus::FAILED->value]);
+            });
+
+            $this->logSecurityEvent('teacher.subscription.request_cancelled', [
+                'teacher_id' => $teacher->id,
+                'subscription_uuid' => $pending->uuid,
+            ], 'info', $pending);
+
+            return [
+                'activeSub' => $this->getActiveSubscription($teacher),
+                'pendingRequest' => null,
+                'usage' => $this->getUsageStats($teacher),
+                'previousPlan' => is_object($pending->plan_tier) ? $pending->plan_tier->value : (string) $pending->plan_tier,
+                'cancelledType' => 'pending_request',
+                'messageAr' => 'تم إلغاء طلب الاشتراك المعلّق بنجاح. يمكنك الآن اختيار باقة أخرى.',
+            ];
+        }
+
         $currentTier = $this->resolveActivePlanTier($teacher);
 
         if ($currentTier === TeacherPlanTier::FREE) {
@@ -707,13 +888,6 @@ class TeacherBillingService
                 ->where('status', 'active')
                 ->latest('id')
                 ->first();
-
-            if ($active) {
-                $active->update([
-                    'status' => 'cancelled',
-                    'cancelled_at' => Carbon::now(),
-                ]);
-            }
 
             TeacherSubscription::where('teacher_id', $teacher->id)
                 ->where('status', 'active')
@@ -740,8 +914,10 @@ class TeacherBillingService
 
         return [
             'activeSub' => $this->getActiveSubscription($teacher),
+            'pendingRequest' => null,
             'usage' => $this->getUsageStats($teacher),
             'previousPlan' => $currentTier->value,
+            'cancelledType' => 'active_subscription',
             'messageAr' => __('messages.billing.cancelled_successfully'),
         ];
     }

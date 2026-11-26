@@ -20,18 +20,24 @@ use App\Models\PlatformSubscriptionPlan;
 use App\Models\StudyGroup;
 use App\Models\User;
 use App\Services\BaseService;
+use App\Services\V1\SubscriptionReceiptService;
 use Carbon\Carbon;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
 class CenterBillingService extends BaseService
 {
+    public function __construct(
+        protected SubscriptionReceiptService $receiptService
+    ) {}
+
     /**
-     * Authoritative server-side pricing matrix (EGP) for the 3 center subscription tiers:
+     * Authoritative fallback pricing matrix (EGP) for the 3 center subscription tiers:
      * Free (0 EGP), Plus (200 / 800 / 1,500 EGP), Pro (400 / 1,600 / 3,000 EGP).
-     * Term = 5 months (-20% vs monthly), Annual = 10 academic months (-25% vs monthly).
+     * Live DB values (including Super Admin discounts & temporary free promos) always take precedence.
      */
     public const PRICING = [
         'free' => [
@@ -327,6 +333,7 @@ class CenterBillingService extends BaseService
             'billingPeriod' => $period->value,
             'status' => $active?->status ?? 'active',
             'isFree' => $isFree,
+            'isFreePromo' => (bool) ($active?->is_free_promo ?? false),
             'canCancel' => ! $isFree,
             'mustCancelToSwitch' => ! $isFree,
             'startsAt' => $active?->starts_at?->toDateString() ?? $center->created_at?->toDateString(),
@@ -341,6 +348,68 @@ class CenterBillingService extends BaseService
     }
 
     /**
+     * @return array<string, mixed>|null
+     */
+    protected function formatSubscriptionRequest(?CenterSubscription $sub): ?array
+    {
+        if (! $sub) {
+            return null;
+        }
+
+        $tierVal = $sub->plan_tier instanceof CenterPlanTier ? $sub->plan_tier->value : (string) $sub->plan_tier;
+        $periodVal = $sub->billing_period instanceof BillingPeriod ? $sub->billing_period->value : (string) $sub->billing_period;
+        $pmEnum = PaymentMethod::tryFrom((string) ($sub->payment_method ?? ''));
+
+        return [
+            'id' => $sub->uuid,
+            'planTier' => $tierVal,
+            'planNameAr' => $sub->plan_name_ar,
+            'planNameEn' => $sub->plan_name_en ?: $sub->plan_name_ar,
+            'billingPeriod' => $periodVal,
+            'amountEgp' => (float) $sub->amount_egp,
+            'baseAmountEgp' => (float) ($sub->base_amount_egp ?? $sub->amount_egp),
+            'discountAmountEgp' => (float) ($sub->discount_amount_egp ?? 0),
+            'couponCode' => $sub->coupon_code,
+            'paymentMethod' => (string) ($sub->payment_method ?? ''),
+            'paymentMethodLabelAr' => $pmEnum?->label() ?? (string) ($sub->payment_method ?? ''),
+            'transactionReference' => $sub->transaction_reference,
+            'senderReference' => $sub->sender_reference,
+            'hasReceipt' => ! empty($sub->receipt_path),
+            'status' => (string) $sub->status,
+            'rejectionReason' => $sub->rejection_reason,
+            'submittedAt' => $sub->created_at?->toIso8601String(),
+            'submittedDate' => $sub->created_at?->format('Y-m-d H:i'),
+            'reviewedAt' => $sub->reviewed_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array{pendingRequest: array<string, mixed>|null, latestRejectedRequest: array<string, mixed>|null}
+     */
+    protected function resolvePendingAndRejectedRequests(User $center): array
+    {
+        $pending = CenterSubscription::where('center_id', $center->id)
+            ->where('status', 'pending_review')
+            ->latest('id')
+            ->first();
+
+        $latestActiveOrPendingId = CenterSubscription::where('center_id', $center->id)
+            ->whereIn('status', ['active', 'pending_review'])
+            ->max('id') ?? 0;
+
+        $rejected = CenterSubscription::where('center_id', $center->id)
+            ->where('status', 'rejected')
+            ->where('id', '>', (int) $latestActiveOrPendingId)
+            ->latest('id')
+            ->first();
+
+        return [
+            'pendingRequest' => $this->formatSubscriptionRequest($pending),
+            'latestRejectedRequest' => $this->formatSubscriptionRequest($rejected),
+        ];
+    }
+
+    /**
      * Get full billing overview for the center.
      *
      * @return array<string, mixed>
@@ -348,6 +417,7 @@ class CenterBillingService extends BaseService
     public function getBillingSummary(User $center): array
     {
         $activeSub = $this->getActiveSubscription($center);
+        $requestState = $this->resolvePendingAndRejectedRequests($center);
         $usage = $this->getUsageStats($center);
         $plans = $this->getPlansCatalog();
 
@@ -358,7 +428,8 @@ class CenterBillingService extends BaseService
             ->map(function (CenterInvoice $inv) {
                 $methodValue = $inv->payment_method?->value ?? 'instapay';
                 $methodAr = $inv->payment_method?->label() ?? 'إنستاباي (InstaPay)';
-                $statusValue = $inv->status?->value ?? 'paid';
+                $rawStatus = $inv->status?->value ?? 'paid';
+                $statusValue = $rawStatus === 'failed' ? 'rejected' : $rawStatus;
                 $amountNum = (float) $inv->final_amount_egp;
 
                 return [
@@ -377,8 +448,10 @@ class CenterBillingService extends BaseService
                     'paymentMethod' => $methodValue,
                     'methodAr' => $methodAr,
                     'methodEn' => ucfirst($methodValue),
+                    'transactionReference' => $inv->transaction_reference,
                     'status' => $statusValue,
                     'statusLabelAr' => $inv->status?->label() ?? 'مدفوع',
+                    'rejectionReason' => $inv->rejection_reason,
                     'paidAt' => $inv->paid_at?->format('Y-m-d H:i') ?? $inv->created_at?->format('Y-m-d H:i'),
                 ];
             })
@@ -387,6 +460,8 @@ class CenterBillingService extends BaseService
 
         return [
             'activeSub' => $activeSub,
+            'pendingRequest' => $requestState['pendingRequest'],
+            'latestRejectedRequest' => $requestState['latestRejectedRequest'],
             'plans' => $plans,
             'pricingMatrix' => self::PRICING,
             'usage' => $usage,
@@ -465,8 +540,10 @@ class CenterBillingService extends BaseService
     }
 
     /**
-     * Activate a paid center subscription atomically with server-side authoritative pricing.
-     * STRICT RULE: A center with an active paid subscription MUST cancel it before switching plans.
+     * Subscribe to a center tier (Plus / Pro).
+     * - STRICT rule: active paid plan OR pending request must be cancelled first.
+     * - Free effective price (Super Admin temporary free promo / 100% coupon): activates immediately without receipt.
+     * - Paid effective price (> 0 EGP): requires transaction reference + payment receipt & waits for Super Admin approval.
      */
     public function subscribeOrUpgrade(User $center, array $data): array
     {
@@ -489,6 +566,20 @@ class CenterBillingService extends BaseService
             ]);
         }
 
+        $existingPending = CenterSubscription::where('center_id', $center->id)
+            ->where('status', 'pending_review')
+            ->latest('id')
+            ->first();
+
+        if ($existingPending) {
+            throw new HttpResponseException(response()->json([
+                'success' => false,
+                'message' => 'لديك طلب اشتراك قيد المراجعة حالياً. يرجى انتظار اعتماد الإدارة أو إلغاء الطلب المعلّق أولاً.',
+                'error_code' => 'PENDING_SUBSCRIPTION_EXISTS',
+                'pending_request' => $this->formatSubscriptionRequest($existingPending),
+            ], Response::HTTP_CONFLICT));
+        }
+
         $currentTier = $this->resolveActivePlanTier($center);
         if ($currentTier !== CenterPlanTier::FREE) {
             $isEn = app()->getLocale() === 'en';
@@ -507,16 +598,29 @@ class CenterBillingService extends BaseService
         $rawPeriod = strtolower(trim((string) ($data['billing_period'] ?? $data['billingPeriod'] ?? 'monthly')));
         $period = BillingPeriod::tryFrom($rawPeriod) ?? BillingPeriod::MONTHLY;
 
-        $basePrice = (float) (self::PRICING[$tier->value][$period->value] ?? 200.0);
+        $fallbackPrice = (float) (self::PRICING[$tier->value][$period->value] ?? 200.0);
+        $resolvedPricing = PlatformSubscriptionPlan::resolveAuthoritativePrice(
+            'center',
+            $tier->value,
+            $period->value,
+            $fallbackPrice
+        );
+        $basePrice = (float) $resolvedPricing['basePrice'];
+        $isFreePromo = (bool) $resolvedPricing['isFreePromo'];
+
         $paymentMethodRaw = strtolower(trim((string) ($data['payment_method'] ?? 'instapay')));
         $paymentMethod = PaymentMethod::tryFrom($paymentMethodRaw) ?? PaymentMethod::INSTAPAY;
 
+        $transactionRef = trim(strip_tags((string) ($data['transaction_ref'] ?? $data['transaction_reference'] ?? '')));
         $senderRefParts = array_filter([
             ! empty($data['sender_phone']) ? trim(strip_tags((string) $data['sender_phone'])) : null,
             ! empty($data['sender_ipa']) ? trim(strip_tags((string) $data['sender_ipa'])) : null,
-            ! empty($data['transaction_ref']) ? trim(strip_tags((string) $data['transaction_ref'])) : null,
+            $transactionRef !== '' ? $transactionRef : null,
         ]);
         $senderReference = ! empty($senderRefParts) ? implode(' | ', $senderRefParts) : null;
+
+        /** @var UploadedFile|null $receiptFile */
+        $receiptFile = ($data['receipt_file'] ?? null) instanceof UploadedFile ? $data['receipt_file'] : null;
 
         $periodLabelAr = match ($period) {
             BillingPeriod::MONTHLY => 'شهرياً',
@@ -524,31 +628,39 @@ class CenterBillingService extends BaseService
             BillingPeriod::ANNUAL => 'سنة دراسية كاملة (10 شهور)',
         };
 
-        $planNameAr = "{$tier->labelAr()} — {$periodLabelAr}";
-        $planNameEn = "{$tier->labelEn()} ({$period->value})";
+        $displayTierAr = $resolvedPricing['planNameAr'] ?: $tier->labelAr();
+        $displayTierEn = $resolvedPricing['planNameEn'] ?: $tier->labelEn();
+        $planNameAr = "{$displayTierAr} — {$periodLabelAr}";
+        $planNameEn = "{$displayTierEn} ({$period->value})";
 
         $startsAt = Carbon::now();
-        $renewsAt = $startsAt->copy()->addDays($period->durationDays());
+        $renewsAt = $isFreePromo && $resolvedPricing['freePromoUntil'] instanceof Carbon && $resolvedPricing['freePromoUntil']->isFuture()
+            ? $resolvedPricing['freePromoUntil']->copy()
+            : $startsAt->copy()->addDays($period->durationDays());
 
         /** @var CenterSubscription $subscription */
         /** @var CenterInvoice $invoice */
-        [$subscription, $invoice] = $this->transaction(function () use (
+        /** @var bool $requiresApproval */
+        [$subscription, $invoice, $requiresApproval] = $this->transaction(function () use (
             $center,
             $tier,
             $period,
             $basePrice,
+            $isFreePromo,
             $startsAt,
             $renewsAt,
             $planNameAr,
             $planNameEn,
             $paymentMethod,
+            $transactionRef,
             $senderReference,
+            $receiptFile,
             $data
         ) {
             $discountAmount = 0.0;
             $appliedCoupon = null;
 
-            if (! empty($data['coupon_code'])) {
+            if ($basePrice > 0 && ! empty($data['coupon_code'])) {
                 $cleanCode = strtoupper(trim(strip_tags((string) $data['coupon_code'])));
                 /** @var DiscountCoupon|null $dbCoupon */
                 $dbCoupon = DiscountCoupon::where('code', $cleanCode)->lockForUpdate()->first();
@@ -569,10 +681,30 @@ class CenterBillingService extends BaseService
             }
 
             $finalPrice = max(0.0, round($basePrice - $discountAmount, 2));
+            $needsReview = $finalPrice > 0.0;
 
-            CenterSubscription::where('center_id', $center->id)
-                ->where('status', 'active')
-                ->update(['status' => 'superseded']);
+            if ($needsReview) {
+                if (mb_strlen($transactionRef) < 3) {
+                    throw ValidationException::withMessages([
+                        'transaction_ref' => ['يرجى إدخال كود العملية / الرقم المرجعي للتحويل (3 أحرف على الأقل).'],
+                    ]);
+                }
+                if (! $receiptFile) {
+                    throw ValidationException::withMessages([
+                        'receipt' => ['يرجى إرفاق صورة أو ملف إيصال التحويل ليتم مراجعته واعتماده من إدارة المنصة.'],
+                    ]);
+                }
+            }
+
+            $receiptMeta = $receiptFile
+                ? $this->receiptService->storeReceipt($receiptFile, 'center', (int) $center->id)
+                : null;
+
+            if (! $needsReview) {
+                CenterSubscription::where('center_id', $center->id)
+                    ->where('status', 'active')
+                    ->update(['status' => 'superseded']);
+            }
 
             $sub = CenterSubscription::create([
                 'center_id' => $center->id,
@@ -581,12 +713,25 @@ class CenterBillingService extends BaseService
                 'plan_name_en' => $planNameEn,
                 'billing_period' => $period,
                 'amount_egp' => $finalPrice,
+                'base_amount_egp' => $basePrice,
+                'discount_amount_egp' => $discountAmount,
+                'coupon_code' => $appliedCoupon,
+                'payment_method' => $needsReview ? $paymentMethod->value : 'free_promo',
+                'transaction_reference' => $transactionRef !== '' ? $transactionRef : null,
+                'sender_reference' => $senderReference,
+                'receipt_path' => $receiptMeta['path'] ?? null,
+                'receipt_disk' => $receiptMeta['disk'] ?? 'local',
+                'receipt_original_name' => $receiptMeta['original_name'] ?? null,
+                'receipt_mime_type' => $receiptMeta['mime_type'] ?? null,
+                'is_free_promo' => $isFreePromo,
                 'starts_at' => $startsAt,
                 'renews_at' => $renewsAt,
-                'status' => 'active',
+                'status' => $needsReview ? 'pending_review' : 'active',
             ]);
 
-            $this->syncProfilePlanTier($center, $tier, true);
+            if (! $needsReview) {
+                $this->syncProfilePlanTier($center, $tier, true);
+            }
 
             $inv = CenterInvoice::create([
                 'invoice_number' => CenterInvoice::generateUniqueInvoiceNumber(),
@@ -600,22 +745,26 @@ class CenterBillingService extends BaseService
                 'coupon_code' => $appliedCoupon,
                 'payment_method' => $paymentMethod,
                 'sender_reference' => $senderReference,
-                'status' => InvoiceStatus::PAID,
-                'paid_at' => $startsAt,
+                'transaction_reference' => $transactionRef !== '' ? $transactionRef : null,
+                'receipt_path' => $receiptMeta['path'] ?? null,
+                'status' => $needsReview ? InvoiceStatus::PENDING : InvoiceStatus::PAID,
+                'paid_at' => $needsReview ? null : $startsAt,
             ]);
 
-            return [$sub, $inv];
+            return [$sub, $inv, $needsReview];
         });
 
         $this->logSecurityEvent(
-            'center.plan_subscribed',
+            $requiresApproval ? 'center.subscription.submitted_for_review' : 'center.plan_subscribed',
             [
                 'center_id' => $center->id,
                 'tier' => $tier->value,
                 'period' => $period->value,
                 'invoice_number' => $invoice->invoice_number,
                 'final_price' => $invoice->final_amount_egp,
+                'is_free_promo' => $isFreePromo,
                 'payment_method' => $paymentMethod->value,
+                'transaction_reference' => $transactionRef !== '' ? $transactionRef : null,
                 'coupon_code' => $invoice->coupon_code,
             ],
             'info',
@@ -626,17 +775,54 @@ class CenterBillingService extends BaseService
             'subscription' => $subscription,
             'invoice' => $invoice,
             'activeSub' => $this->getActiveSubscription($center),
+            'pendingRequest' => $requiresApproval ? $this->formatSubscriptionRequest($subscription) : null,
+            'requiresApproval' => $requiresApproval,
+            'status' => $subscription->status,
             'usage' => $this->getUsageStats($center),
             'daysRemaining' => $period->durationDays(),
-            'messageAr' => __('messages.billing.subscribed_successfully'),
+            'messageAr' => $requiresApproval
+                ? "تم إرسال طلب اشتراك {$planNameAr} وإيصال الدفع للمراجعة بنجاح — سيتم تفعيل الباقة فور اعتماد الإدارة."
+                : "تم تفعيل {$planNameAr} مجاناً بنجاح فوراً بدون انتظار!",
         ];
     }
 
     /**
-     * Cancel the center's active paid subscription and revert their account to the Free tier.
+     * Cancel either a pending approval subscription request OR the center's active paid subscription.
      */
     public function cancelSubscription(User $center): array
     {
+        $pending = CenterSubscription::where('center_id', $center->id)
+            ->where('status', 'pending_review')
+            ->latest('id')
+            ->first();
+
+        if ($pending) {
+            $this->transaction(function () use ($pending): void {
+                $pending->update([
+                    'status' => 'cancelled',
+                    'cancelled_at' => Carbon::now(),
+                ]);
+
+                CenterInvoice::where('subscription_id', $pending->id)
+                    ->where('status', InvoiceStatus::PENDING->value)
+                    ->update(['status' => InvoiceStatus::FAILED->value]);
+            });
+
+            $this->logSecurityEvent('center.subscription.request_cancelled', [
+                'center_id' => $center->id,
+                'subscription_uuid' => $pending->uuid,
+            ], 'info', $pending);
+
+            return [
+                'activeSub' => $this->getActiveSubscription($center),
+                'pendingRequest' => null,
+                'usage' => $this->getUsageStats($center),
+                'previousPlan' => is_object($pending->plan_tier) ? $pending->plan_tier->value : (string) $pending->plan_tier,
+                'cancelledType' => 'pending_request',
+                'messageAr' => 'تم إلغاء طلب الاشتراك المعلّق بنجاح. يمكنك الآن اختيار باقة أخرى.',
+            ];
+        }
+
         $currentTier = $this->resolveActivePlanTier($center);
 
         if ($currentTier === CenterPlanTier::FREE) {
@@ -677,8 +863,10 @@ class CenterBillingService extends BaseService
 
         return [
             'activeSub' => $this->getActiveSubscription($center),
+            'pendingRequest' => null,
             'usage' => $this->getUsageStats($center),
             'previousPlan' => $currentTier->value,
+            'cancelledType' => 'active_subscription',
             'messageAr' => __('messages.billing.cancelled_successfully'),
         ];
     }

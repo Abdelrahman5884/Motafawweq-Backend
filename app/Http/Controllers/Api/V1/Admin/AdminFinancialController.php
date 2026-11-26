@@ -8,13 +8,16 @@ use App\Http\Requests\V1\Admin\SaveAdminCouponRequest;
 use App\Http\Requests\V1\Admin\SaveAdminSubscriptionPlanRequest;
 use App\Http\Requests\V1\Admin\StoreAdminPayoutRequest;
 use App\Services\V1\Admin\AdminFinancialService;
+use App\Services\V1\SubscriptionReceiptService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 class AdminFinancialController extends BaseApiController
 {
     public function __construct(
-        protected AdminFinancialService $financialService
+        protected AdminFinancialService $financialService,
+        protected SubscriptionReceiptService $receiptService
     ) {}
 
     /**
@@ -182,6 +185,77 @@ class AdminFinancialController extends BaseApiController
         $plans = $this->financialService->resetPlansToDefault($this->authenticatedUser());
 
         return $this->successResponse($plans, __('messages.admin.plans_reset'));
+    }
+
+    /* ── Subscription Payment Approval Queue (All Roles) ── */
+
+    /**
+     * GET /api/v1/admin/financials/subscription-requests
+     */
+    public function subscriptionRequests(Request $request): JsonResponse
+    {
+        $result = $this->financialService->listSubscriptionRequests([
+            'status' => $request->query('status', 'pending_review'),
+            'role' => $request->query('role'),
+            'search' => $request->query('search'),
+            'page' => $request->query('page', 1),
+            'per_page' => $request->query('per_page', 20),
+        ]);
+
+        return $this->successResponse(
+            $result['items'],
+            'تم جلب طلبات الاشتراك وإيصالات الدفع بنجاح.',
+            200,
+            array_merge($result['meta'], ['summary' => $result['summary']])
+        );
+    }
+
+    /**
+     * POST /api/v1/admin/financials/subscription-requests/{role}/{uuid}/approve
+     */
+    public function approveSubscriptionRequest(string $role, string $uuid): JsonResponse
+    {
+        $result = $this->financialService->approveSubscriptionRequest(
+            $this->authenticatedUser(),
+            $role,
+            $uuid
+        );
+
+        return $this->successResponse($result, 'تم اعتماد طلب الاشتراك وتفعيل الباقة للمستخدم بنجاح.');
+    }
+
+    /**
+     * POST /api/v1/admin/financials/subscription-requests/{role}/{uuid}/reject
+     */
+    public function rejectSubscriptionRequest(Request $request, string $role, string $uuid): JsonResponse
+    {
+        $validated = $request->validate([
+            'reason' => ['nullable', 'string', 'min:3', 'max:500'],
+            'rejection_reason' => ['nullable', 'string', 'min:3', 'max:500'],
+        ]);
+
+        $reason = (string) ($validated['reason'] ?? $validated['rejection_reason'] ?? '');
+
+        $result = $this->financialService->rejectSubscriptionRequest(
+            $this->authenticatedUser(),
+            $role,
+            $uuid,
+            $reason
+        );
+
+        return $this->successResponse($result, 'تم رفض طلب الاشتراك وإبلاغ المستخدم بالسبب.');
+    }
+
+    /**
+     * GET /api/v1/media/admin/subscription-receipts/{role}/{uuid} (signed URL)
+     */
+    public function streamSubscriptionReceipt(Request $request, string $role, string $uuid): Response
+    {
+        if (! $request->hasValidSignature()) {
+            return $this->forbiddenResponse(__('messages.invalid_signed_url'));
+        }
+
+        return $this->receiptService->streamReceipt($role, $uuid);
     }
 
     /* ── Payout Requests ── */

@@ -24,6 +24,8 @@ use App\Models\StudyGroup;
 use App\Models\TeacherProfile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -592,26 +594,44 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
 
     public function test_teacher_can_upgrade_plan_with_coupon_generating_official_invoice(): void
     {
+        Storage::fake('local');
         $teacher = $this->createTeacher('free.upgrade@motafawweq.com', TeacherPlanTier::FREE);
+        $admin = User::factory()->admin()->create([
+            'status' => UserStatus::ACTIVE,
+            'email_verified_at' => now(),
+        ]);
 
         Sanctum::actingAs($teacher, [TokenType::ACCESS->value]);
 
+        $pngBytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
         $payload = [
             'plan_tier' => TeacherPlanTier::PRO->value,
             'billing_period' => BillingPeriod::TERM->value, // 600 EGP base (150/mo * 5 - 20%)
             'payment_method' => PaymentMethod::VODAFONE->value,
             'coupon_code' => 'TEACHER2026', // 25% discount -> 450 EGP
+            'sender_phone' => '01012345678',
+            'transaction_ref' => 'VF-PRO-TERM-450',
+            'receipt' => UploadedFile::fake()->createWithContent('pro-term.png', $pngBytes),
         ];
 
-        $response = $this->postJson('/api/v1/teacher/billing/subscribe', $payload);
+        $response = $this->post('/api/v1/teacher/billing/subscribe', $payload, ['Accept' => 'application/json']);
 
         $response->assertOk()
-            ->assertJsonPath('data.activeSub.planTier', 'pro')
-            ->assertJsonPath('data.activeSub.amountEgp', 450)
+            ->assertJsonPath('data.requiresApproval', true)
+            ->assertJsonPath('data.status', 'pending_review')
+            ->assertJsonPath('data.activeSub.planTier', 'free')
             ->assertJsonPath('data.invoice.baseAmount', 600)
             ->assertJsonPath('data.invoice.discountAmount', 150)
             ->assertJsonPath('data.invoice.finalAmount', 450)
-            ->assertJsonPath('data.invoice.status', 'paid');
+            ->assertJsonPath('data.invoice.status', 'pending');
+
+        $pendingUuid = (string) $response->json('data.pendingRequest.id');
+
+        // Super Admin approves -> Pro activates and invoice transitions to paid
+        Sanctum::actingAs($admin, [TokenType::ACCESS->value]);
+        $this->postJson("/api/v1/admin/financials/subscription-requests/teacher/{$pendingUuid}/approve")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'active');
 
         $this->assertDatabaseHas('teacher_subscriptions', [
             'teacher_id' => $teacher->id,
@@ -632,7 +652,10 @@ class TeacherCertificatesAndFinancialsTest extends TestCase
         ]);
 
         $this->assertDatabaseHas('security_audit_logs', [
-            'event' => 'teacher.plan_subscribed',
+            'event' => 'teacher.subscription.submitted_for_review',
+        ]);
+        $this->assertDatabaseHas('security_audit_logs', [
+            'event' => 'admin.subscription.approved',
         ]);
     }
 }

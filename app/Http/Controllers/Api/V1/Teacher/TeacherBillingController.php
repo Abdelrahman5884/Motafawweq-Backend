@@ -45,15 +45,23 @@ class TeacherBillingController extends Controller
 
     public function subscribe(SubscribePlanRequest $request): JsonResponse
     {
+        $payload = $request->validated();
+        if ($request->hasFile('receipt')) {
+            $payload['receipt_file'] = $request->file('receipt');
+        }
+
         $result = $this->billingService->subscribeOrUpgrade(
             $request->user(),
-            $request->validated()
+            $payload
         );
 
         return $this->success([
             'activeSub' => $result['activeSub'],
+            'pendingRequest' => $result['pendingRequest'] ?? null,
+            'requiresApproval' => (bool) ($result['requiresApproval'] ?? false),
+            'status' => $result['status'] ?? 'active',
             'usage' => $result['usage'],
-            'invoice' => new TeacherInvoiceResource($result['invoice']),
+            'invoice' => $result['invoice'] ? new TeacherInvoiceResource($result['invoice']) : null,
         ], $result['messageAr']);
     }
 
@@ -63,8 +71,10 @@ class TeacherBillingController extends Controller
 
         return $this->success([
             'activeSub' => $result['activeSub'],
+            'pendingRequest' => $result['pendingRequest'] ?? null,
             'usage' => $result['usage'],
             'previousPlan' => $result['previousPlan'],
+            'cancelledType' => $result['cancelledType'] ?? 'active_subscription',
         ], $result['messageAr']);
     }
 }

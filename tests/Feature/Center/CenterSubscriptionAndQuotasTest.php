@@ -9,6 +9,8 @@ use App\Models\CenterSubscription;
 use App\Models\DiscountCoupon;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -22,6 +24,13 @@ class CenterSubscriptionAndQuotasTest extends TestCase
             'status' => UserStatus::ACTIVE,
             'email_verified_at' => now(),
         ]);
+    }
+
+    private function fakeReceiptPng(string $name = 'receipt.png'): UploadedFile
+    {
+        $pngBytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+
+        return UploadedFile::fake()->createWithContent($name, $pngBytes);
     }
 
     public function test_new_center_defaults_to_free_tier_and_auth_me_exposes_center_entitlements(): void
@@ -173,7 +182,12 @@ class CenterSubscriptionAndQuotasTest extends TestCase
 
     public function test_center_billing_lifecycle_coupons_authoritative_pricing_and_cancel_before_switch(): void
     {
+        Storage::fake('local');
         $center = $this->createFreeCenter();
+        $admin = User::factory()->admin()->create([
+            'status' => UserStatus::ACTIVE,
+            'email_verified_at' => now(),
+        ]);
         Sanctum::actingAs($center, ['access']);
 
         $dbCoupon = DiscountCoupon::create([
@@ -193,31 +207,54 @@ class CenterSubscriptionAndQuotasTest extends TestCase
             ->assertJsonPath('data.discountPercent', 20)
             ->assertJsonPath('data.finalAmountEgp', 640);
 
-        // Subscribe to Plus Term (authoritative base = 800 EGP, 30% coupon => 560 EGP)
-        $subRes = $this->postJson('/api/v1/center/billing/subscribe', [
+        // Subscribe to Plus Term with receipt + transaction_ref (authoritative base = 800 EGP, 30% coupon => 560 EGP)
+        $subRes = $this->post('/api/v1/center/billing/subscribe', [
             'plan_tier' => 'plan-center-plus',
             'billing_period' => 'term',
             'payment_method' => 'instapay',
             'coupon_code' => 'VIPCENTER30',
+            'sender_ipa' => 'center@instapay',
+            'transaction_ref' => 'IP-CTR-560',
+            'receipt' => $this->fakeReceiptPng('center-receipt.png'),
             'amount_egp' => 1, // Tampered client price MUST be ignored!
-        ])->assertOk();
+        ], ['Accept' => 'application/json'])->assertOk();
 
-        $subRes->assertJsonPath('data.activeSub.planTier', 'plus')
+        $subRes->assertJsonPath('data.requiresApproval', true)
+            ->assertJsonPath('data.status', 'pending_review')
+            ->assertJsonPath('data.activeSub.planTier', 'free')
             ->assertJsonPath('data.invoice.baseAmountEgp', 800)
             ->assertJsonPath('data.invoice.discountAmountEgp', 240)
             ->assertJsonPath('data.invoice.finalAmountEgp', 560);
 
         $this->assertEquals(1, $dbCoupon->fresh()->used_count);
 
+        // Financials stay locked while request is pending Super Admin review
+        $this->getJson('/api/v1/center/financials/overview')->assertStatus(403);
+
+        // Super Admin approves -> Plus activates
+        $plusPendingUuid = (string) $subRes->json('data.pendingRequest.id');
+        Sanctum::actingAs($admin, ['access']);
+        $this->postJson("/api/v1/admin/financials/subscription-requests/center/{$plusPendingUuid}/approve")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'active');
+
+        Sanctum::actingAs($center, ['access']);
+        $this->getJson('/api/v1/center/billing')
+            ->assertOk()
+            ->assertJsonPath('data.activeSub.planTier', 'plus');
+
         // Financials now unlocked on Plus, but Pro Cloud Backup still blocked
         $this->getJson('/api/v1/center/financials/overview')->assertOk();
         $this->postJson('/api/v1/center/backups')->assertStatus(403);
 
         // Attempting to subscribe to Pro without cancelling Plus returns 409 Conflict
-        $this->postJson('/api/v1/center/billing/subscribe', [
+        $this->post('/api/v1/center/billing/subscribe', [
             'plan_tier' => 'pro',
             'billing_period' => 'monthly',
-        ])->assertStatus(409)
+            'payment_method' => 'vodafone',
+            'transaction_ref' => 'VF-CTR-BLK',
+            'receipt' => $this->fakeReceiptPng('blk.png'),
+        ], ['Accept' => 'application/json'])->assertStatus(409)
             ->assertJsonPath('error_code', 'ACTIVE_SUBSCRIPTION_EXISTS');
 
         // Cancel Plus -> reverts to Free
@@ -226,14 +263,26 @@ class CenterSubscriptionAndQuotasTest extends TestCase
             ->assertJsonPath('data.activeSub.planTier', 'free')
             ->assertJsonPath('data.previousPlan', 'plus');
 
-        // Subscribe to Pro Annual (3000 EGP) -> unlocks Pro Cloud Backup & White-Label
-        $this->postJson('/api/v1/center/billing/subscribe', [
+        // Subscribe to Pro Annual (3000 EGP) + Super Admin approval -> unlocks Pro Cloud Backup & White-Label
+        $proRes = $this->post('/api/v1/center/billing/subscribe', [
             'plan_tier' => 'pro',
             'billing_period' => 'annual',
             'payment_method' => 'vodafone',
-        ])->assertOk()
-            ->assertJsonPath('data.activeSub.planTier', 'pro')
+            'sender_phone' => '01088776655',
+            'transaction_ref' => 'VF-CTR-3000',
+            'receipt' => $this->fakeReceiptPng('center-pro.png'),
+        ], ['Accept' => 'application/json'])->assertOk()
+            ->assertJsonPath('data.requiresApproval', true)
             ->assertJsonPath('data.invoice.finalAmountEgp', 3000);
+
+        Sanctum::actingAs($admin, ['access']);
+        $this->postJson('/api/v1/admin/financials/subscription-requests/center/'.$proRes->json('data.pendingRequest.id').'/approve')
+            ->assertOk();
+
+        Sanctum::actingAs($center, ['access']);
+        $this->getJson('/api/v1/center/billing')
+            ->assertOk()
+            ->assertJsonPath('data.activeSub.planTier', 'pro');
 
         $this->postJson('/api/v1/center/backups')->assertStatus(201);
         $this->putJson('/api/v1/center/settings', ['custom_domain' => 'rowad.edu.eg'])->assertOk();

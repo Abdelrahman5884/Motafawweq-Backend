@@ -45,8 +45,14 @@ class StudentBillingController extends BaseApiController
             'sender_phone' => ['nullable', 'string', 'max:30'],
             'sender_ipa' => ['nullable', 'string', 'max:120'],
             'transaction_ref' => ['nullable', 'string', 'max:120'],
+            'transaction_reference' => ['nullable', 'string', 'max:120'],
+            'receipt' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:8192'],
             'notes' => ['nullable', 'string', 'max:500'],
         ]);
+
+        if ($request->hasFile('receipt')) {
+            $validated['receipt_file'] = $request->file('receipt');
+        }
 
         $result = $this->billingService->subscribeOrUpgrade(
             $this->authenticatedUser(),
@@ -54,6 +60,13 @@ class StudentBillingController extends BaseApiController
         );
 
         return $this->createdResponse($result, $result['messageAr']);
+    }
+
+    public function cancel(): JsonResponse
+    {
+        $result = $this->billingService->cancelSubscription($this->authenticatedUser());
+
+        return $this->successResponse($result, $result['messageAr']);
     }
 
     public function storePayment(Request $request): JsonResponse

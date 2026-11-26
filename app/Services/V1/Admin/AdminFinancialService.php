@@ -2,10 +2,15 @@
 
 namespace App\Services\V1\Admin;
 
+use App\Enums\BillingPeriod;
+use App\Enums\CenterPlanTier;
 use App\Enums\DirectPaymentStatus;
 use App\Enums\InvoiceStatus;
+use App\Enums\PaymentMethod;
 use App\Enums\PayoutRequestStatus;
+use App\Enums\TeacherPlanTier;
 use App\Models\CenterInvoice;
+use App\Models\CenterProfile;
 use App\Models\CenterSubscription;
 use App\Models\DiscountCoupon;
 use App\Models\PlatformExpense;
@@ -15,9 +20,11 @@ use App\Models\StudentDirectPayment;
 use App\Models\StudentInvoice;
 use App\Models\StudentSubscription;
 use App\Models\TeacherInvoice;
+use App\Models\TeacherProfile;
 use App\Models\TeacherSubscription;
 use App\Models\User;
 use App\Services\BaseService;
+use App\Services\V1\SubscriptionReceiptService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -40,7 +47,8 @@ class AdminFinancialService extends BaseService
 
     public function __construct(
         protected PlatformSettingsService $settingsService,
-        protected AdminDashboardService $dashboardService
+        protected AdminDashboardService $dashboardService,
+        protected SubscriptionReceiptService $receiptService
     ) {}
 
     /**
@@ -146,6 +154,10 @@ class AdminFinancialService extends BaseService
                 ->where('status', PayoutRequestStatus::PENDING->value)
                 ->count();
 
+            $pendingSubRequestsCount = (int) StudentSubscription::query()->where('status', 'pending_review')->count()
+                + (int) TeacherSubscription::query()->where('status', 'pending_review')->count()
+                + (int) CenterSubscription::query()->where('status', 'pending_review')->count();
+
             $activeCouponsCount = (int) DiscountCoupon::query()
                 ->where('is_active', true)
                 ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', $now))
@@ -202,6 +214,7 @@ class AdminFinancialService extends BaseService
                 'settledPayoutsEgp' => $settledPayoutsEgp,
                 'pendingPayoutsEgp' => $pendingPayoutsEgp,
                 'pendingPayoutsCount' => $pendingPayoutsCount,
+                'pendingSubscriptionRequestsCount' => $pendingSubRequestsCount,
                 'aiInfrastructureCostEgp' => $aiCostEgp,
                 'aiCostPerMinuteEgp' => $aiEcon['costPerMinuteEgp'] ?? 0.42,
                 'activeCouponsCount' => $activeCouponsCount,
@@ -688,26 +701,97 @@ class AdminFinancialService extends BaseService
     }
 
     /**
+     * Normalize promotional discount & temporary free pricing fields for a plan create/update.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function sanitizePlanPromotionFields(array $data, ?PlatformSubscriptionPlan $existing = null): array
+    {
+        $price = array_key_exists('price_egp', $data) ? (float) $data['price_egp'] : (float) ($existing?->price_egp ?? 0);
+        $termPrice = array_key_exists('term_price_egp', $data)
+            ? ($data['term_price_egp'] !== null ? (float) $data['term_price_egp'] : null)
+            : ($existing?->term_price_egp !== null ? (float) $existing->term_price_egp : ($price > 0 ? round($price * 4, 2) : 0.0));
+        $annualPrice = array_key_exists('annual_price_egp', $data)
+            ? (float) $data['annual_price_egp']
+            : (float) ($existing?->annual_price_egp ?? 0);
+
+        $origMonthly = array_key_exists('original_price_egp', $data)
+            ? ($data['original_price_egp'] !== null ? (float) $data['original_price_egp'] : null)
+            : ($existing?->original_price_egp !== null ? (float) $existing->original_price_egp : null);
+        $origTerm = array_key_exists('original_term_price_egp', $data)
+            ? ($data['original_term_price_egp'] !== null ? (float) $data['original_term_price_egp'] : null)
+            : ($existing?->original_term_price_egp !== null ? (float) $existing->original_term_price_egp : null);
+        $origAnnual = array_key_exists('original_annual_price_egp', $data)
+            ? ($data['original_annual_price_egp'] !== null ? (float) $data['original_annual_price_egp'] : null)
+            : ($existing?->original_annual_price_egp !== null ? (float) $existing->original_annual_price_egp : null);
+
+        // Ensure compare-at prices are strictly greater than effective prices (otherwise clear them cleanly)
+        if ($origMonthly !== null && $origMonthly <= $price) {
+            $origMonthly = null;
+        }
+        if ($origTerm !== null && $termPrice !== null && $origTerm <= $termPrice) {
+            $origTerm = null;
+        }
+        if ($origAnnual !== null && $origAnnual <= $annualPrice) {
+            $origAnnual = null;
+        }
+
+        $computedDiscount = PlatformSubscriptionPlan::computeDiscountPercent($origMonthly, $price);
+        if ($computedDiscount === null && array_key_exists('discount_percent', $data) && $data['discount_percent'] !== null && $origMonthly !== null) {
+            $computedDiscount = round((float) $data['discount_percent'], 1);
+        }
+
+        $freePromoEnabled = array_key_exists('free_promo_enabled', $data)
+            ? (bool) $data['free_promo_enabled']
+            : (bool) ($existing?->free_promo_enabled ?? false);
+
+        $freePromoUntil = null;
+        if ($freePromoEnabled) {
+            if (array_key_exists('free_promo_until', $data)) {
+                $freePromoUntil = $data['free_promo_until'] ? Carbon::parse($data['free_promo_until']) : null;
+            } else {
+                $freePromoUntil = $existing?->free_promo_until;
+            }
+        }
+
+        $freeLabelAr = array_key_exists('free_promo_label_ar', $data)
+            ? ($data['free_promo_label_ar'] !== null ? trim(strip_tags((string) $data['free_promo_label_ar'])) : null)
+            : $existing?->free_promo_label_ar;
+        $freeLabelEn = array_key_exists('free_promo_label_en', $data)
+            ? ($data['free_promo_label_en'] !== null ? trim(strip_tags((string) $data['free_promo_label_en'])) : null)
+            : $existing?->free_promo_label_en;
+
+        return [
+            'price_egp' => round($price, 2),
+            'original_price_egp' => $origMonthly !== null ? round($origMonthly, 2) : null,
+            'term_price_egp' => $termPrice !== null ? round($termPrice, 2) : null,
+            'original_term_price_egp' => $origTerm !== null ? round($origTerm, 2) : null,
+            'annual_price_egp' => round($annualPrice, 2),
+            'original_annual_price_egp' => $origAnnual !== null ? round($origAnnual, 2) : null,
+            'discount_percent' => $computedDiscount,
+            'free_promo_enabled' => $freePromoEnabled,
+            'free_promo_until' => $freePromoUntil,
+            'free_promo_label_ar' => $freePromoEnabled ? ($freeLabelAr ?: 'مجانية لفترة محدودة') : null,
+            'free_promo_label_en' => $freePromoEnabled ? ($freeLabelEn ?: 'Free for a Limited Time') : null,
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
     public function createPlan(User $admin, array $data): array
     {
-        $monthlyPrice = (float) $data['price_egp'];
-        $defaultTerm = $monthlyPrice > 0 ? round($monthlyPrice * 4, 2) : 0.0;
+        $promoFields = $this->sanitizePlanPromotionFields($data, null);
 
-        $plan = new PlatformSubscriptionPlan([
+        $plan = new PlatformSubscriptionPlan(array_merge([
             'slug' => $data['slug'] ?? null,
             'target_role' => $data['target_role'],
             'tier_key' => $data['tier_key'] ?? 'custom',
             'name_ar' => $data['name_ar'],
             'name_en' => $data['name_en'] ?? $data['name_ar'],
             'billing_cycle' => $data['billing_cycle'] ?? 'monthly',
-            'price_egp' => $monthlyPrice,
-            'term_price_egp' => array_key_exists('term_price_egp', $data) && $data['term_price_egp'] !== null
-                ? (float) $data['term_price_egp']
-                : $defaultTerm,
-            'annual_price_egp' => (float) ($data['annual_price_egp'] ?? 0),
             'commission_percent' => $data['target_role'] === 'teacher' && isset($data['commission_percent'])
                 ? (float) $data['commission_percent']
                 : null,
@@ -718,7 +802,7 @@ class AdminFinancialService extends BaseService
             'features_ar' => $data['features_ar'] ?? ['اشتراك معتمد في منصة متفوق'],
             'features_en' => $data['features_en'] ?? ['Verified Motafawweq platform subscription'],
             'display_order' => (int) ($data['display_order'] ?? 0),
-        ]);
+        ], $promoFields));
 
         $plan->forceFill(['updated_by' => $admin->id])->save();
         $this->settingsService->bumpCacheEpoch();
@@ -728,6 +812,7 @@ class AdminFinancialService extends BaseService
             'plan_uuid' => $plan->uuid,
             'target_role' => $plan->target_role,
             'price_egp' => $plan->price_egp,
+            'free_promo_enabled' => $plan->free_promo_enabled,
         ], 'info', $plan);
 
         return $plan->toFrontendArray();
@@ -745,12 +830,12 @@ class AdminFinancialService extends BaseService
         $beforePrice = (float) $plan->price_egp;
         $allowed = [
             'target_role', 'tier_key', 'name_ar', 'name_en', 'billing_cycle',
-            'price_egp', 'term_price_egp', 'annual_price_egp', 'commission_percent',
-            'badge_ar', 'badge_en', 'is_popular', 'is_active',
+            'commission_percent', 'badge_ar', 'badge_en', 'is_popular', 'is_active',
             'features_ar', 'features_en', 'display_order',
         ];
 
-        $plan->fill(array_intersect_key($data, array_flip($allowed)));
+        $promoFields = $this->sanitizePlanPromotionFields($data, $plan);
+        $plan->fill(array_merge(array_intersect_key($data, array_flip($allowed)), $promoFields));
         $plan->forceFill(['updated_by' => $admin->id])->save();
         $this->settingsService->bumpCacheEpoch();
 
@@ -759,6 +844,10 @@ class AdminFinancialService extends BaseService
             'plan_uuid' => $plan->uuid,
             'price_before' => $beforePrice,
             'price_after' => (float) $plan->price_egp,
+            'original_price_egp' => $plan->original_price_egp,
+            'discount_percent' => $plan->discount_percent,
+            'free_promo_enabled' => (bool) $plan->free_promo_enabled,
+            'free_promo_until' => $plan->free_promo_until?->toIso8601String(),
         ], 'warning', $plan);
 
         return $plan->fresh()->toFrontendArray();
@@ -822,6 +911,414 @@ class AdminFinancialService extends BaseService
         ], 'warning');
 
         return $this->listPlans();
+    }
+
+    /* =========================================================================
+       SUPER ADMIN SUBSCRIPTION APPROVAL QUEUE (ALL ROLES: STUDENT / TEACHER / CENTER)
+       ========================================================================= */
+
+    /**
+     * List subscription requests across Student, Teacher, and Center roles with receipt URLs and summary counters.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array<string, mixed>
+     */
+    public function listSubscriptionRequests(array $filters = []): array
+    {
+        $perPage = min(max((int) ($filters['per_page'] ?? 20), 1), 100);
+        $page = max((int) ($filters['page'] ?? 1), 1);
+        $role = isset($filters['role']) ? strtolower(trim((string) $filters['role'])) : null;
+        $status = isset($filters['status']) ? strtolower(trim((string) $filters['status'])) : 'pending_review';
+        $search = isset($filters['search']) ? trim((string) $filters['search']) : null;
+
+        $validRoles = ['student', 'teacher', 'center'];
+        $rolesToQuery = ($role && in_array($role, $validRoles, true)) ? [$role] : $validRoles;
+
+        $roleSpecs = [
+            'student' => ['table' => (new StudentSubscription)->getTable(), 'fk' => 'student_id'],
+            'teacher' => ['table' => (new TeacherSubscription)->getTable(), 'fk' => 'teacher_id'],
+            'center' => ['table' => (new CenterSubscription)->getTable(), 'fk' => 'center_id'],
+        ];
+
+        $usersTable = (new User)->getTable();
+        $safeSearch = ($search !== null && $search !== '') ? '%'.addcslashes($search, '%_\\').'%' : null;
+
+        $unionQuery = null;
+        foreach ($rolesToQuery as $rKey) {
+            $spec = $roleSpecs[$rKey];
+            $branch = DB::table($spec['table'].' as sub')
+                ->leftJoin($usersTable.' as u', 'u.id', '=', 'sub.'.$spec['fk'])
+                ->leftJoin($usersTable.' as rev', 'rev.id', '=', 'sub.reviewed_by')
+                ->where('sub.plan_tier', '!=', 'free')
+                ->selectRaw(
+                    '? as role, sub.uuid, sub.'.$spec['fk'].' as user_id, u.name as user_name, u.email as user_email, u.phone as user_phone, '
+                    .'sub.plan_tier, sub.plan_name_ar, sub.plan_name_en, sub.billing_period, sub.base_amount_egp, sub.discount_amount_egp, '
+                    .'sub.amount_egp, sub.coupon_code, sub.payment_method, sub.transaction_reference, sub.sender_reference, '
+                    .'sub.receipt_path, sub.receipt_original_name, sub.receipt_mime_type, sub.is_free_promo, '
+                    .'sub.status, sub.rejection_reason, sub.starts_at, sub.renews_at, sub.reviewed_at, rev.name as reviewer_name, sub.created_at',
+                    [$rKey]
+                );
+
+            if ($status && $status !== 'all') {
+                if ($status === 'approved') {
+                    $branch->whereIn('sub.status', ['active', 'superseded', 'expired']);
+                } else {
+                    $branch->where('sub.status', $status);
+                }
+            }
+
+            if ($safeSearch !== null) {
+                $branch->where(function ($q) use ($safeSearch): void {
+                    $q->where('u.name', 'like', $safeSearch)
+                        ->orWhere('u.email', 'like', $safeSearch)
+                        ->orWhere('u.phone', 'like', $safeSearch)
+                        ->orWhere('sub.transaction_reference', 'like', $safeSearch)
+                        ->orWhere('sub.sender_reference', 'like', $safeSearch)
+                        ->orWhere('sub.plan_name_ar', 'like', $safeSearch);
+                });
+            }
+
+            $unionQuery = $unionQuery === null ? $branch : $unionQuery->unionAll($branch);
+        }
+
+        /** @var LengthAwarePaginator $paginator */
+        $paginator = DB::query()
+            ->fromSub($unionQuery, 'subscription_requests')
+            ->orderByRaw("CASE WHEN status = 'pending_review' THEN 0 ELSE 1 END")
+            ->orderByDesc('created_at')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        $items = collect($paginator->items())->map(function (object $row): array {
+            $rKey = (string) $row->role;
+            $pmEnum = PaymentMethod::tryFrom((string) ($row->payment_method ?? ''));
+            $createdAt = $row->created_at ? Carbon::parse($row->created_at) : null;
+            $reviewedAt = $row->reviewed_at ? Carbon::parse($row->reviewed_at) : null;
+
+            return [
+                'id' => (string) $row->uuid,
+                'role' => $rKey,
+                'userId' => (int) ($row->user_id ?? 0),
+                'userName' => (string) ($row->user_name ?? ''),
+                'userEmail' => (string) ($row->user_email ?? ''),
+                'userPhone' => (string) ($row->user_phone ?? ''),
+                'planTier' => (string) $row->plan_tier,
+                'planNameAr' => (string) $row->plan_name_ar,
+                'planNameEn' => (string) ($row->plan_name_en ?: $row->plan_name_ar),
+                'billingPeriod' => (string) $row->billing_period,
+                'baseAmountEgp' => round((float) ($row->base_amount_egp ?? $row->amount_egp ?? 0), 2),
+                'discountAmountEgp' => round((float) ($row->discount_amount_egp ?? 0), 2),
+                'amountEgp' => round((float) ($row->amount_egp ?? 0), 2),
+                'couponCode' => $row->coupon_code ?: null,
+                'paymentMethod' => (string) ($row->payment_method ?? ''),
+                'paymentMethodLabelAr' => $pmEnum?->label() ?? ((string) ($row->payment_method ?? '')),
+                'transactionReference' => $row->transaction_reference ?: null,
+                'senderReference' => $row->sender_reference ?: null,
+                'hasReceipt' => ! empty($row->receipt_path),
+                'receiptUrl' => $this->receiptService->signedUrl($rKey, (string) $row->uuid, $row->receipt_path),
+                'receiptOriginalName' => $row->receipt_original_name ?: null,
+                'receiptMimeType' => $row->receipt_mime_type ?: null,
+                'isFreePromo' => (bool) ($row->is_free_promo ?? false),
+                'status' => (string) $row->status,
+                'rejectionReason' => $row->rejection_reason ?: null,
+                'submittedAt' => $createdAt?->toIso8601String(),
+                'submittedDate' => $createdAt?->format('Y-m-d H:i'),
+                'reviewedAt' => $reviewedAt?->toIso8601String(),
+                'reviewerName' => $row->reviewer_name ?: null,
+            ];
+        })->values()->all();
+
+        $pendingCount = (int) StudentSubscription::where('status', 'pending_review')->count()
+            + (int) TeacherSubscription::where('status', 'pending_review')->count()
+            + (int) CenterSubscription::where('status', 'pending_review')->count();
+
+        $pendingAmountEgp = round(
+            (float) StudentSubscription::where('status', 'pending_review')->sum('amount_egp')
+            + (float) TeacherSubscription::where('status', 'pending_review')->sum('amount_egp')
+            + (float) CenterSubscription::where('status', 'pending_review')->sum('amount_egp'),
+            2
+        );
+
+        $approvedCount = (int) StudentSubscription::where('status', 'active')->where('plan_tier', '!=', 'free')->count()
+            + (int) TeacherSubscription::where('status', 'active')->where('plan_tier', '!=', 'free')->count()
+            + (int) CenterSubscription::where('status', 'active')->where('plan_tier', '!=', 'free')->count();
+
+        $rejectedCount = (int) StudentSubscription::where('status', 'rejected')->count()
+            + (int) TeacherSubscription::where('status', 'rejected')->count()
+            + (int) CenterSubscription::where('status', 'rejected')->count();
+
+        return [
+            'summary' => [
+                'pendingCount' => $pendingCount,
+                'pendingAmountEgp' => $pendingAmountEgp,
+                'approvedCount' => $approvedCount,
+                'rejectedCount' => $rejectedCount,
+            ],
+            'items' => $items,
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+                'has_more' => $paginator->hasMorePages(),
+            ],
+        ];
+    }
+
+    /**
+     * Atomically approve a pending paid subscription request across Student, Teacher, or Center roles.
+     *
+     * @return array<string, mixed>
+     */
+    public function approveSubscriptionRequest(User $admin, string $role, string $uuid): array
+    {
+        $role = strtolower(trim($role));
+        if (! in_array($role, ['student', 'teacher', 'center'], true)) {
+            throw ValidationException::withMessages(['role' => ['نوع الحساب غير صالح.']]);
+        }
+
+        $result = $this->transaction(function () use ($admin, $role, $uuid): array {
+            $now = Carbon::now();
+
+            if ($role === 'student') {
+                /** @var StudentSubscription $sub */
+                $sub = StudentSubscription::query()->where('uuid', $uuid)->lockForUpdate()->firstOrFail();
+                $this->assertSubscriptionPending($sub->status);
+
+                $period = $sub->billing_period instanceof BillingPeriod
+                    ? $sub->billing_period
+                    : (BillingPeriod::tryFrom((string) $sub->billing_period) ?? BillingPeriod::MONTHLY);
+
+                StudentSubscription::where('student_id', $sub->student_id)
+                    ->where('id', '!=', $sub->id)
+                    ->where('status', 'active')
+                    ->update(['status' => 'superseded']);
+
+                $sub->update([
+                    'status' => 'active',
+                    'starts_at' => $now,
+                    'renews_at' => $now->copy()->addDays($period->durationDays()),
+                    'reviewed_by' => $admin->id,
+                    'reviewed_at' => $now,
+                    'rejection_reason' => null,
+                ]);
+
+                StudentInvoice::where('subscription_id', $sub->id)->update([
+                    'status' => InvoiceStatus::PAID->value,
+                    'paid_at' => $now,
+                    'rejection_reason' => null,
+                ]);
+
+                $userId = (int) $sub->student_id;
+            } elseif ($role === 'teacher') {
+                /** @var TeacherSubscription $sub */
+                $sub = TeacherSubscription::query()->where('uuid', $uuid)->lockForUpdate()->firstOrFail();
+                $this->assertSubscriptionPending($sub->status);
+
+                $period = $sub->billing_period instanceof BillingPeriod
+                    ? $sub->billing_period
+                    : (BillingPeriod::tryFrom((string) $sub->billing_period) ?? BillingPeriod::MONTHLY);
+
+                TeacherSubscription::where('teacher_id', $sub->teacher_id)
+                    ->where('id', '!=', $sub->id)
+                    ->where('status', 'active')
+                    ->update(['status' => 'superseded']);
+
+                $sub->update([
+                    'status' => 'active',
+                    'starts_at' => $now,
+                    'renews_at' => $now->copy()->addDays($period->durationDays()),
+                    'reviewed_by' => $admin->id,
+                    'reviewed_at' => $now,
+                    'rejection_reason' => null,
+                ]);
+
+                $tierVal = $sub->plan_tier instanceof TeacherPlanTier ? $sub->plan_tier->value : (string) $sub->plan_tier;
+                $teacherUser = User::find($sub->teacher_id);
+                $teacherProfile = TeacherProfile::firstOrCreate(
+                    ['user_id' => $sub->teacher_id],
+                    ['name_ar' => $teacherUser?->name ?: 'المعلم']
+                );
+                $teacherProfile->forceFill(['plan_tier' => $tierVal])->save();
+
+                TeacherInvoice::where('subscription_id', $sub->id)->update([
+                    'status' => InvoiceStatus::PAID->value,
+                    'paid_at' => $now,
+                    'rejection_reason' => null,
+                ]);
+
+                $userId = (int) $sub->teacher_id;
+            } else {
+                /** @var CenterSubscription $sub */
+                $sub = CenterSubscription::query()->where('uuid', $uuid)->lockForUpdate()->firstOrFail();
+                $this->assertSubscriptionPending($sub->status);
+
+                $period = $sub->billing_period instanceof BillingPeriod
+                    ? $sub->billing_period
+                    : (BillingPeriod::tryFrom((string) $sub->billing_period) ?? BillingPeriod::MONTHLY);
+
+                CenterSubscription::where('center_id', $sub->center_id)
+                    ->where('id', '!=', $sub->id)
+                    ->where('status', 'active')
+                    ->update(['status' => 'superseded']);
+
+                $sub->update([
+                    'status' => 'active',
+                    'starts_at' => $now,
+                    'renews_at' => $now->copy()->addDays($period->durationDays()),
+                    'reviewed_by' => $admin->id,
+                    'reviewed_at' => $now,
+                    'rejection_reason' => null,
+                ]);
+
+                $tierVal = $sub->plan_tier instanceof CenterPlanTier ? $sub->plan_tier->value : (string) $sub->plan_tier;
+                $centerUser = User::find($sub->center_id);
+                $centerProfile = CenterProfile::firstOrCreate(
+                    ['user_id' => $sub->center_id],
+                    ['name_ar' => $centerUser?->name ?: 'السنتر التعليمي']
+                );
+                $centerProfile->forceFill(['plan_tier' => $tierVal])->save();
+
+                CenterInvoice::where('subscription_id', $sub->id)->update([
+                    'status' => InvoiceStatus::PAID->value,
+                    'paid_at' => $now,
+                    'rejection_reason' => null,
+                ]);
+
+                $userId = (int) $sub->center_id;
+            }
+
+            $this->logSecurityEvent('admin.subscription.approved', [
+                'admin_id' => $admin->id,
+                'role' => $role,
+                'user_id' => $userId,
+                'subscription_uuid' => $sub->uuid,
+                'plan_tier' => is_object($sub->plan_tier) ? $sub->plan_tier->value : (string) $sub->plan_tier,
+                'amount_egp' => (float) $sub->amount_egp,
+                'transaction_reference' => $sub->transaction_reference,
+            ], 'info', $sub);
+
+            return [
+                'id' => $sub->uuid,
+                'role' => $role,
+                'status' => 'active',
+                'planTier' => is_object($sub->plan_tier) ? $sub->plan_tier->value : (string) $sub->plan_tier,
+                'planNameAr' => $sub->plan_name_ar,
+                'amountEgp' => (float) $sub->amount_egp,
+                'startsAt' => $sub->starts_at?->toIso8601String(),
+                'renewsAt' => $sub->renews_at?->toIso8601String(),
+                'reviewedAt' => $sub->reviewed_at?->toIso8601String(),
+            ];
+        });
+
+        $this->settingsService->bumpCacheEpoch();
+
+        return $result;
+    }
+
+    /**
+     * Atomically reject a pending paid subscription request with an explicit reason.
+     *
+     * @return array<string, mixed>
+     */
+    public function rejectSubscriptionRequest(User $admin, string $role, string $uuid, string $reason): array
+    {
+        $role = strtolower(trim($role));
+        if (! in_array($role, ['student', 'teacher', 'center'], true)) {
+            throw ValidationException::withMessages(['role' => ['نوع الحساب غير صالح.']]);
+        }
+
+        $cleanReason = mb_substr(trim(strip_tags($reason)), 0, 500);
+        if (mb_strlen($cleanReason) < 3) {
+            throw ValidationException::withMessages(['reason' => ['يرجى توضيح سبب رفض طلب الاشتراك (3 أحرف على الأقل).']]);
+        }
+
+        $result = $this->transaction(function () use ($admin, $role, $uuid, $cleanReason): array {
+            $now = Carbon::now();
+
+            if ($role === 'student') {
+                /** @var StudentSubscription $sub */
+                $sub = StudentSubscription::query()->where('uuid', $uuid)->lockForUpdate()->firstOrFail();
+                $this->assertSubscriptionPending($sub->status);
+
+                $sub->update([
+                    'status' => 'rejected',
+                    'reviewed_by' => $admin->id,
+                    'reviewed_at' => $now,
+                    'rejection_reason' => $cleanReason,
+                ]);
+
+                StudentInvoice::where('subscription_id', $sub->id)->update([
+                    'status' => InvoiceStatus::FAILED->value,
+                    'rejection_reason' => $cleanReason,
+                ]);
+                $userId = (int) $sub->student_id;
+            } elseif ($role === 'teacher') {
+                /** @var TeacherSubscription $sub */
+                $sub = TeacherSubscription::query()->where('uuid', $uuid)->lockForUpdate()->firstOrFail();
+                $this->assertSubscriptionPending($sub->status);
+
+                $sub->update([
+                    'status' => 'rejected',
+                    'reviewed_by' => $admin->id,
+                    'reviewed_at' => $now,
+                    'rejection_reason' => $cleanReason,
+                ]);
+
+                TeacherInvoice::where('subscription_id', $sub->id)->update([
+                    'status' => InvoiceStatus::FAILED->value,
+                    'rejection_reason' => $cleanReason,
+                ]);
+                $userId = (int) $sub->teacher_id;
+            } else {
+                /** @var CenterSubscription $sub */
+                $sub = CenterSubscription::query()->where('uuid', $uuid)->lockForUpdate()->firstOrFail();
+                $this->assertSubscriptionPending($sub->status);
+
+                $sub->update([
+                    'status' => 'rejected',
+                    'reviewed_by' => $admin->id,
+                    'reviewed_at' => $now,
+                    'rejection_reason' => $cleanReason,
+                ]);
+
+                CenterInvoice::where('subscription_id', $sub->id)->update([
+                    'status' => InvoiceStatus::FAILED->value,
+                    'rejection_reason' => $cleanReason,
+                ]);
+                $userId = (int) $sub->center_id;
+            }
+
+            $this->logSecurityEvent('admin.subscription.rejected', [
+                'admin_id' => $admin->id,
+                'role' => $role,
+                'user_id' => $userId,
+                'subscription_uuid' => $sub->uuid,
+                'reason' => $cleanReason,
+            ], 'warning', $sub);
+
+            return [
+                'id' => $sub->uuid,
+                'role' => $role,
+                'status' => 'rejected',
+                'rejectionReason' => $cleanReason,
+                'reviewedAt' => $sub->reviewed_at?->toIso8601String(),
+            ];
+        });
+
+        $this->settingsService->bumpCacheEpoch();
+
+        return $result;
+    }
+
+    protected function assertSubscriptionPending(string $status): void
+    {
+        if ($status !== 'pending_review') {
+            throw new HttpResponseException(response()->json([
+                'success' => false,
+                'message' => 'تمت معالجة طلب الاشتراك هذا مسبقاً ولا يمكن تكرار الإجراء.',
+                'error_code' => 'SUBSCRIPTION_ALREADY_PROCESSED',
+            ], Response::HTTP_CONFLICT));
+        }
     }
 
     /* =========================================================================

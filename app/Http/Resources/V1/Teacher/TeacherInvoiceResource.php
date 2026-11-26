@@ -34,8 +34,10 @@ class TeacherInvoiceResource extends JsonResource
             'method' => $this->payment_method?->value ?? 'vodafone',
             'methodAr' => $this->payment_method?->label() ?? 'فودافون كاش ومحافظ المحمول',
             'methodEn' => ucfirst($this->payment_method?->value ?? 'vodafone'),
+            'transactionReference' => $this->transaction_reference,
             'status' => $this->status?->value ?? 'paid',
             'statusAr' => $this->status?->label() ?? 'مدفوع',
+            'rejectionReason' => $this->rejection_reason,
             'paidAt' => $this->paid_at?->format('Y-m-d H:i'),
             'createdAt' => $this->created_at?->toIso8601String(),
         ];

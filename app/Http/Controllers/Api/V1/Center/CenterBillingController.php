@@ -49,17 +49,25 @@ class CenterBillingController extends BaseApiController
 
     public function subscribe(SubscribeCenterPlanRequest $request): JsonResponse
     {
+        $payload = $request->validated();
+        if ($request->hasFile('receipt')) {
+            $payload['receipt_file'] = $request->file('receipt');
+        }
+
         $result = $this->billingService->subscribeOrUpgrade(
             $this->authenticatedUser(),
-            $request->validated()
+            $payload
         );
 
         $inv = $result['invoice'];
 
         return $this->successResponse([
             'activeSub' => $result['activeSub'],
+            'pendingRequest' => $result['pendingRequest'] ?? null,
+            'requiresApproval' => (bool) ($result['requiresApproval'] ?? false),
+            'status' => $result['status'] ?? 'active',
             'usage' => $result['usage'],
-            'invoice' => [
+            'invoice' => $inv ? [
                 'id' => $inv->invoice_number,
                 'uuid' => $inv->uuid,
                 'invoiceNumber' => $inv->invoice_number,
@@ -71,8 +79,9 @@ class CenterBillingController extends BaseApiController
                 'finalAmountEgp' => (float) $inv->final_amount_egp,
                 'couponCode' => $inv->coupon_code,
                 'paymentMethod' => $inv->payment_method?->value,
+                'transactionReference' => $inv->transaction_reference,
                 'status' => $inv->status?->value,
-            ],
+            ] : null,
         ], $result['messageAr']);
     }
 
@@ -82,8 +91,10 @@ class CenterBillingController extends BaseApiController
 
         return $this->successResponse([
             'activeSub' => $result['activeSub'],
+            'pendingRequest' => $result['pendingRequest'] ?? null,
             'usage' => $result['usage'],
             'previousPlan' => $result['previousPlan'],
+            'cancelledType' => $result['cancelledType'] ?? 'active_subscription',
         ], $result['messageAr']);
     }
 }

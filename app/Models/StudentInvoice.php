@@ -27,7 +27,10 @@ class StudentInvoice extends Model
         'coupon_code',
         'payment_method',
         'sender_reference',
+        'transaction_reference',
+        'receipt_path',
         'status',
+        'rejection_reason',
         'paid_at',
     ];
 

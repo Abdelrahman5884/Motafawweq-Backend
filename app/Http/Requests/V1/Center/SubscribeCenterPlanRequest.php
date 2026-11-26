@@ -18,7 +18,9 @@ class SubscribeCenterPlanRequest extends BaseApiRequest
             'coupon_code' => ['nullable', 'string', 'max:50'],
             'sender_phone' => ['nullable', 'string', 'max:40'],
             'sender_ipa' => ['nullable', 'string', 'max:100'],
-            'transaction_ref' => ['nullable', 'string', 'max:100'],
+            'transaction_ref' => ['nullable', 'string', 'max:120'],
+            'transaction_reference' => ['nullable', 'string', 'max:120'],
+            'receipt' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:8192'],
         ];
     }
 

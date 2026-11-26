@@ -329,6 +329,8 @@ Route::prefix('v1')->group(function () {
                     ->middleware('throttle:student-read');
                 Route::post('/billing/subscribe', [StudentBillingController::class, 'subscribe'])
                     ->middleware(['throttle:student-checkout', 'idempotent']);
+                Route::post('/billing/cancel', [StudentBillingController::class, 'cancel'])
+                    ->middleware('throttle:student-checkout');
                 Route::post('/billing/coupons/validate', [StudentBillingController::class, 'validateCoupon'])
                     ->middleware('throttle:student-checkout');
                 Route::post('/billing/payments', [StudentBillingController::class, 'storePayment'])
@@ -564,6 +566,19 @@ Route::prefix('v1')->group(function () {
                         Route::delete('/{uuid}', [AdminFinancialController::class, 'destroyPlan'])
                             ->whereUuid('uuid')
                             ->middleware('throttle:admin-financial');
+                    });
+
+                    Route::prefix('subscription-requests')->group(function () {
+                        Route::get('/', [AdminFinancialController::class, 'subscriptionRequests'])
+                            ->middleware('throttle:admin-read');
+                        Route::post('/{role}/{uuid}/approve', [AdminFinancialController::class, 'approveSubscriptionRequest'])
+                            ->where(['role' => 'student|teacher|center'])
+                            ->whereUuid('uuid')
+                            ->middleware(['throttle:admin-financial', 'idempotent']);
+                        Route::post('/{role}/{uuid}/reject', [AdminFinancialController::class, 'rejectSubscriptionRequest'])
+                            ->where(['role' => 'student|teacher|center'])
+                            ->whereUuid('uuid')
+                            ->middleware(['throttle:admin-financial', 'idempotent']);
                     });
 
                     Route::prefix('payouts')->group(function () {
@@ -1273,5 +1288,12 @@ Route::prefix('v1')->group(function () {
         Route::get('/submissions/{submissionUuid}/attachment/stream', [TeacherHomeworkController::class, 'streamSubmissionAttachment'])
             ->whereUuid('submissionUuid')
             ->name('api.v1.teacher.homeworks.submission.attachment.stream');
+    });
+
+    Route::prefix('media/admin/subscription-receipts')->group(function () {
+        Route::get('/{role}/{uuid}', [AdminFinancialController::class, 'streamSubscriptionReceipt'])
+            ->where(['role' => 'student|teacher|center'])
+            ->whereUuid('uuid')
+            ->name('api.v1.admin.subscriptions.receipt.stream');
     });
 });
