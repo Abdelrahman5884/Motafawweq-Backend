@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\V1\Center\CenterRoomController;
 use App\Http\Controllers\Api\V1\Center\CenterSettingsController;
 use App\Http\Controllers\Api\V1\Center\CenterStaffController;
 use App\Http\Controllers\Api\V1\Center\CenterTeacherController;
+use App\Http\Controllers\Api\V1\Parent\ParentPortalController;
 use App\Http\Controllers\Api\V1\Public\CertificateVerificationController;
 use App\Http\Controllers\Api\V1\Public\PlatformPublicController;
 use App\Http\Controllers\Api\V1\Storage\StorageController;
@@ -643,6 +644,59 @@ Route::prefix('v1')->group(function () {
                     Route::get('/security-summary', [AdminSystemController::class, 'securitySummary'])
                         ->middleware('throttle:admin-read');
                 });
+            });
+
+            // Parent Portal area (strictly isolated to active, verified parents with zero-IDOR child guards)
+            Route::prefix('parent')->middleware('role:parent')->group(function () {
+                Route::get('/overview', [ParentPortalController::class, 'overview'])
+                    ->middleware('throttle:parent-read');
+
+                Route::prefix('children')->group(function () {
+                    Route::post('/link', [ParentPortalController::class, 'linkChild'])
+                        ->middleware(['throttle:parent-link', 'idempotent']);
+
+                    Route::delete('/{studentId}', [ParentPortalController::class, 'unlinkChild'])
+                        ->whereNumber('studentId')
+                        ->middleware('throttle:parent-write');
+
+                    Route::get('/{studentId}/dashboard', [ParentPortalController::class, 'childDashboard'])
+                        ->whereNumber('studentId')
+                        ->middleware('throttle:parent-read');
+
+                    Route::get('/{studentId}/courses', [ParentPortalController::class, 'childCourses'])
+                        ->whereNumber('studentId')
+                        ->middleware('throttle:parent-read');
+
+                    Route::get('/{studentId}/attendance', [ParentPortalController::class, 'childAttendance'])
+                        ->whereNumber('studentId')
+                        ->middleware('throttle:parent-read');
+
+                    Route::get('/{studentId}/exams', [ParentPortalController::class, 'childExams'])
+                        ->whereNumber('studentId')
+                        ->middleware('throttle:parent-read');
+
+                    Route::get('/{studentId}/exams/export', [ParentPortalController::class, 'exportChildExams'])
+                        ->whereNumber('studentId')
+                        ->middleware('throttle:parent-read');
+
+                    Route::get('/{studentId}/homework', [ParentPortalController::class, 'childHomework'])
+                        ->whereNumber('studentId')
+                        ->middleware('throttle:parent-read');
+
+                    Route::get('/{studentId}/financials', [ParentPortalController::class, 'childFinancials'])
+                        ->whereNumber('studentId')
+                        ->middleware('throttle:parent-read');
+                });
+
+                Route::get('/inquiries', [ParentPortalController::class, 'inquiries'])
+                    ->middleware('throttle:parent-read');
+                Route::post('/inquiries', [ParentPortalController::class, 'storeInquiry'])
+                    ->middleware(['throttle:parent-write', 'idempotent']);
+
+                Route::get('/settings', [ParentPortalController::class, 'settings'])
+                    ->middleware('throttle:parent-read');
+                Route::put('/settings', [ParentPortalController::class, 'updateSettings'])
+                    ->middleware('throttle:parent-write');
             });
 
             // Teacher Portal area (strictly isolated to active, verified teachers)

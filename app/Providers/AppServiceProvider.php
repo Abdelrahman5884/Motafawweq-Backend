@@ -265,5 +265,26 @@ class AppServiceProvider extends ServiceProvider
                 ->by('pub-cat:'.$request->ip())
                 ->response($tooMany('messages.rate_limit_api'));
         });
+
+        // Parent portal read endpoints: 120 per minute per parent
+        RateLimiter::for('parent-read', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(120)
+                ->by('par-read:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // Parent portal write mutations (settings, inquiries, unlink): 30 per minute per parent
+        RateLimiter::for('parent-write', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(30)
+                ->by('par-write:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_api'));
+        });
+
+        // Parent child-code linking: 10 per minute per parent (anti-enumeration)
+        RateLimiter::for('parent-link', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(10)
+                ->by('par-link:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.rate_limit_join_code'));
+        });
     }
 }

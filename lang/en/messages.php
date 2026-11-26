@@ -436,4 +436,24 @@ return [
         'audit_logs_fetched' => 'Global security audit trail retrieved successfully.',
         'security_summary_fetched' => 'Platform security posture summary retrieved successfully.',
     ],
+
+    // Parent Portal
+    'parent' => [
+        'overview_fetched' => 'Parent portal overview and linked children retrieved successfully.',
+        'child_dashboard_fetched' => 'Student monitoring dashboard retrieved successfully.',
+        'child_courses_fetched' => 'Student enrolled courses and syllabus progress retrieved successfully.',
+        'child_attendance_fetched' => 'Student center attendance records retrieved successfully.',
+        'child_exams_fetched' => 'Student exam scorecards retrieved successfully.',
+        'child_homework_fetched' => 'Student homework tracker retrieved successfully.',
+        'child_financials_fetched' => 'Student tuition and payment receipts retrieved successfully.',
+        'child_not_linked' => 'You are not authorized to view this student because they are not linked to your account.',
+        'child_code_not_found' => 'No active student matched this code. Please verify the student code or center barcode.',
+        'child_already_linked' => 'This student is already linked to your parent account.',
+        'child_linked' => 'Student account linked to your parent profile successfully.',
+        'child_unlinked' => 'Student unlinked from your parent profile successfully.',
+        'inquiries_fetched' => 'Parent inquiries history retrieved successfully.',
+        'inquiry_created' => 'Your inquiry has been submitted and will be reviewed shortly.',
+        'settings_fetched' => 'Parent profile and preferences retrieved successfully.',
+        'settings_updated' => 'Parent profile and notification preferences saved successfully.',
+    ],
 ];

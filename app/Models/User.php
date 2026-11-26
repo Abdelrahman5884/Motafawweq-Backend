@@ -297,6 +297,16 @@ class User extends Authenticatable
             ->withTimestamps();
     }
 
+    public function parentProfile(): HasOne
+    {
+        return $this->hasOne(ParentProfile::class, 'user_id');
+    }
+
+    public function parentInquiries(): HasMany
+    {
+        return $this->hasMany(ParentInquiry::class, 'parent_id');
+    }
+
     /* ----------------------------------------------------------------- */
     /* Role helpers */
     /* ----------------------------------------------------------------- */
