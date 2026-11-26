@@ -19,9 +19,13 @@ class StudentCourseLessonController extends BaseApiController
         protected StudentCourseLessonService $courseLessonService
     ) {}
 
-    public function courses(): JsonResponse
+    public function courses(Request $request): JsonResponse
     {
-        $courses = $this->courseLessonService->listCourses($this->authenticatedUser());
+        $search = $request->query('search');
+        $courses = $this->courseLessonService->listCourses(
+            $this->authenticatedUser(),
+            is_string($search) ? $search : null
+        );
 
         return $this->successResponse($courses);
     }

@@ -176,4 +176,62 @@ class StudentMinistryCurriculumAndExamTest extends TestCase
         $this->getJson('/api/v1/student/ministry/curricula')->assertForbidden();
         $this->getJson('/api/v1/student/ministry/exams')->assertForbidden();
     }
+
+    public function test_ministry_curricula_and_exams_scope_to_student_grade_by_default_and_search_across_all_grades(): void
+    {
+        $student = $this->createStudent('الصف الأول الثانوي', 'عام');
+        Sanctum::actingAs($student, [TokenType::ACCESS->value]);
+
+        // 1. Default curricula: strictly 1st Secondary only
+        $defaultCurrRes = $this->getJson('/api/v1/student/ministry/curricula')
+            ->assertOk()
+            ->assertJsonPath('data.studentGradeAr', 'الصف الأول الثانوي')
+            ->assertJsonPath('data.selectedGradeAr', 'الصف الأول الثانوي')
+            ->assertJsonPath('data.isSearchingAllGrades', false);
+
+        $defaultCurrItems = $defaultCurrRes->json('data.items');
+        $this->assertNotEmpty($defaultCurrItems);
+        foreach ($defaultCurrItems as $item) {
+            $this->assertSame('الصف الأول الثانوي', $item['gradeAr']);
+            $this->assertTrue($item['isSameGrade']);
+        }
+
+        // 2. Cross-grade curricula search by colloquial grade ("تالتة ثانوي") finds 3rd Secondary curricula
+        $searchCurrRes = $this->getJson('/api/v1/student/ministry/curricula?search='.urlencode('تالتة ثانوي'))
+            ->assertOk()
+            ->assertJsonPath('data.selectedGradeAr', 'all')
+            ->assertJsonPath('data.isSearchingAllGrades', true);
+
+        $searchCurrItems = $searchCurrRes->json('data.items');
+        $this->assertNotEmpty($searchCurrItems);
+        $this->assertTrue(
+            collect($searchCurrItems)->contains(fn (array $i) => $i['gradeAr'] === 'الصف الثالث الثانوي')
+        );
+
+        // 3. Default Ministry exams: strictly 1st Secondary only
+        $defaultExamRes = $this->getJson('/api/v1/student/ministry/exams')
+            ->assertOk()
+            ->assertJsonPath('data.studentGradeAr', 'الصف الأول الثانوي')
+            ->assertJsonPath('data.selectedGradeAr', 'الصف الأول الثانوي')
+            ->assertJsonPath('data.isSearchingAllGrades', false);
+
+        $defaultExamItems = $defaultExamRes->json('data.items');
+        $this->assertNotEmpty($defaultExamItems);
+        foreach ($defaultExamItems as $item) {
+            $this->assertSame('الصف الأول الثانوي', $item['gradeAr']);
+            $this->assertTrue($item['isSameGrade']);
+        }
+
+        // 4. Cross-grade Ministry exam search ("ثالثة إعدادي") discovers 3rd Prep exams
+        $searchExamRes = $this->getJson('/api/v1/student/ministry/exams?search='.urlencode('ثالثة اعدادي'))
+            ->assertOk()
+            ->assertJsonPath('data.selectedGradeAr', 'all')
+            ->assertJsonPath('data.isSearchingAllGrades', true);
+
+        $searchExamItems = $searchExamRes->json('data.items');
+        $this->assertNotEmpty($searchExamItems);
+        $this->assertTrue(
+            collect($searchExamItems)->contains(fn (array $i) => $i['gradeAr'] === 'الصف الثالث الإعدادي')
+        );
+    }
 }

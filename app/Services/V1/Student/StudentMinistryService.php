@@ -19,16 +19,22 @@ class StudentMinistryService extends BaseService
     /**
      * List official Ministry of Education curricula tailored to the student's grade & track,
      * enriched with persisted per-unit progress and linked Ministry exam status.
+     * When `$search` is provided (without an explicit grade override), searches across all published grades.
      */
-    public function listCurricula(User $student, ?string $gradeFilter = null): array
+    public function listCurricula(User $student, ?string $gradeFilter = null, ?string $search = null): array
     {
         MinistryCurriculum::ensureCatalogSeeded();
 
         [$studentGrade, $studentTrack] = $this->resolveStudentGradeAndTrack($student);
-        $showAllGrades = $gradeFilter !== null && strtolower(trim($gradeFilter)) === 'all';
+        $cleanSearch = mb_substr(trim((string) $search), 0, 120);
+        $isSearching = $cleanSearch !== '';
+        $explicitGradeFilter = $gradeFilter !== null && trim($gradeFilter) !== '';
+        $searchAllGrades = $isSearching && ! $explicitGradeFilter;
+
+        $showAllGrades = $searchAllGrades || ($explicitGradeFilter && strtolower(trim($gradeFilter)) === 'all');
         $selectedGrade = $showAllGrades
             ? 'all'
-            : MinistryCurriculumCatalog::normalizeGrade($gradeFilter ?: $studentGrade);
+            : MinistryCurriculumCatalog::normalizeGrade($explicitGradeFilter ? $gradeFilter : $studentGrade);
 
         $query = MinistryCurriculum::query()
             ->where('is_published', true)
@@ -44,13 +50,41 @@ class StudentMinistryService extends BaseService
             ->values()
             ->all();
 
-        // Prioritize subjects matching the student's track first
-        usort($curricula, function (array $a, array $b) use ($studentTrack) {
-            $aMatches = $this->matchesTrack($a['tracks'] ?? [], $studentTrack) ? 0 : 1;
-            $bMatches = $this->matchesTrack($b['tracks'] ?? [], $studentTrack) ? 0 : 1;
+        if ($isSearching) {
+            $curricula = array_values(array_filter($curricula, function (array $curr) use ($cleanSearch) {
+                $unitFields = [];
+                foreach (($curr['units'] ?? []) as $unit) {
+                    $unitFields[] = $unit['titleAr'] ?? '';
+                    $unitFields[] = $unit['titleEn'] ?? '';
+                    foreach (($unit['topics'] ?? []) as $topic) {
+                        $unitFields[] = is_string($topic) ? $topic : '';
+                    }
+                }
 
-            return $aMatches <=> $bMatches;
-        });
+                return MinistryCurriculumCatalog::matchesSearchQuery($cleanSearch, array_merge([
+                    $curr['code'] ?? '',
+                    $curr['titleAr'] ?? '',
+                    $curr['titleEn'] ?? '',
+                    $curr['subjectAr'] ?? '',
+                    $curr['subjectEn'] ?? '',
+                    $curr['gradeAr'] ?? '',
+                    $curr['gradeSubtitleAr'] ?? '',
+                    $curr['gradeSubtitleEn'] ?? '',
+                    $curr['descriptionAr'] ?? '',
+                    MinistryCurriculumCatalog::gradeSearchAliases($curr['gradeAr'] ?? ''),
+                ], $unitFields));
+            }));
+        }
+
+        // Prioritize student's own grade first (in cross-grade search), then matching track, then catalog order
+        $indexedCurricula = [];
+        foreach ($curricula as $idx => $curr) {
+            $gradeRank = ($curr['gradeAr'] ?? '') === $studentGrade ? 0 : 1;
+            $trackRank = $this->matchesTrack($curr['tracks'] ?? [], $studentTrack) ? 0 : 1;
+            $indexedCurricula[] = ['_sortKey' => [$gradeRank, $trackRank, $idx], 'curr' => $curr];
+        }
+        usort($indexedCurricula, fn (array $a, array $b) => $a['_sortKey'] <=> $b['_sortKey']);
+        $curricula = array_map(fn (array $row) => $row['curr'], $indexedCurricula);
 
         $codes = array_column($curricula, 'code');
         $examCodes = array_values(array_filter(array_column($curricula, 'examCode')));
@@ -85,7 +119,7 @@ class StudentMinistryService extends BaseService
             $examsIndex[$ex['code']] = $ex;
         }
 
-        $items = array_map(function (array $curr) use ($completedUnitsByCode, $attemptsByExamCode, $examsIndex, $studentTrack) {
+        $items = array_map(function (array $curr) use ($completedUnitsByCode, $attemptsByExamCode, $examsIndex, $studentTrack, $studentGrade) {
             $units = $curr['units'] ?? [];
             $unitsCount = count($units);
             $chaptersCount = array_sum(array_map(fn (array $u) => (int) ($u['chaptersCount'] ?? 1), $units));
@@ -158,6 +192,7 @@ class StudentMinistryService extends BaseService
                 'subjectAr' => $curr['subjectAr'],
                 'subjectEn' => $curr['subjectEn'],
                 'gradeAr' => $curr['gradeAr'],
+                'isSameGrade' => ($curr['gradeAr'] ?? '') === $studentGrade,
                 'gradeSubtitleAr' => $curr['gradeSubtitleAr'] ?? $curr['gradeAr'],
                 'gradeSubtitleEn' => $curr['gradeSubtitleEn'] ?? $curr['gradeAr'],
                 'stage' => $curr['stage'],
@@ -194,6 +229,7 @@ class StudentMinistryService extends BaseService
             'studentGradeAr' => $studentGrade,
             'studentTrackAr' => $studentTrack,
             'selectedGradeAr' => $selectedGrade,
+            'isSearchingAllGrades' => $searchAllGrades,
             'availableGrades' => MinistryCurriculumCatalog::availableGrades(),
             'items' => $items,
         ];
@@ -290,14 +326,21 @@ class StudentMinistryService extends BaseService
 
     /**
      * List official Ministry of Education guided practice exams with live student attempt status.
+     * By default strictly scoped to the student's current grade; when `$search` is provided
+     * (without an explicit grade override), searches across all grades.
      */
-    public function listExams(User $student, ?string $gradeFilter = null): array
+    public function listExams(User $student, ?string $gradeFilter = null, ?string $search = null): array
     {
         [$studentGrade, $studentTrack] = $this->resolveStudentGradeAndTrack($student);
-        $showAllGrades = $gradeFilter !== null && strtolower(trim($gradeFilter)) === 'all';
+        $cleanSearch = mb_substr(trim((string) $search), 0, 120);
+        $isSearching = $cleanSearch !== '';
+        $explicitGradeFilter = $gradeFilter !== null && trim($gradeFilter) !== '';
+        $searchAllGrades = $isSearching && ! $explicitGradeFilter;
+
+        $showAllGrades = $searchAllGrades || ($explicitGradeFilter && strtolower(trim($gradeFilter)) === 'all');
         $selectedGrade = $showAllGrades
             ? 'all'
-            : MinistryCurriculumCatalog::normalizeGrade($gradeFilter ?: $studentGrade);
+            : MinistryCurriculumCatalog::normalizeGrade($explicitGradeFilter ? $gradeFilter : $studentGrade);
 
         $exams = MinistryCurriculumCatalog::exams();
         if (! $showAllGrades) {
@@ -307,12 +350,32 @@ class StudentMinistryService extends BaseService
             ));
         }
 
-        usort($exams, function (array $a, array $b) use ($studentTrack) {
-            $aMatches = $this->matchesTrack($a['tracks'] ?? [], $studentTrack) ? 0 : 1;
-            $bMatches = $this->matchesTrack($b['tracks'] ?? [], $studentTrack) ? 0 : 1;
+        if ($isSearching) {
+            $exams = array_values(array_filter($exams, fn (array $ex) => MinistryCurriculumCatalog::matchesSearchQuery(
+                $cleanSearch,
+                [
+                    $ex['code'] ?? '',
+                    $ex['curriculumCode'] ?? '',
+                    $ex['titleAr'] ?? '',
+                    $ex['titleEn'] ?? '',
+                    $ex['subjectAr'] ?? '',
+                    $ex['subjectEn'] ?? '',
+                    $ex['gradeAr'] ?? '',
+                    MinistryCurriculumCatalog::gradeSearchAliases($ex['gradeAr'] ?? ''),
+                    MinistryCurriculumCatalog::SOURCE_AR,
+                    MinistryCurriculumCatalog::SOURCE_EN,
+                ]
+            )));
+        }
 
-            return $aMatches <=> $bMatches;
-        });
+        $indexedExams = [];
+        foreach ($exams as $idx => $ex) {
+            $gradeRank = ($ex['gradeAr'] ?? '') === $studentGrade ? 0 : 1;
+            $trackRank = $this->matchesTrack($ex['tracks'] ?? [], $studentTrack) ? 0 : 1;
+            $indexedExams[] = ['_sortKey' => [$gradeRank, $trackRank, $idx], 'exam' => $ex];
+        }
+        usort($indexedExams, fn (array $a, array $b) => $a['_sortKey'] <=> $b['_sortKey']);
+        $exams = array_map(fn (array $row) => $row['exam'], $indexedExams);
 
         $examCodes = array_column($exams, 'code');
         $attemptsByCode = ! empty($examCodes)
@@ -326,7 +389,7 @@ class StudentMinistryService extends BaseService
 
         $now = Carbon::now();
 
-        $items = array_map(function (array $exam) use ($attemptsByCode, $now) {
+        $items = array_map(function (array $exam) use ($attemptsByCode, $now, $studentGrade) {
             $questions = $exam['questions'] ?? [];
             $fullMark = $this->computeFullMark($questions);
             $passScore = (int) ceil($fullMark * (($exam['passPercentage'] ?? 50) / 100));
@@ -371,6 +434,7 @@ class StudentMinistryService extends BaseService
                 'subjectAr' => $exam['subjectAr'],
                 'subjectEn' => $exam['subjectEn'] ?? $exam['subjectAr'],
                 'gradeAr' => $exam['gradeAr'],
+                'isSameGrade' => ($exam['gradeAr'] ?? '') === $studentGrade,
                 'teacherName' => MinistryCurriculumCatalog::SOURCE_AR,
                 'durationMinutes' => (int) $exam['durationMinutes'],
                 'fullMark' => $fullMark,
@@ -399,6 +463,7 @@ class StudentMinistryService extends BaseService
             'studentGradeAr' => $studentGrade,
             'studentTrackAr' => $studentTrack,
             'selectedGradeAr' => $selectedGrade,
+            'isSearchingAllGrades' => $searchAllGrades,
             'availableGrades' => MinistryCurriculumCatalog::availableGrades(),
             'items' => $items,
         ];

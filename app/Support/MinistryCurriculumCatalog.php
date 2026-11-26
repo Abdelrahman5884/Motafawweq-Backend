@@ -89,43 +89,207 @@ final class MinistryCurriculumCatalog
     }
 
     /**
-     * Normalize any grade string (including English or decorated Arabic labels) to canonical Arabic.
+     * Normalize Arabic & Latin text for forgiving search & grade comparisons
+     * (strips diacritics, unifies alef/yaa/taa-marbuta forms, lowercases, collapses whitespace).
      */
-    public static function normalizeGrade(?string $raw): string
+    public static function normalizeArabicForSearch(string $text): string
+    {
+        $clean = mb_strtolower(trim($text), 'UTF-8');
+        if ($clean === '') {
+            return '';
+        }
+
+        // Remove Arabic diacritics (tashkeel) and tatweel
+        $clean = (string) preg_replace('/[\x{064B}-\x{065F}\x{0670}\x{0640}]/u', '', $clean);
+
+        $clean = str_replace(
+            ['أ', 'إ', 'آ', 'ٱ', 'ى', 'ة'],
+            ['ا', 'ا', 'ا', 'ا', 'ي', 'ه'],
+            $clean
+        );
+
+        return trim((string) preg_replace('/\s+/u', ' ', $clean));
+    }
+
+    /**
+     * Attempt to normalize a grade string to its canonical Arabic grade label.
+     * Returns null when the input is blank or unrecognized (never guesses a fallback grade).
+     */
+    public static function tryNormalizeGrade(?string $raw): ?string
     {
         $clean = trim((string) $raw);
         if ($clean === '') {
-            return 'الصف الثالث الثانوي';
-        }
-
-        $aliases = [
-            '3rd Secondary (Thanawya Amma)' => 'الصف الثالث الثانوي',
-            '3rd Secondary' => 'الصف الثالث الثانوي',
-            'الصف الثالث الثانوي (الثانوية العامة)' => 'الصف الثالث الثانوي',
-            '2nd Secondary' => 'الصف الثاني الثانوي',
-            '1st Secondary' => 'الصف الأول الثانوي',
-            '3rd Preparatory (Certificate)' => 'الصف الثالث الإعدادي',
-            '3rd Preparatory' => 'الصف الثالث الإعدادي',
-            'الصف الثالث الإعدادي (الشهادة الإعدادية)' => 'الصف الثالث الإعدادي',
-            '2nd Preparatory' => 'الصف الثاني الإعدادي',
-            '1st Preparatory' => 'الصف الأول الإعدادي',
-            '6th Primary' => 'الصف السادس الابتدائي',
-            '5th Primary' => 'الصف الخامس الابتدائي',
-            '4th Primary' => 'الصف الرابع الابتدائي',
-            '3rd Primary' => 'الصف الثالث الابتدائي',
-            '2nd Primary' => 'الصف الثاني الابتدائي',
-            '1st Primary' => 'الصف الأول الابتدائي',
-        ];
-
-        if (isset($aliases[$clean])) {
-            return $aliases[$clean];
+            return null;
         }
 
         if (in_array($clean, self::availableGrades(), true)) {
             return $clean;
         }
 
-        return 'الصف الثالث الثانوي';
+        $normalized = self::normalizeArabicForSearch($clean);
+
+        static $aliasMap = null;
+        if ($aliasMap === null) {
+            $rawAliases = [
+                // 3rd Secondary
+                'الصف الثالث الثانوي' => 'الصف الثالث الثانوي',
+                'الصف الثالث الثانوي (الثانوية العامة)' => 'الصف الثالث الثانوي',
+                'ثالثة ثانوي' => 'الصف الثالث الثانوي',
+                'تالتة ثانوي' => 'الصف الثالث الثانوي',
+                'الثالث الثانوي' => 'الصف الثالث الثانوي',
+                'ثانوية عامة' => 'الصف الثالث الثانوي',
+                '3 ثانوي' => 'الصف الثالث الثانوي',
+                '3rd Secondary (Thanawya Amma)' => 'الصف الثالث الثانوي',
+                '3rd Secondary' => 'الصف الثالث الثانوي',
+
+                // 2nd Secondary
+                'الصف الثاني الثانوي' => 'الصف الثاني الثانوي',
+                'ثانية ثانوي' => 'الصف الثاني الثانوي',
+                'تانية ثانوي' => 'الصف الثاني الثانوي',
+                'الثاني الثانوي' => 'الصف الثاني الثانوي',
+                '2 ثانوي' => 'الصف الثاني الثانوي',
+                '2nd Secondary' => 'الصف الثاني الثانوي',
+
+                // 1st Secondary
+                'الصف الأول الثانوي' => 'الصف الأول الثانوي',
+                'أولى ثانوي' => 'الصف الأول الثانوي',
+                'الأول الثانوي' => 'الصف الأول الثانوي',
+                '1 ثانوي' => 'الصف الأول الثانوي',
+                '1st Secondary' => 'الصف الأول الثانوي',
+
+                // 3rd Preparatory
+                'الصف الثالث الإعدادي' => 'الصف الثالث الإعدادي',
+                'الصف الثالث الإعدادي (الشهادة الإعدادية)' => 'الصف الثالث الإعدادي',
+                'ثالثة إعدادي' => 'الصف الثالث الإعدادي',
+                'تالتة إعدادي' => 'الصف الثالث الإعدادي',
+                'الثالث الإعدادي' => 'الصف الثالث الإعدادي',
+                'الشهادة الإعدادية' => 'الصف الثالث الإعدادي',
+                '3 إعدادي' => 'الصف الثالث الإعدادي',
+                '3rd Preparatory (Certificate)' => 'الصف الثالث الإعدادي',
+                '3rd Preparatory' => 'الصف الثالث الإعدادي',
+
+                // 2nd Preparatory
+                'الصف الثاني الإعدادي' => 'الصف الثاني الإعدادي',
+                'ثانية إعدادي' => 'الصف الثاني الإعدادي',
+                'تانية إعدادي' => 'الصف الثاني الإعدادي',
+                'الثاني الإعدادي' => 'الصف الثاني الإعدادي',
+                '2 إعدادي' => 'الصف الثاني الإعدادي',
+                '2nd Preparatory' => 'الصف الثاني الإعدادي',
+
+                // 1st Preparatory
+                'الصف الأول الإعدادي' => 'الصف الأول الإعدادي',
+                'أولى إعدادي' => 'الصف الأول الإعدادي',
+                'الأول الإعدادي' => 'الصف الأول الإعدادي',
+                '1 إعدادي' => 'الصف الأول الإعدادي',
+                '1st Preparatory' => 'الصف الأول الإعدادي',
+
+                // Primary 6 -> 1
+                'الصف السادس الابتدائي' => 'الصف السادس الابتدائي',
+                'سادسة ابتدائي' => 'الصف السادس الابتدائي',
+                '6 ابتدائي' => 'الصف السادس الابتدائي',
+                '6th Primary' => 'الصف السادس الابتدائي',
+
+                'الصف الخامس الابتدائي' => 'الصف الخامس الابتدائي',
+                'خامسة ابتدائي' => 'الصف الخامس الابتدائي',
+                '5 ابتدائي' => 'الصف الخامس الابتدائي',
+                '5th Primary' => 'الصف الخامس الابتدائي',
+
+                'الصف الرابع الابتدائي' => 'الصف الرابع الابتدائي',
+                'رابعة ابتدائي' => 'الصف الرابع الابتدائي',
+                '4 ابتدائي' => 'الصف الرابع الابتدائي',
+                '4th Primary' => 'الصف الرابع الابتدائي',
+
+                'الصف الثالث الابتدائي' => 'الصف الثالث الابتدائي',
+                'ثالثة ابتدائي' => 'الصف الثالث الابتدائي',
+                'تالتة ابتدائي' => 'الصف الثالث الابتدائي',
+                '3 ابتدائي' => 'الصف الثالث الابتدائي',
+                '3rd Primary' => 'الصف الثالث الابتدائي',
+
+                'الصف الثاني الابتدائي' => 'الصف الثاني الابتدائي',
+                'ثانية ابتدائي' => 'الصف الثاني الابتدائي',
+                'تانية ابتدائي' => 'الصف الثاني الابتدائي',
+                '2 ابتدائي' => 'الصف الثاني الابتدائي',
+                '2nd Primary' => 'الصف الثاني الابتدائي',
+
+                'الصف الأول الابتدائي' => 'الصف الأول الابتدائي',
+                'أولى ابتدائي' => 'الصف الأول الابتدائي',
+                '1 ابتدائي' => 'الصف الأول الابتدائي',
+                '1st Primary' => 'الصف الأول الابتدائي',
+            ];
+
+            $aliasMap = [];
+            foreach ($rawAliases as $key => $canonical) {
+                $aliasMap[self::normalizeArabicForSearch($key)] = $canonical;
+            }
+        }
+
+        return $aliasMap[$normalized] ?? null;
+    }
+
+    /**
+     * Normalize any grade string (including English or decorated Arabic labels) to canonical Arabic.
+     */
+    public static function normalizeGrade(?string $raw): string
+    {
+        return self::tryNormalizeGrade($raw) ?? 'الصف الثالث الثانوي';
+    }
+
+    /**
+     * Extra colloquial & English aliases for a canonical grade so cross-grade searches
+     * like "فيزياء اولى ثانوي" or "3rd prep" match smoothly.
+     */
+    public static function gradeSearchAliases(?string $canonicalGrade): string
+    {
+        return match ($canonicalGrade) {
+            'الصف الثالث الثانوي' => 'ثالثة ثانوي تالتة ثانوي ثانوية عامة 3 ثانوي 3rd secondary thanawya',
+            'الصف الثاني الثانوي' => 'ثانية ثانوي تانية ثانوي 2 ثانوي 2nd secondary',
+            'الصف الأول الثانوي' => 'أولى ثانوي اولي ثانوي 1 ثانوي 1st secondary',
+            'الصف الثالث الإعدادي' => 'ثالثة إعدادي تالتة إعدادي الشهادة الإعدادية 3 إعدادي 3rd preparatory prep',
+            'الصف الثاني الإعدادي' => 'ثانية إعدادي تانية إعدادي 2 إعدادي 2nd preparatory prep',
+            'الصف الأول الإعدادي' => 'أولى إعدادي اولي إعدادي 1 إعدادي 1st preparatory prep',
+            'الصف السادس الابتدائي' => 'سادسة ابتدائي 6 ابتدائي 6th primary',
+            'الصف الخامس الابتدائي' => 'خامسة ابتدائي 5 ابتدائي 5th primary',
+            'الصف الرابع الابتدائي' => 'رابعة ابتدائي 4 ابتدائي 4th primary',
+            'الصف الثالث الابتدائي' => 'ثالثة ابتدائي تالتة ابتدائي 3 ابتدائي 3rd primary',
+            'الصف الثاني الابتدائي' => 'ثانية ابتدائي تانية ابتدائي 2 ابتدائي 2nd primary',
+            'الصف الأول الابتدائي' => 'أولى ابتدائي اولي ابتدائي 1 ابتدائي 1st primary',
+            default => '',
+        };
+    }
+
+    /**
+     * Token-aware Arabic/English search matcher against a list of text fields.
+     *
+     * @param  list<string|null>  $fields
+     */
+    public static function matchesSearchQuery(string $search, array $fields): bool
+    {
+        $normalizedQuery = self::normalizeArabicForSearch($search);
+        if ($normalizedQuery === '') {
+            return true;
+        }
+
+        $tokens = array_slice(
+            array_values(array_filter(explode(' ', $normalizedQuery), fn (string $t) => $t !== '')),
+            0,
+            6
+        );
+        if (empty($tokens)) {
+            return true;
+        }
+
+        $haystack = self::normalizeArabicForSearch(implode(' ', array_filter($fields, fn ($f) => is_string($f) && $f !== '')));
+        if ($haystack === '') {
+            return false;
+        }
+
+        foreach ($tokens as $token) {
+            if (! str_contains($haystack, $token)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

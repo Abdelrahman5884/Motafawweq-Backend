@@ -20,10 +20,12 @@ use App\Models\LessonTranscript;
 use App\Models\StudentDirectPayment;
 use App\Models\StudentLessonNote;
 use App\Models\StudentLessonProgress;
+use App\Models\StudentProfile;
 use App\Models\StudentXpLedger;
 use App\Models\TeacherPayoutAccount;
 use App\Models\User;
 use App\Services\BaseService;
+use App\Support\MinistryCurriculumCatalog;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\URL;
@@ -47,20 +49,72 @@ class StudentCourseLessonService extends BaseService
     ) {}
 
     /**
-     * List all published courses across teachers with the student's enrollment, progress,
-     * next resume lesson, computed duration, and active teacher payout accounts (zero N+1).
+     * List published teacher courses scoped strictly to the student's current grade by default
+     * (plus already enrolled/pending courses). When `$search` is provided, searches across ALL
+     * grades while prioritizing enrolled, pending, and same-grade courses (zero N+1).
      */
-    public function listCourses(User $student): array
+    public function listCourses(User $student, ?string $search = null): array
     {
         $entitlements = $this->accessService->getEntitlements($student);
+        $cleanSearch = mb_substr(trim((string) $search), 0, 120);
+        $isSearching = $cleanSearch !== '';
 
-        $courses = Course::query()
+        $rawStudentGrade = StudentProfile::where('student_id', $student->id)->value('grade_ar');
+        $studentGrade = MinistryCurriculumCatalog::normalizeGrade($rawStudentGrade);
+
+        $pendingCourseIds = StudentDirectPayment::query()
+            ->where('student_id', $student->id)
+            ->where('status', DirectPaymentStatus::PENDING)
+            ->whereNotNull('course_id')
+            ->pluck('course_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $allPublished = Course::query()
             ->where('status', CourseStatus::PUBLISHED)
             ->with(['teacher:id,name,avatar'])
             ->withCount(['lessons as published_lessons_count' => fn ($q) => $q->where('status', LessonStatus::PUBLISHED)])
             ->withSum(['lessons as published_duration_seconds' => fn ($q) => $q->where('status', LessonStatus::PUBLISHED)], 'duration_seconds')
             ->latest()
             ->get();
+
+        if ($allPublished->isEmpty()) {
+            return [];
+        }
+
+        // Filter BEFORE bulk progress/lesson/payout lookups to avoid loading data for hidden grades
+        $courses = $allPublished->filter(function (Course $course) use (
+            $entitlements,
+            $pendingCourseIds,
+            $studentGrade,
+            $isSearching,
+            $cleanSearch
+        ) {
+            $normalizedGrade = MinistryCurriculumCatalog::tryNormalizeGrade($course->grade_ar);
+
+            if ($isSearching) {
+                return MinistryCurriculumCatalog::matchesSearchQuery($cleanSearch, [
+                    $course->title_ar,
+                    $course->title_en,
+                    $course->subject_ar,
+                    $course->subject_en,
+                    $course->grade_ar,
+                    $normalizedGrade,
+                    MinistryCurriculumCatalog::gradeSearchAliases($normalizedGrade),
+                    $course->stage_name_ar,
+                    $course->description_ar,
+                    $course->teacher?->name,
+                ]);
+            }
+
+            $cid = (int) $course->id;
+            $isDirectlyEnrolled = in_array($cid, $entitlements['direct_course_ids'] ?? [], true);
+            $isPending = in_array($cid, $pendingCourseIds, true);
+
+            return $normalizedGrade === $studentGrade || $isDirectlyEnrolled || $isPending;
+        })->values();
 
         if ($courses->isEmpty()) {
             return [];
@@ -83,14 +137,6 @@ class StudentCourseLessonService extends BaseService
                 $completedLessonIds[(int) $prog->lesson_id] = true;
             }
         }
-
-        $pendingCourseIds = StudentDirectPayment::query()
-            ->where('student_id', $student->id)
-            ->where('status', DirectPaymentStatus::PENDING)
-            ->whereIn('course_id', $courseIds)
-            ->pluck('course_id')
-            ->map(fn ($id) => (int) $id)
-            ->all();
 
         // Bulk-load published lesson UUIDs for enrolled courses to determine exact next resume lesson
         $enrolledCourseIds = array_values(array_intersect(
@@ -129,12 +175,14 @@ class StudentCourseLessonService extends BaseService
                 ->groupBy('teacher_id')
             : collect();
 
-        $mapped = $courses->map(function (Course $course) use (
+        $mapped = $courses->map(function (Course $course, int $idx) use (
             $completedByCourse,
             $entitlements,
             $pendingCourseIds,
             $nextLessonByCourse,
-            $payoutsByTeacher
+            $payoutsByTeacher,
+            $studentGrade,
+            $isSearching
         ) {
             $publishedLessons = (int) ($course->published_lessons_count ?? 0);
             $publishedDurationSec = max(0, (int) ($course->published_duration_seconds ?? 0));
@@ -145,6 +193,8 @@ class StudentCourseLessonService extends BaseService
             $priceEgp = max(0.0, (float) ($course->price_egp ?? 0));
             $isEnrolled = in_array((int) $course->id, $entitlements['course_ids'], true);
             $isPending = ! $isEnrolled && in_array((int) $course->id, $pendingCourseIds, true);
+            $normalizedGrade = MinistryCurriculumCatalog::tryNormalizeGrade($course->grade_ar);
+            $isSameGrade = $normalizedGrade === $studentGrade;
 
             $teacherAccounts = ($payoutsByTeacher->get($course->teacher_id) ?? collect())
                 ->map(fn (TeacherPayoutAccount $acc) => [
@@ -158,39 +208,47 @@ class StudentCourseLessonService extends BaseService
                 ->values()
                 ->all();
 
-            return [
-                'id' => $course->uuid,
-                'uuid' => $course->uuid,
-                'titleAr' => $course->title_ar,
-                'titleEn' => $course->title_en ?: $course->title_ar,
-                'subjectAr' => $course->subject_ar ?: $course->grade_ar,
-                'subjectEn' => $course->subject_en ?: ($course->subject_ar ?: $course->grade_ar),
-                'stage' => $course->stage_name_ar ?: (string) ($course->stage_id ?? ''),
-                'gradeAr' => $course->grade_ar ?: '',
-                'descriptionAr' => $course->description_ar ?: '',
-                'descriptionEn' => $course->description_en ?: ($course->description_ar ?: ''),
-                'coverUrl' => $course->cover_url ?: '',
-                'priceEgp' => $priceEgp,
-                'isEnrolled' => $isEnrolled,
-                'isPending' => $isPending,
-                'teacherName' => $course->teacher?->name ?? '',
-                'teacherAvatar' => $course->teacher?->avatar ?? '',
-                'hoursTotal' => $course->hours_total ?: '',
-                'publishedDurationSeconds' => $publishedDurationSec,
-                'lessonsCount' => $publishedLessons,
-                'completedLessons' => $completed,
-                'progressPercent' => $progressPercent,
-                'studentsCount' => max(0, (int) ($course->students_count ?? 0)),
-                'nextLessonId' => $isEnrolled ? ($nextLessonByCourse[(int) $course->id] ?? null) : null,
-                'payoutAccounts' => $teacherAccounts,
-            ];
-        });
+            $enrollBucket = $isEnrolled ? 0 : ($isPending ? 1 : 2);
+            $gradeBucket = $isSameGrade ? 0 : 1;
+            $sortKey = $isSearching
+                ? [$gradeBucket, $enrollBucket, $idx]
+                : [$enrollBucket, $gradeBucket, $idx];
 
-        // Sort: Enrolled first, then Pending, then Available (preserving recency inside each bucket)
-        return $mapped
-            ->sortBy(fn (array $item) => $item['isEnrolled'] ? 0 : ($item['isPending'] ? 1 : 2))
-            ->values()
-            ->all();
+            return [
+                '_sortKey' => $sortKey,
+                'payload' => [
+                    'id' => $course->uuid,
+                    'uuid' => $course->uuid,
+                    'titleAr' => $course->title_ar,
+                    'titleEn' => $course->title_en ?: $course->title_ar,
+                    'subjectAr' => $course->subject_ar ?: $course->grade_ar,
+                    'subjectEn' => $course->subject_en ?: ($course->subject_ar ?: $course->grade_ar),
+                    'stage' => $course->stage_name_ar ?: (string) ($course->stage_id ?? ''),
+                    'gradeAr' => $normalizedGrade ?? ($course->grade_ar ?: ''),
+                    'isSameGrade' => $isSameGrade,
+                    'descriptionAr' => $course->description_ar ?: '',
+                    'descriptionEn' => $course->description_en ?: ($course->description_ar ?: ''),
+                    'coverUrl' => $course->cover_url ?: '',
+                    'priceEgp' => $priceEgp,
+                    'isEnrolled' => $isEnrolled,
+                    'isPending' => $isPending,
+                    'teacherName' => $course->teacher?->name ?? '',
+                    'teacherAvatar' => $course->teacher?->avatar ?? '',
+                    'hoursTotal' => $course->hours_total ?: '',
+                    'publishedDurationSeconds' => $publishedDurationSec,
+                    'lessonsCount' => $publishedLessons,
+                    'completedLessons' => $completed,
+                    'progressPercent' => $progressPercent,
+                    'studentsCount' => max(0, (int) ($course->students_count ?? 0)),
+                    'nextLessonId' => $isEnrolled ? ($nextLessonByCourse[(int) $course->id] ?? null) : null,
+                    'payoutAccounts' => $teacherAccounts,
+                ],
+            ];
+        })->all();
+
+        usort($mapped, fn (array $a, array $b) => $a['_sortKey'] <=> $b['_sortKey']);
+
+        return array_map(fn (array $row) => $row['payload'], $mapped);
     }
 
     /**

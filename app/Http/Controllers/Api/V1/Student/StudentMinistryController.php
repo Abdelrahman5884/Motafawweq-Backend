@@ -19,9 +19,11 @@ class StudentMinistryController extends BaseApiController
     public function curricula(Request $request): JsonResponse
     {
         $grade = $request->query('grade');
+        $search = $request->query('search');
         $data = $this->ministryService->listCurricula(
             $this->authenticatedUser(),
-            is_string($grade) ? $grade : null
+            is_string($grade) ? $grade : null,
+            is_string($search) ? $search : null
         );
 
         return $this->successResponse($data);
@@ -51,9 +53,11 @@ class StudentMinistryController extends BaseApiController
     public function exams(Request $request): JsonResponse
     {
         $grade = $request->query('grade');
+        $search = $request->query('search');
         $data = $this->ministryService->listExams(
             $this->authenticatedUser(),
-            is_string($grade) ? $grade : null
+            is_string($grade) ? $grade : null,
+            is_string($search) ? $search : null
         );
 
         return $this->successResponse($data);

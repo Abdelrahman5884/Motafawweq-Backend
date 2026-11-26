@@ -62,10 +62,10 @@ class StudentAccessService extends BaseService
             $confirmedPayments->pluck('teacher_id')->all()
         ))));
 
-        $directCourseIds = array_filter(array_merge(
+        $directCourseIds = array_values(array_unique(array_filter(array_merge(
             $enrolledGroups->pluck('course_id')->all(),
             $confirmedPayments->pluck('course_id')->all()
-        ));
+        ))));
 
         $teacherCourseIds = ! empty($teacherIds)
             ? Course::query()
@@ -80,6 +80,7 @@ class StudentAccessService extends BaseService
         return $this->entitlementCache[$student->id] = [
             'group_ids' => array_map('intval', $groupIds),
             'teacher_ids' => array_map('intval', $teacherIds),
+            'direct_course_ids' => array_map('intval', $directCourseIds),
             'course_ids' => array_map('intval', $courseIds),
         ];
     }

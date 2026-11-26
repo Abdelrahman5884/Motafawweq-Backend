@@ -11,11 +11,13 @@ use App\Models\Exam;
 use App\Models\ExamQuestion;
 use App\Models\ExamSubmission;
 use App\Models\ExamSubmissionAnswer;
+use App\Models\StudentProfile;
 use App\Models\StudentRiskSignal;
 use App\Models\StudentXpLedger;
 use App\Models\User;
 use App\Services\BaseService;
 use App\Services\V1\LeagueRulesService;
+use App\Support\MinistryCurriculumCatalog;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Validation\ValidationException;
@@ -28,15 +30,23 @@ class StudentExamTakingService extends BaseService
     ) {}
 
     /**
-     * List all accessible exams for the authenticated student with accurate submission & schedule state.
+     * List accessible exams for the authenticated student with accurate submission & schedule state.
+     * By default (empty search), strictly scoped to the student's current grade (plus unscoped or
+     * already-attempted exams). When `$search` is provided, searches across all accessible grades.
      */
-    public function listExams(User $student): array
+    public function listExams(User $student, ?string $search = null): array
     {
         $entitlements = $this->accessService->getEntitlements($student);
 
         if (empty($entitlements['teacher_ids']) && empty($entitlements['course_ids'])) {
             return [];
         }
+
+        $cleanSearch = mb_substr(trim((string) $search), 0, 120);
+        $isSearching = $cleanSearch !== '';
+
+        $rawStudentGrade = StudentProfile::where('student_id', $student->id)->value('grade_ar');
+        $studentGrade = MinistryCurriculumCatalog::normalizeGrade($rawStudentGrade);
 
         $exams = Exam::query()
             ->whereIn('status', [ExamStatus::ACTIVE, ExamStatus::CLOSED])
@@ -48,7 +58,7 @@ class StudentExamTakingService extends BaseService
                     $q->orWhereIn('course_id', $entitlements['course_ids']);
                 }
             })
-            ->with(['teacher:id,name'])
+            ->with(['teacher:id,name', 'course:id,grade_ar'])
             ->withCount('questions')
             ->latest()
             ->get();
@@ -63,14 +73,44 @@ class StudentExamTakingService extends BaseService
             ->get()
             ->keyBy('exam_id');
 
+        $filteredExams = $exams->filter(function (Exam $exam) use ($studentGrade, $isSearching, $cleanSearch, $submissionsByExam) {
+            $rawGrade = trim((string) ($exam->grade_ar ?: ($exam->course?->grade_ar ?? '')));
+            $normalizedGrade = MinistryCurriculumCatalog::tryNormalizeGrade($rawGrade);
+
+            if ($isSearching) {
+                return MinistryCurriculumCatalog::matchesSearchQuery($cleanSearch, [
+                    $exam->title_ar,
+                    $exam->title_en,
+                    $exam->course_title_ar,
+                    $exam->teacher?->name,
+                    $rawGrade,
+                    $normalizedGrade,
+                    MinistryCurriculumCatalog::gradeSearchAliases($normalizedGrade),
+                ]);
+            }
+
+            // Default browse: keep student's current grade, unscoped exams, or already attempted exams
+            return $normalizedGrade === null
+                || $normalizedGrade === $studentGrade
+                || $submissionsByExam->has($exam->id);
+        })->values();
+
+        if ($filteredExams->isEmpty()) {
+            return [];
+        }
+
         $now = Carbon::now();
 
-        return $exams->map(function (Exam $exam) use ($submissionsByExam, $now) {
+        $mapped = $filteredExams->map(function (Exam $exam, int $idx) use ($submissionsByExam, $now, $studentGrade) {
             /** @var ExamSubmission|null $sub */
             $sub = $submissionsByExam->get($exam->id);
             $subStatus = $sub?->status instanceof ExamSubmissionStatus
                 ? $sub->status->value
                 : ($sub?->status ?? 'not_started');
+
+            $rawGrade = trim((string) ($exam->grade_ar ?: ($exam->course?->grade_ar ?? '')));
+            $normalizedGrade = MinistryCurriculumCatalog::tryNormalizeGrade($rawGrade);
+            $isSameGrade = $normalizedGrade === null || $normalizedGrade === $studentGrade;
 
             $showResults = (bool) $exam->show_results;
             $canRevealScore = $showResults && $subStatus === ExamSubmissionStatus::GRADED->value;
@@ -81,31 +121,42 @@ class StudentExamTakingService extends BaseService
             }
 
             return [
-                'id' => $exam->uuid,
-                'uuid' => $exam->uuid,
-                'titleAr' => $exam->title_ar,
-                'titleEn' => $exam->title_en ?? $exam->title_ar,
-                'courseTitleAr' => $exam->course_title_ar,
-                'teacherName' => $exam->teacher?->name ?? '',
-                'durationMinutes' => (int) $exam->duration_minutes,
-                'fullMark' => (int) $exam->full_mark,
-                'passScore' => (int) $exam->pass_score,
-                'questionsCount' => max((int) ($exam->questions_count ?? 0), (int) $exam->questions_count),
-                'status' => $exam->status instanceof ExamStatus ? $exam->status->value : (string) $exam->status,
-                'isUpcoming' => (bool) $isUpcoming,
-                'isBubbleSheet' => (bool) $exam->is_bubble_sheet,
-                'showResults' => $showResults,
-                'startsAt' => $exam->starts_at?->toIso8601String(),
-                'dueDate' => $exam->due_date?->format('Y-m-d'),
-                'submissionStatus' => $subStatus,
-                'remainingSeconds' => $remainingSeconds,
-                'submittedAt' => $sub?->submitted_at?->toIso8601String(),
-                'score' => $canRevealScore ? (float) $sub->score : null,
-                'percentage' => $canRevealScore ? (float) $sub->percentage : null,
-                'isPassed' => $canRevealScore ? (bool) $sub->is_passed : null,
-                'isFullMark' => $canRevealScore ? (bool) $sub->is_full_mark : null,
+                '_sortKey' => [$isSameGrade ? 0 : 1, $idx],
+                'payload' => [
+                    'id' => $exam->uuid,
+                    'uuid' => $exam->uuid,
+                    'titleAr' => $exam->title_ar,
+                    'titleEn' => $exam->title_en ?? $exam->title_ar,
+                    'courseTitleAr' => $exam->course_title_ar,
+                    'gradeAr' => $normalizedGrade ?? $rawGrade,
+                    'isSameGrade' => $isSameGrade,
+                    'teacherName' => $exam->teacher?->name ?? '',
+                    'durationMinutes' => (int) $exam->duration_minutes,
+                    'fullMark' => (int) $exam->full_mark,
+                    'passScore' => (int) $exam->pass_score,
+                    'questionsCount' => max((int) ($exam->questions_count ?? 0), (int) $exam->questions_count),
+                    'status' => $exam->status instanceof ExamStatus ? $exam->status->value : (string) $exam->status,
+                    'isUpcoming' => (bool) $isUpcoming,
+                    'isBubbleSheet' => (bool) $exam->is_bubble_sheet,
+                    'showResults' => $showResults,
+                    'startsAt' => $exam->starts_at?->toIso8601String(),
+                    'dueDate' => $exam->due_date?->format('Y-m-d'),
+                    'submissionStatus' => $subStatus,
+                    'remainingSeconds' => $remainingSeconds,
+                    'submittedAt' => $sub?->submitted_at?->toIso8601String(),
+                    'score' => $canRevealScore ? (float) $sub->score : null,
+                    'percentage' => $canRevealScore ? (float) $sub->percentage : null,
+                    'isPassed' => $canRevealScore ? (bool) $sub->is_passed : null,
+                    'isFullMark' => $canRevealScore ? (bool) $sub->is_full_mark : null,
+                ],
             ];
-        })->values()->all();
+        })->all();
+
+        if ($isSearching) {
+            usort($mapped, fn (array $a, array $b) => $a['_sortKey'] <=> $b['_sortKey']);
+        }
+
+        return array_map(fn (array $row) => $row['payload'], $mapped);
     }
 
     /**

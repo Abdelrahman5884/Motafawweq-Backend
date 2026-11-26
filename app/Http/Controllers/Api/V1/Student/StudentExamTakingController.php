@@ -7,6 +7,7 @@ use App\Http\Requests\V1\Student\SubmitExamRequest;
 use App\Http\Resources\V1\Student\StudentExamSubmissionResource;
 use App\Services\V1\Student\StudentExamTakingService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class StudentExamTakingController extends BaseApiController
 {
@@ -16,11 +17,16 @@ class StudentExamTakingController extends BaseApiController
 
     /**
      * GET /api/v1/student/exams
-     * List accessible exams for the student with submission status.
+     * List accessible exams for the student (scoped to student's grade by default;
+     * searches across all grades when `?search=` is provided).
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $exams = $this->examTakingService->listExams($this->authenticatedUser());
+        $search = $request->query('search');
+        $exams = $this->examTakingService->listExams(
+            $this->authenticatedUser(),
+            is_string($search) ? $search : null
+        );
 
         return $this->successResponse($exams);
     }

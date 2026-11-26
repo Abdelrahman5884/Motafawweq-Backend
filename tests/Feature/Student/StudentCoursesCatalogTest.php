@@ -14,6 +14,7 @@ use App\Models\DiscountCoupon;
 use App\Models\GroupEnrollment;
 use App\Models\Lesson;
 use App\Models\StudentLessonProgress;
+use App\Models\StudentProfile;
 use App\Models\StudyGroup;
 use App\Models\TeacherPayoutAccount;
 use App\Models\User;
@@ -281,5 +282,95 @@ class StudentCoursesCatalogTest extends TestCase
             'payment_method' => 'instapay',
         ])->assertStatus(422)
             ->assertJsonValidationErrors(['course_uuid']);
+    }
+
+    public function test_courses_catalog_scopes_strictly_to_student_grade_by_default_and_searches_across_all_grades(): void
+    {
+        $teacher = $this->createTeacher('د. كريم مصطفى');
+        $student = $this->createStudent('ياسين أحمد');
+
+        StudentProfile::create([
+            'student_id' => $student->id,
+            'stage' => 'stage-secondary',
+            'grade_ar' => 'الصف الأول الثانوي',
+            'track_ar' => 'عام',
+        ]);
+
+        // Same grade as student (must appear by default)
+        $sameGradeCourse = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'الفيزياء الحديثة — أولى ثانوي',
+            'subject_ar' => 'الفيزياء',
+            'grade_ar' => 'الصف الأول الثانوي',
+            'price_egp' => 250,
+            'status' => CourseStatus::PUBLISHED,
+        ]);
+
+        // Different grade, NOT enrolled (must be HIDDEN by default, FOUND on cross-grade search)
+        $otherGradeCourse = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'الفيزياء الكهربية الشاملة',
+            'subject_ar' => 'الفيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'price_egp' => 450,
+            'status' => CourseStatus::PUBLISHED,
+        ]);
+
+        // Different grade, ALREADY enrolled (must remain visible by default)
+        $enrolledOtherGrade = Course::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'الكيمياء الحرارية المتميزة',
+            'subject_ar' => 'الكيمياء',
+            'grade_ar' => 'الصف الثاني الثانوي',
+            'price_egp' => 300,
+            'status' => CourseStatus::PUBLISHED,
+        ]);
+
+        $group = StudyGroup::create([
+            'teacher_id' => $teacher->id,
+            'course_id' => $enrolledOtherGrade->id,
+            'name_ar' => 'مجموعة الكيمياء',
+            'subject_ar' => 'الكيمياء',
+            'grade_ar' => 'الصف الثاني الثانوي',
+            'center_name' => 'سنتر الرواد',
+            'hall_name' => 'قاعة 3',
+            'price_egp' => 300,
+            'join_code' => 'CHM-'.random_int(1000, 9999),
+            'status' => 'active',
+        ]);
+        GroupEnrollment::create([
+            'study_group_id' => $group->id,
+            'teacher_id' => $teacher->id,
+            'student_id' => $student->id,
+            'status' => EnrollmentStatus::ENROLLED,
+            'enrolled_at' => now(),
+        ]);
+
+        Sanctum::actingAs($student, [TokenType::ACCESS->value]);
+
+        // 1. Default browse: strictly student's grade + already enrolled (excludes 3rd Secondary)
+        $defaultRes = $this->getJson('/api/v1/student/courses')->assertOk();
+        $defaultIds = collect($defaultRes->json('data'))->pluck('id')->all();
+
+        $this->assertCount(2, $defaultIds);
+        $this->assertContains($sameGradeCourse->uuid, $defaultIds);
+        $this->assertContains($enrolledOtherGrade->uuid, $defaultIds);
+        $this->assertNotContains($otherGradeCourse->uuid, $defaultIds);
+
+        // 2. Cross-grade search by colloquial grade alias ("تالتة ثانوي") discovers 3rd Secondary course
+        $gradeSearchRes = $this->getJson('/api/v1/student/courses?search='.urlencode('تالتة ثانوي'))
+            ->assertOk();
+        $gradeSearchRes->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $otherGradeCourse->uuid)
+            ->assertJsonPath('data.0.isSameGrade', false);
+
+        // 3. Cross-grade search by subject ("الفيزياء") returns BOTH grades with student's grade ranked first
+        $subjectSearchRes = $this->getJson('/api/v1/student/courses?search='.urlencode('الفيزياء'))
+            ->assertOk();
+        $subjectSearchRes->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.id', $sameGradeCourse->uuid)
+            ->assertJsonPath('data.0.isSameGrade', true)
+            ->assertJsonPath('data.1.id', $otherGradeCourse->uuid)
+            ->assertJsonPath('data.1.isSameGrade', false);
     }
 }

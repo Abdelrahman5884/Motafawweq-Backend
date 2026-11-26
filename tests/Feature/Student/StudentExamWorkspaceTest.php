@@ -13,6 +13,7 @@ use App\Models\Exam;
 use App\Models\ExamQuestion;
 use App\Models\ExamSubmission;
 use App\Models\GroupEnrollment;
+use App\Models\StudentProfile;
 use App\Models\StudyGroup;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -271,5 +272,91 @@ class StudentExamWorkspaceTest extends TestCase
             ->assertJsonPath('data.percentage', null)
             ->assertJsonPath('data.isPassed', null)
             ->assertJsonCount(0, 'data.review');
+    }
+
+    public function test_teacher_exams_scope_to_student_grade_by_default_and_search_across_all_grades(): void
+    {
+        $teacher = $this->createTeacher();
+        $student = $this->createStudent('عمر شريف');
+
+        StudentProfile::create([
+            'student_id' => $student->id,
+            'stage' => 'stage-secondary',
+            'grade_ar' => 'الصف الأول الثانوي',
+            'track_ar' => 'عام',
+        ]);
+
+        $this->enrollStudent($student, $teacher);
+
+        $sameGradeExam = Exam::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'اختبار الفيزياء — أولى ثانوي',
+            'course_title_ar' => 'الفيزياء',
+            'grade_ar' => 'الصف الأول الثانوي',
+            'duration_minutes' => 25,
+            'full_mark' => 20,
+            'pass_score' => 10,
+            'status' => ExamStatus::ACTIVE,
+            'show_results' => true,
+        ]);
+
+        $otherGradeExam = Exam::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'مراجعة الفيزياء الكهربية — ثالثة ثانوي',
+            'course_title_ar' => 'الفيزياء',
+            'grade_ar' => 'الصف الثالث الثانوي',
+            'duration_minutes' => 45,
+            'full_mark' => 50,
+            'pass_score' => 25,
+            'status' => ExamStatus::ACTIVE,
+            'show_results' => true,
+        ]);
+
+        $attemptedOtherGradeExam = Exam::create([
+            'teacher_id' => $teacher->id,
+            'title_ar' => 'امتحان سابق — ثانية ثانوي',
+            'course_title_ar' => 'الفيزياء',
+            'grade_ar' => 'الصف الثاني الثانوي',
+            'duration_minutes' => 30,
+            'full_mark' => 30,
+            'pass_score' => 15,
+            'status' => ExamStatus::ACTIVE,
+            'show_results' => true,
+        ]);
+
+        ExamSubmission::create([
+            'exam_id' => $attemptedOtherGradeExam->id,
+            'student_id' => $student->id,
+            'started_at' => now()->subMinutes(10),
+            'expires_at' => now()->addMinutes(20),
+            'full_mark' => 30,
+            'status' => ExamSubmissionStatus::IN_PROGRESS,
+        ]);
+
+        Sanctum::actingAs($student, [TokenType::ACCESS->value]);
+
+        // 1. Default browse excludes other-grade unattempted exams
+        $defaultRes = $this->getJson('/api/v1/student/exams')->assertOk();
+        $defaultIds = collect($defaultRes->json('data'))->pluck('id')->all();
+
+        $this->assertCount(2, $defaultIds);
+        $this->assertContains($sameGradeExam->uuid, $defaultIds);
+        $this->assertContains($attemptedOtherGradeExam->uuid, $defaultIds);
+        $this->assertNotContains($otherGradeExam->uuid, $defaultIds);
+
+        // 2. Cross-grade search by colloquial grade discovers 3rd Secondary exam
+        $this->getJson('/api/v1/student/exams?search='.urlencode('تالتة ثانوي'))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $otherGradeExam->uuid)
+            ->assertJsonPath('data.0.gradeAr', 'الصف الثالث الثانوي')
+            ->assertJsonPath('data.0.isSameGrade', false);
+
+        // 3. Cross-grade search by subject returns all grades with student's grade ranked first
+        $searchRes = $this->getJson('/api/v1/student/exams?search='.urlencode('الفيزياء'))
+            ->assertOk();
+        $searchRes->assertJsonCount(3, 'data')
+            ->assertJsonPath('data.0.id', $sameGradeExam->uuid)
+            ->assertJsonPath('data.0.isSameGrade', true);
     }
 }
