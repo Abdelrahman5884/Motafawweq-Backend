@@ -25,6 +25,12 @@ class StudentConvertedLectureController extends BaseApiController
         return $this->successResponse($this->service->show($this->authenticatedUser(), $uuid));
     }
 
+    /** GET /api/v1/student/converted-lectures/{uuid}/status */
+    public function status(string $uuid): JsonResponse
+    {
+        return $this->successResponse($this->service->getStatus($this->authenticatedUser(), $uuid));
+    }
+
     /** POST /api/v1/student/converted-lectures */
     public function store(Request $request): JsonResponse
     {
@@ -33,6 +39,7 @@ class StudentConvertedLectureController extends BaseApiController
             'subject_ar' => ['nullable', 'string', 'max:120'],
             'grade_ar' => ['nullable', 'string', 'max:120'],
             'lesson_uuid' => ['nullable', 'uuid'],
+            'language' => ['nullable', 'string', 'max:16', 'regex:/^(auto|[a-zA-Z]{2,3})$/'],
             'outputs' => ['nullable', 'array', 'max:4'],
             'outputs.*' => ['string', 'in:graph,transcript,topics,quiz'],
             'file_name' => ['nullable', 'string', 'max:255'],

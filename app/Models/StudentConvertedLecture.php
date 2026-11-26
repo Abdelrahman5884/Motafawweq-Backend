@@ -6,6 +6,8 @@ use App\Traits\BelongsToStudent;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 class StudentConvertedLecture extends Model
@@ -57,5 +59,17 @@ class StudentConvertedLecture extends Model
     public function lesson(): BelongsTo
     {
         return $this->belongsTo(Lesson::class);
+    }
+
+    public function aiJobs(): HasMany
+    {
+        return $this->hasMany(AiProcessingJob::class, 'converted_lecture_id')->latest('id');
+    }
+
+    public function latestSttJob(): HasOne
+    {
+        return $this->hasOne(AiProcessingJob::class, 'converted_lecture_id')
+            ->where('task_type', AiProcessingJob::TASK_SPEECH_TO_TEXT)
+            ->latestOfMany('id');
     }
 }

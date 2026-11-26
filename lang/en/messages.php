@@ -457,4 +457,19 @@ return [
         'settings_fetched' => 'Parent profile and preferences retrieved successfully.',
         'settings_updated' => 'Parent profile and notification preferences saved successfully.',
     ],
+
+    // AI Microservice & Speech-to-Text Engine
+    'ai' => [
+        'status_fetched' => 'AI processing status retrieved successfully.',
+        'transcription_started' => 'AI Speech-to-Text transcription started successfully.',
+        'transcription_completed' => 'AI Speech-to-Text transcription completed successfully.',
+        'transcription_failed' => 'Unable to complete audio transcription. Please try again.',
+        'lesson_media_required' => 'This lesson has no audio or video media attached for transcription.',
+        'lesson_media_missing' => 'Lesson media file could not be found in storage.',
+        'media_file_unreadable' => 'Unable to read the media file for AI transcription.',
+        'service_unavailable' => 'AI service is currently unavailable. Please make sure Motafawweq AI is running and try again.',
+        'service_error' => 'An error occurred while processing audio in the AI service.',
+        'job_expired' => 'The transcription job expired. Please restart transcription.',
+        'rate_limit_stt' => 'Too many transcription requests. Please wait a minute and try again.',
+    ],
 ];

@@ -22,7 +22,7 @@ class SyncLessonTranscriptRequest extends BaseApiRequest
     public function rules(): array
     {
         return [
-            'segments' => ['present', 'array', 'max:500'],
+            'segments' => ['present', 'array', 'max:2000'],
             'segments.*.speaker' => ['nullable', 'string', 'max:120'],
             'segments.*.startSeconds' => ['nullable', 'integer', 'min:0', 'max:86400'],
             'segments.*.start_seconds' => ['nullable', 'integer', 'min:0', 'max:86400'],

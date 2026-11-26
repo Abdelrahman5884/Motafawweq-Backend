@@ -286,5 +286,12 @@ class AppServiceProvider extends ServiceProvider
                 ->by('par-link:'.($request->user()?->id ?: $request->ip()))
                 ->response($tooMany('messages.rate_limit_join_code'));
         });
+
+        // AI Speech-to-Text job submission: 10 requests per minute per authenticated user
+        RateLimiter::for('ai-stt', function (Request $request) use ($tooMany) {
+            return Limit::perMinute(10)
+                ->by('ai-stt:'.($request->user()?->id ?: $request->ip()))
+                ->response($tooMany('messages.ai.rate_limit_stt'));
+        });
     }
 }

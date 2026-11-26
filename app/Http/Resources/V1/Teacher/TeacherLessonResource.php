@@ -6,6 +6,7 @@ use App\Enums\LessonAttachmentType;
 use App\Enums\LessonMediaMode;
 use App\Enums\LessonStatus;
 use App\Http\Resources\BaseJsonResource;
+use App\Services\V1\AI\LessonSpeechToTextService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
@@ -35,6 +36,7 @@ class TeacherLessonResource extends BaseJsonResource
         $chapters = $this->relationLoaded('chapters') ? $this->chapters : collect();
         $transcript = $this->relationLoaded('transcriptSegments') ? $this->transcriptSegments : collect();
         $conceptGraph = $this->relationLoaded('conceptGraph') ? $this->conceptGraph : null;
+        $latestSttJob = $this->relationLoaded('latestSttJob') ? $this->latestSttJob : null;
 
         $mediaStreamUrl = null;
         if ($this->media_path && Route::has('api.v1.teacher.lessons.media.stream')) {
@@ -97,6 +99,7 @@ class TeacherLessonResource extends BaseJsonResource
             'lessonImages' => LessonAttachmentResource::collection($images)->resolve($request),
             'chapters' => LessonChapterResource::collection($chapters)->resolve($request),
             'transcript' => LessonTranscriptResource::collection($transcript)->resolve($request),
+            'aiSttJob' => LessonSpeechToTextService::formatJob($latestSttJob),
             'notebookMindMap' => $conceptGraph?->tree_data,
             'publishedAt' => $this->formatDate($this->published_at),
             'createdAt' => $this->formatDate($this->created_at),

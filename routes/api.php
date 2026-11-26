@@ -50,6 +50,7 @@ use App\Http\Controllers\Api\V1\Teacher\TeacherExamGradingController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherFinancialController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherHomeworkController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherLeagueController;
+use App\Http\Controllers\Api\V1\Teacher\TeacherLessonAiController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherPayoutAccountController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherRosterController;
 use App\Http\Controllers\Api\V1\Teacher\TeacherScheduleController;
@@ -364,6 +365,9 @@ Route::prefix('v1')->group(function () {
                 Route::post('/converted-lectures', [StudentConvertedLectureController::class, 'store'])
                     ->middleware(['throttle:student-uploads', 'idempotent', 'student.plan:converted_lectures']);
                 Route::get('/converted-lectures/{uuid}', [StudentConvertedLectureController::class, 'show'])
+                    ->whereUuid('uuid')
+                    ->middleware(['throttle:student-read', 'student.plan:converted_lectures']);
+                Route::get('/converted-lectures/{uuid}/status', [StudentConvertedLectureController::class, 'status'])
                     ->whereUuid('uuid')
                     ->middleware(['throttle:student-read', 'student.plan:converted_lectures']);
                 Route::delete('/converted-lectures/{uuid}', [StudentConvertedLectureController::class, 'destroy'])
@@ -807,6 +811,14 @@ Route::prefix('v1')->group(function () {
                     Route::put('/lessons/{uuid}/concept-graph', [LessonWorkspaceController::class, 'saveConceptGraph'])
                         ->whereUuid('uuid')
                         ->middleware('teacher.plan:ai');
+
+                    // AI Speech-to-Text (Whisper large-v3) Pipeline
+                    Route::get('/lessons/{uuid}/ai/status', [TeacherLessonAiController::class, 'status'])
+                        ->whereUuid('uuid')
+                        ->middleware('teacher.plan:ai');
+                    Route::post('/lessons/{uuid}/ai/transcribe', [TeacherLessonAiController::class, 'transcribe'])
+                        ->whereUuid('uuid')
+                        ->middleware(['teacher.plan:ai', 'throttle:ai-stt']);
                 });
 
                 // Stage 7 & 8: Study Groups, Schedule & Student Roster

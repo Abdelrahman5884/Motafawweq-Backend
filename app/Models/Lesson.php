@@ -100,4 +100,16 @@ class Lesson extends Model
     {
         return $this->hasOne(LessonConceptGraph::class);
     }
+
+    public function aiJobs(): HasMany
+    {
+        return $this->hasMany(AiProcessingJob::class)->latest('id');
+    }
+
+    public function latestSttJob(): HasOne
+    {
+        return $this->hasOne(AiProcessingJob::class)
+            ->where('task_type', AiProcessingJob::TASK_SPEECH_TO_TEXT)
+            ->latestOfMany('id');
+    }
 }
