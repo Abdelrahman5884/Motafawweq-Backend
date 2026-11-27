@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\BaseApiController;
 use App\Services\V1\Student\StudentConvertedLectureService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use RuntimeException;
+use Symfony\Component\HttpFoundation\Response;
 
 class StudentConvertedLectureController extends BaseApiController
 {
@@ -54,6 +56,33 @@ class StudentConvertedLectureController extends BaseApiController
         );
 
         return $this->createdResponse($lecture, 'تم حفظ المحاضرة في أرشيفك بنجاح.');
+    }
+
+    /** POST /api/v1/student/converted-lectures/{uuid}/quiz */
+    public function generateQuiz(Request $request, string $uuid): JsonResponse
+    {
+        $validated = $request->validate([
+            'quiz_count' => ['nullable', 'integer', 'min:2', 'max:10'],
+        ]);
+
+        try {
+            $lecture = $this->service->generateQuiz(
+                $this->authenticatedUser(),
+                $uuid,
+                (int) ($validated['quiz_count'] ?? 5)
+            );
+        } catch (RuntimeException $e) {
+            return $this->errorResponse(
+                $e->getMessage() ?: __('messages.ai.service_unavailable'),
+                Response::HTTP_SERVICE_UNAVAILABLE
+            );
+        }
+
+        return $this->successResponse(
+            $lecture,
+            __('messages.ai.quiz_generation_started'),
+            Response::HTTP_ACCEPTED
+        );
     }
 
     /** DELETE /api/v1/student/converted-lectures/{uuid} */

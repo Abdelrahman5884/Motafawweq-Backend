@@ -43,7 +43,7 @@ class AiMicroserviceClient
     }
 
     /**
-     * Check AI microservice availability and loaded Whisper model status.
+     * Check AI microservice availability and loaded STT/LLM model status.
      *
      * @return array<string, mixed>
      */
@@ -190,12 +190,136 @@ class AiMicroserviceClient
     }
 
     /**
-     * Best-effort cleanup of completed job payload in AI microservice memory.
+     * Best-effort cleanup of completed STT job payload in AI microservice memory.
      */
     public function deleteTranscriptionJob(string $remoteJobId): void
     {
         try {
             $this->client(5)->delete("/api/v1/stt/jobs/{$remoteJobId}");
+        } catch (\Throwable) {
+            // Non-fatal cleanup
+        }
+    }
+
+    /**
+     * Enqueue an async LLM analysis job (chapters, NotebookLM concept_graph, quiz, summary).
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public function startAnalysisJob(array $payload): array
+    {
+        try {
+            $response = $this->client(30)->post('/api/v1/analysis/jobs', $payload);
+
+            if (! $response->successful()) {
+                $detail = (string) ($response->json('detail') ?? $response->body());
+                Log::error('AI analysis job creation failed', [
+                    'status' => $response->status(),
+                    'detail' => mb_substr($detail, 0, 400),
+                ]);
+
+                throw new RuntimeException($detail !== '' ? $detail : __('messages.ai.analysis_error'));
+            }
+
+            return (array) $response->json();
+        } catch (ConnectionException $e) {
+            Log::error('AI microservice unreachable during analysis job submission', [
+                'url' => $this->baseUrl,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new RuntimeException(__('messages.ai.service_unavailable'), 0, $e);
+        }
+    }
+
+    /**
+     * Upload a PDF/TXT document to enqueue async AI analysis (segments + chapters + concept graph + quiz).
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array<string, mixed>
+     */
+    public function startDocumentAnalysisJob(
+        string $localFilePath,
+        string $originalFilename,
+        array $fields = []
+    ): array {
+        if (! is_file($localFilePath) || ! is_readable($localFilePath)) {
+            throw new RuntimeException(__('messages.ai.media_file_unreadable'));
+        }
+
+        $stream = fopen($localFilePath, 'rb');
+        if ($stream === false) {
+            throw new RuntimeException(__('messages.ai.media_file_unreadable'));
+        }
+
+        try {
+            $response = $this->client($this->requestTimeout)
+                ->attach('file', $stream, $originalFilename ?: basename($localFilePath))
+                ->post('/api/v1/analysis/jobs/from-document', $fields);
+
+            if (! $response->successful()) {
+                $detail = (string) ($response->json('detail') ?? $response->body());
+                Log::error('AI document analysis job creation failed', [
+                    'status' => $response->status(),
+                    'detail' => mb_substr($detail, 0, 400),
+                ]);
+
+                throw new RuntimeException($detail !== '' ? $detail : __('messages.ai.analysis_error'));
+            }
+
+            return (array) $response->json();
+        } catch (ConnectionException $e) {
+            Log::error('AI microservice unreachable during document analysis submission', [
+                'url' => $this->baseUrl,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new RuntimeException(__('messages.ai.service_unavailable'), 0, $e);
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
+    }
+
+    /**
+     * Poll an existing remote LLM analysis job for live progress and structured outputs.
+     *
+     * @return array<string, mixed>
+     */
+    public function getAnalysisJob(string $remoteJobId): array
+    {
+        try {
+            $response = $this->client(15)->get("/api/v1/analysis/jobs/{$remoteJobId}");
+
+            if ($response->status() === 404) {
+                return [
+                    'job_id' => $remoteJobId,
+                    'status' => 'failed',
+                    'stage' => 'expired',
+                    'progress' => 0,
+                    'error' => __('messages.ai.analysis_job_expired'),
+                ];
+            }
+
+            if (! $response->successful()) {
+                throw new RuntimeException(__('messages.ai.analysis_error'));
+            }
+
+            return (array) $response->json();
+        } catch (ConnectionException $e) {
+            throw new RuntimeException(__('messages.ai.service_unavailable'), 0, $e);
+        }
+    }
+
+    /**
+     * Best-effort cleanup of completed analysis job payload in AI microservice memory.
+     */
+    public function deleteAnalysisJob(string $remoteJobId): void
+    {
+        try {
+            $this->client(5)->delete("/api/v1/analysis/jobs/{$remoteJobId}");
         } catch (\Throwable) {
             // Non-fatal cleanup
         }

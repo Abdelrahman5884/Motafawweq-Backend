@@ -13,6 +13,21 @@ class AiProcessingJob extends Model
 
     public const TASK_SPEECH_TO_TEXT = 'speech_to_text';
 
+    public const TASK_LESSON_ANALYSIS = 'lesson_analysis';
+
+    public const TASK_CHAPTERS = 'chapters';
+
+    public const TASK_CONCEPT_GRAPH = 'concept_graph';
+
+    public const TASK_QUIZ = 'quiz';
+
+    public const ANALYSIS_TASK_TYPES = [
+        self::TASK_LESSON_ANALYSIS,
+        self::TASK_CHAPTERS,
+        self::TASK_CONCEPT_GRAPH,
+        self::TASK_QUIZ,
+    ];
+
     public const STATUS_QUEUED = 'queued';
 
     public const STATUS_PROCESSING = 'processing';

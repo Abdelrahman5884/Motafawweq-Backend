@@ -37,6 +37,7 @@ class TeacherLessonResource extends BaseJsonResource
         $transcript = $this->relationLoaded('transcriptSegments') ? $this->transcriptSegments : collect();
         $conceptGraph = $this->relationLoaded('conceptGraph') ? $this->conceptGraph : null;
         $latestSttJob = $this->relationLoaded('latestSttJob') ? $this->latestSttJob : null;
+        $latestAnalysisJob = $this->relationLoaded('latestAnalysisJob') ? $this->latestAnalysisJob : null;
 
         $mediaStreamUrl = null;
         if ($this->media_path && Route::has('api.v1.teacher.lessons.media.stream')) {
@@ -100,6 +101,7 @@ class TeacherLessonResource extends BaseJsonResource
             'chapters' => LessonChapterResource::collection($chapters)->resolve($request),
             'transcript' => LessonTranscriptResource::collection($transcript)->resolve($request),
             'aiSttJob' => LessonSpeechToTextService::formatJob($latestSttJob),
+            'aiAnalysisJob' => LessonSpeechToTextService::formatJob($latestAnalysisJob),
             'notebookMindMap' => $conceptGraph?->tree_data,
             'publishedAt' => $this->formatDate($this->published_at),
             'createdAt' => $this->formatDate($this->created_at),

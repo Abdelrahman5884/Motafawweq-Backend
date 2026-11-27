@@ -112,4 +112,11 @@ class Lesson extends Model
             ->where('task_type', AiProcessingJob::TASK_SPEECH_TO_TEXT)
             ->latestOfMany('id');
     }
+
+    public function latestAnalysisJob(): HasOne
+    {
+        return $this->hasOne(AiProcessingJob::class)
+            ->whereIn('task_type', AiProcessingJob::ANALYSIS_TASK_TYPES)
+            ->latestOfMany('id');
+    }
 }

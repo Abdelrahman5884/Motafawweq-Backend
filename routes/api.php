@@ -370,6 +370,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('/converted-lectures/{uuid}/status', [StudentConvertedLectureController::class, 'status'])
                     ->whereUuid('uuid')
                     ->middleware(['throttle:student-read', 'student.plan:converted_lectures']);
+                Route::post('/converted-lectures/{uuid}/quiz', [StudentConvertedLectureController::class, 'generateQuiz'])
+                    ->whereUuid('uuid')
+                    ->middleware(['throttle:ai-stt', 'student.plan:converted_lectures']);
                 Route::delete('/converted-lectures/{uuid}', [StudentConvertedLectureController::class, 'destroy'])
                     ->whereUuid('uuid')
                     ->middleware(['throttle:student-write', 'student.plan:converted_lectures']);
@@ -812,11 +815,20 @@ Route::prefix('v1')->group(function () {
                         ->whereUuid('uuid')
                         ->middleware('teacher.plan:ai');
 
-                    // AI Speech-to-Text (Whisper large-v3) Pipeline
+                    // AI Lesson Pipeline (Speech-to-Text + Chapter Indexing + NotebookLM Concept Graph)
                     Route::get('/lessons/{uuid}/ai/status', [TeacherLessonAiController::class, 'status'])
                         ->whereUuid('uuid')
                         ->middleware('teacher.plan:ai');
                     Route::post('/lessons/{uuid}/ai/transcribe', [TeacherLessonAiController::class, 'transcribe'])
+                        ->whereUuid('uuid')
+                        ->middleware(['teacher.plan:ai', 'throttle:ai-stt']);
+                    Route::post('/lessons/{uuid}/ai/process', [TeacherLessonAiController::class, 'process'])
+                        ->whereUuid('uuid')
+                        ->middleware(['teacher.plan:ai', 'throttle:ai-stt']);
+                    Route::post('/lessons/{uuid}/ai/chapters', [TeacherLessonAiController::class, 'generateChapters'])
+                        ->whereUuid('uuid')
+                        ->middleware(['teacher.plan:ai', 'throttle:ai-stt']);
+                    Route::post('/lessons/{uuid}/ai/concept-graph', [TeacherLessonAiController::class, 'generateConceptGraph'])
                         ->whereUuid('uuid')
                         ->middleware(['teacher.plan:ai', 'throttle:ai-stt']);
                 });

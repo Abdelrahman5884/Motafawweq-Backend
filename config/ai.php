@@ -8,7 +8,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | Central configuration for Laravel <-> Motafawweq-ai (FastAPI) calls.
-    | Supports Speech-to-Text (Whisper large-v3) and future EdTech AI tasks.
+    | Supports Hybrid Speech-to-Text (QwenCleo-ASR + Whisper large-v3) and
+    | Local Bilingual LLM (Chapters, NotebookLM Concept Maps, Smart Quizzes).
     |
     */
 
@@ -21,8 +22,13 @@ return [
     'request_timeout' => (int) env('AI_REQUEST_TIMEOUT', 120),
 
     'stt' => [
-        'default_model' => (string) env('AI_STT_MODEL', 'large-v3'),
+        'default_model' => (string) env('AI_STT_MODEL', 'mohammedaly22/QwenCleo-ASR'),
         'max_media_bytes' => (int) env('AI_STT_MAX_MEDIA_BYTES', 104857600), // 100 MB
+    ],
+
+    'llm' => [
+        'default_model' => (string) env('AI_LLM_MODEL', 'unsloth/Qwen2.5-3B-Instruct-bnb-4bit'),
+        'default_quiz_count' => (int) env('AI_QUIZ_COUNT', 5),
     ],
 
 ];

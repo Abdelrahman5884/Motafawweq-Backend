@@ -20,7 +20,7 @@ class StudentConvertedLectureService extends BaseService
 {
     private const ALLOWED_OUTPUTS = ['graph', 'transcript', 'topics', 'quiz'];
 
-    private const ALLOWED_MIME_PREFIXES = ['audio/', 'video/', 'application/pdf'];
+    private const ALLOWED_MIME_PREFIXES = ['audio/', 'video/', 'application/pdf', 'text/plain'];
 
     public function __construct(
         protected StudentAccessService $accessService,
@@ -30,7 +30,7 @@ class StudentConvertedLectureService extends BaseService
     public function list(User $student): array
     {
         return StudentConvertedLecture::forStudent($student->id)
-            ->with(['lesson:id,uuid', 'latestSttJob'])
+            ->with(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob'])
             ->latest()
             ->limit(100)
             ->get()
@@ -45,14 +45,25 @@ class StudentConvertedLectureService extends BaseService
 
         if ($lecture->latestSttJob && $lecture->latestSttJob->isActive()) {
             $this->syncLectureSttJob($lecture->latestSttJob, $lecture);
-            $lecture = $lecture->fresh(['lesson:id,uuid', 'latestSttJob']);
+            $lecture = $lecture->fresh(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob']);
+        }
+
+        // Seamless STT -> LLM Analysis auto-chaining for Student Smart Lecture
+        if ($lecture->latestSttJob && $lecture->latestSttJob->status === AiProcessingJob::STATUS_COMPLETED) {
+            $this->maybeChainPendingLectureAnalysis($lecture->latestSttJob, $lecture, $student);
+            $lecture = $lecture->fresh(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob']);
+        }
+
+        if ($lecture->latestAnalysisJob && $lecture->latestAnalysisJob->isActive()) {
+            $this->syncLectureAnalysisJob($lecture->latestAnalysisJob, $lecture);
+            $lecture = $lecture->fresh(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob']);
         }
 
         return $this->format($lecture, true);
     }
 
     /**
-     * Poll live AI Speech-to-Text progress and return the updated converted lecture payload.
+     * Poll live AI STT + Analysis progress and return the updated converted lecture payload.
      *
      * @return array<string, mixed>
      */
@@ -62,7 +73,35 @@ class StudentConvertedLectureService extends BaseService
     }
 
     /**
-     * Register a lecture conversion request and trigger real AI Speech-to-Text when an audio/video file is provided.
+     * Generate (or regenerate) AI MCQ quiz questions on demand for an owned converted lecture.
+     *
+     * @return array<string, mixed>
+     */
+    public function generateQuiz(User $student, string $uuid, int $quizCount = 5): array
+    {
+        $lecture = $this->findOwned($student, $uuid);
+        $segments = is_array($lecture->transcript) ? $lecture->transcript : [];
+
+        if (empty($segments)) {
+            throw ValidationException::withMessages([
+                'transcript' => [__('messages.ai.transcript_required_for_analysis')],
+            ]);
+        }
+
+        $safeCount = max(2, min(10, $quizCount));
+        $outputs = is_array($lecture->outputs) ? $lecture->outputs : [];
+        if (! in_array('quiz', $outputs, true)) {
+            $outputs[] = 'quiz';
+            $lecture->update(['outputs' => array_values(array_unique($outputs))]);
+        }
+
+        $this->dispatchLectureAnalysisJob($student, $lecture, ['quiz'], $safeCount);
+
+        return $this->format($lecture->fresh(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob']), true);
+    }
+
+    /**
+     * Register a lecture conversion request and trigger real AI STT + Concept Map + Topics + Quiz generation.
      */
     public function create(User $student, array $data, ?UploadedFile $file = null): array
     {
@@ -77,8 +116,11 @@ class StudentConvertedLectureService extends BaseService
         $fileName = null;
         $fileSize = null;
         $isAudioOrVideo = false;
+        $isDocument = false;
+
         if ($file) {
             $mime = (string) $file->getMimeType();
+            $ext = strtolower((string) $file->getClientOriginalExtension());
             $allowed = false;
             foreach (self::ALLOWED_MIME_PREFIXES as $prefix) {
                 if (str_starts_with($mime, $prefix)) {
@@ -86,12 +128,16 @@ class StudentConvertedLectureService extends BaseService
                     break;
                 }
             }
+            if (! $allowed && in_array($ext, ['pdf', 'txt', 'md'], true)) {
+                $allowed = true;
+            }
             if (! $allowed) {
                 throw ValidationException::withMessages([
-                    'file' => ['نوع الملف غير مدعوم. يرجى رفع ملف صوت أو فيديو أو PDF.'],
+                    'file' => ['نوع الملف غير مدعوم. يرجى رفع ملف صوت أو فيديو أو PDF أو نصي.'],
                 ]);
             }
             $isAudioOrVideo = str_starts_with($mime, 'audio/') || str_starts_with($mime, 'video/');
+            $isDocument = ! $isAudioOrVideo && (str_starts_with($mime, 'application/pdf') || str_starts_with($mime, 'text/plain') || in_array($ext, ['pdf', 'txt', 'md'], true));
             $fileName = mb_substr(preg_replace('/[^\pL\pN._\- ]/u', '', $file->getClientOriginalName()) ?: 'lecture', 0, 200);
             $fileSize = round($file->getSize() / (1024 * 1024), 1).' MB';
         } elseif (! empty($data['file_name'])) {
@@ -99,36 +145,57 @@ class StudentConvertedLectureService extends BaseService
             $fileSize = isset($data['file_size']) ? mb_substr(trim(strip_tags((string) $data['file_size'])), 0, 60) : null;
         }
 
+        $linkedLesson = null;
         $lessonId = null;
         if (! empty($data['lesson_uuid'])) {
-            $lesson = Lesson::where('uuid', $data['lesson_uuid'])->first();
+            $lesson = Lesson::with('transcriptSegments')->where('uuid', $data['lesson_uuid'])->first();
             if ($lesson) {
                 $this->accessService->assertCanAccess($student, $lesson, (int) $lesson->teacher_id, (int) $lesson->course_id);
+                $linkedLesson = $lesson;
                 $lessonId = $lesson->id;
             }
         }
 
         $title = trim(strip_tags((string) ($data['title_ar'] ?? '')));
         if ($title === '') {
-            $title = $fileName ? preg_replace('/\.[^.]+$/', '', $fileName) : 'محاضرة محولة';
+            $title = $linkedLesson?->title_ar
+                ?: ($fileName ? preg_replace('/\.[^.]+$/', '', $fileName) : 'محاضرة محولة');
         }
 
-        $wantsTranscript = in_array('transcript', $outputs, true);
+        $analysisTasks = $this->mapOutputsToAnalysisTasks($outputs);
+        $initialTranscript = [];
+        if (! $file && $linkedLesson && $linkedLesson->transcriptSegments->isNotEmpty()) {
+            $initialTranscript = $linkedLesson->transcriptSegments->map(fn ($seg, $idx) => [
+                'id' => (string) Str::uuid(),
+                'speaker' => $seg->speaker ?: 'المعلم',
+                'startSeconds' => max(0, (int) $seg->start_seconds),
+                'endSeconds' => max(0, (int) $seg->start_seconds + 20),
+                'timestamp' => $seg->timestamp_label ?: $this->formatSeconds((int) $seg->start_seconds),
+                'text' => (string) ($seg->text_ar ?: $seg->text_en ?: ''),
+                'textAr' => (string) ($seg->text_ar ?: $seg->text_en ?: ''),
+                'textEn' => (string) ($seg->text_en ?: $seg->text_ar ?: ''),
+                'order' => $idx + 1,
+            ])->values()->all();
+        }
 
         $lecture = StudentConvertedLecture::create([
             'student_id' => $student->id,
             'lesson_id' => $lessonId,
             'title_ar' => mb_substr($title, 0, 255),
-            'subject_ar' => isset($data['subject_ar']) ? mb_substr(trim(strip_tags((string) $data['subject_ar'])), 0, 120) : null,
-            'grade_ar' => isset($data['grade_ar']) ? mb_substr(trim(strip_tags((string) $data['grade_ar'])), 0, 120) : null,
+            'subject_ar' => isset($data['subject_ar'])
+                ? mb_substr(trim(strip_tags((string) $data['subject_ar'])), 0, 120)
+                : $linkedLesson?->subject_ar,
+            'grade_ar' => isset($data['grade_ar'])
+                ? mb_substr(trim(strip_tags((string) $data['grade_ar'])), 0, 120)
+                : $linkedLesson?->grade_ar,
             'file_name' => $fileName,
             'file_size' => $fileSize,
-            'duration_label' => null,
-            'summary_ar' => $wantsTranscript && $isAudioOrVideo
-                ? 'جاري التفريغ النصي الذكي للمحاضرة بواسطة محرك الذكاء الاصطناعي...'
+            'duration_label' => $linkedLesson?->duration_label,
+            'summary_ar' => ($isAudioOrVideo || $isDocument || ! empty($initialTranscript))
+                ? 'جاري تحليل المحاضرة وتوليد المخرجات المطلوبة بالذكاء الاصطناعي...'
                 : 'تم استلام المحاضرة وتسجيل طلب التحويل بنجاح.',
             'outputs' => $outputs,
-            'transcript' => [],
+            'transcript' => $initialTranscript,
             'topics' => [],
             'mindmap' => null,
             'quiz_questions' => [],
@@ -136,13 +203,13 @@ class StudentConvertedLectureService extends BaseService
             'concepts_count' => 0,
         ]);
 
-        // Dispatch real Whisper large-v3 Speech-to-Text when an audio/video file is uploaded
-        if ($file && $isAudioOrVideo && $wantsTranscript) {
-            $requestedLang = isset($data['language']) ? strtolower(trim((string) $data['language'])) : null;
-            if ($requestedLang === '' || $requestedLang === 'auto') {
-                $requestedLang = null;
-            }
+        $requestedLang = isset($data['language']) ? strtolower(trim((string) $data['language'])) : null;
+        if ($requestedLang === '' || $requestedLang === 'auto') {
+            $requestedLang = null;
+        }
 
+        // Case 1: Audio/Video uploaded -> Run Hybrid STT first, then auto-chain LLM Analysis for graph/topics/quiz
+        if ($file && $isAudioOrVideo) {
             try {
                 $remote = $this->aiClient->startFileTranscriptionJob(
                     $file->getRealPath(),
@@ -159,8 +226,11 @@ class StudentConvertedLectureService extends BaseService
                     'progress' => max(5, min(95, (int) ($remote['progress'] ?? 8))),
                     'stage' => (string) ($remote['stage'] ?? 'queued'),
                     'remote_job_id' => $remote['job_id'] ?? null,
-                    'model_name' => (string) ($remote['model'] ?? config('ai.stt.default_model', 'large-v3')),
+                    'model_name' => (string) ($remote['model'] ?? config('ai.stt.default_model', 'mohammedaly22/QwenCleo-ASR')),
                     'requested_language' => $requestedLang,
+                    'meta' => [
+                        'pendingAnalysisTasks' => $analysisTasks,
+                    ],
                     'started_at' => now(),
                 ]);
             } catch (RuntimeException $e) {
@@ -176,7 +246,7 @@ class StudentConvertedLectureService extends BaseService
                     'status' => AiProcessingJob::STATUS_FAILED,
                     'progress' => 0,
                     'stage' => 'failed',
-                    'model_name' => (string) config('ai.stt.default_model', 'large-v3'),
+                    'model_name' => (string) config('ai.stt.default_model', 'mohammedaly22/QwenCleo-ASR'),
                     'requested_language' => $requestedLang,
                     'error_message' => mb_substr($e->getMessage(), 0, 500),
                     'started_at' => now(),
@@ -184,10 +254,71 @@ class StudentConvertedLectureService extends BaseService
                 ]);
             }
         }
+        // Case 2: PDF / TXT uploaded -> Dispatch directly to AI document analysis endpoint
+        elseif ($file && $isDocument) {
+            $docTasks = ! empty($analysisTasks) ? $analysisTasks : ['summary', 'chapters'];
+            try {
+                $remote = $this->aiClient->startDocumentAnalysisJob(
+                    $file->getRealPath(),
+                    $fileName ?: 'lecture.pdf',
+                    [
+                        'title' => $lecture->title_ar,
+                        'subject' => (string) ($lecture->subject_ar ?: ''),
+                        'grade' => (string) ($lecture->grade_ar ?: ''),
+                        'language' => $requestedLang ?: 'auto',
+                        'tasks' => implode(',', $docTasks),
+                        'quiz_count' => (int) config('ai.llm.default_quiz_count', 5),
+                    ]
+                );
+
+                AiProcessingJob::create([
+                    'user_id' => $student->id,
+                    'converted_lecture_id' => $lecture->id,
+                    'task_type' => AiProcessingJob::TASK_LESSON_ANALYSIS,
+                    'status' => (string) ($remote['status'] ?? AiProcessingJob::STATUS_QUEUED),
+                    'progress' => max(5, min(95, (int) ($remote['progress'] ?? 8))),
+                    'stage' => (string) ($remote['stage'] ?? 'extracting_document'),
+                    'remote_job_id' => $remote['job_id'] ?? null,
+                    'model_name' => (string) ($remote['model'] ?? config('ai.llm.default_model', 'Qwen/Qwen2.5-3B-Instruct')),
+                    'meta' => ['tasks' => $docTasks],
+                    'started_at' => now(),
+                ]);
+            } catch (RuntimeException $e) {
+                Log::warning('Student smart lecture document analysis dispatch failed', [
+                    'lecture_uuid' => $lecture->uuid,
+                    'error' => $e->getMessage(),
+                ]);
+
+                AiProcessingJob::create([
+                    'user_id' => $student->id,
+                    'converted_lecture_id' => $lecture->id,
+                    'task_type' => AiProcessingJob::TASK_LESSON_ANALYSIS,
+                    'status' => AiProcessingJob::STATUS_FAILED,
+                    'progress' => 0,
+                    'stage' => 'failed',
+                    'model_name' => (string) config('ai.llm.default_model', 'Qwen/Qwen2.5-3B-Instruct'),
+                    'error_message' => mb_substr($e->getMessage(), 0, 500),
+                    'meta' => ['tasks' => $docTasks],
+                    'started_at' => now(),
+                    'completed_at' => now(),
+                ]);
+            }
+        }
+        // Case 3: Linked course lesson already has transcript -> Directly dispatch LLM analysis
+        elseif (! empty($initialTranscript) && ! empty($analysisTasks)) {
+            try {
+                $this->dispatchLectureAnalysisJob($student, $lecture, $analysisTasks, (int) config('ai.llm.default_quiz_count', 5));
+            } catch (RuntimeException $e) {
+                Log::warning('Student linked lesson AI analysis dispatch failed', [
+                    'lecture_uuid' => $lecture->uuid,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         $this->logSecurityEvent('student.lecture.converted', ['lecture_uuid' => $lecture->uuid], 'info', $lecture);
 
-        return $this->format($lecture->fresh(['lesson:id,uuid', 'latestSttJob']), true);
+        return $this->format($lecture->fresh(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob']), true);
     }
 
     public function delete(User $student, string $uuid): bool
@@ -196,6 +327,177 @@ class StudentConvertedLectureService extends BaseService
         $lecture->delete();
 
         return true;
+    }
+
+    /**
+     * Map frontend Smart Lecture output keys to AI microservice analysis task names.
+     *
+     * @param  list<string>  $outputs
+     * @return list<string>
+     */
+    protected function mapOutputsToAnalysisTasks(array $outputs): array
+    {
+        $tasks = [];
+        if (in_array('topics', $outputs, true)) {
+            $tasks[] = 'chapters';
+        }
+        if (in_array('graph', $outputs, true)) {
+            $tasks[] = 'concept_graph';
+        }
+        if (in_array('quiz', $outputs, true)) {
+            $tasks[] = 'quiz';
+        }
+        if (! empty($tasks)) {
+            $tasks[] = 'summary';
+        }
+
+        return array_values(array_unique($tasks));
+    }
+
+    /**
+     * @param  list<string>  $tasks
+     */
+    protected function dispatchLectureAnalysisJob(
+        User $student,
+        StudentConvertedLecture $lecture,
+        array $tasks,
+        int $quizCount = 5
+    ): AiProcessingJob {
+        $rawSegments = is_array($lecture->transcript) ? $lecture->transcript : [];
+        $segmentsPayload = [];
+        $maxSecs = 0;
+
+        foreach ($rawSegments as $seg) {
+            if (! is_array($seg)) {
+                continue;
+            }
+            $txt = trim((string) ($seg['textAr'] ?? $seg['text'] ?? ''));
+            if ($txt === '') {
+                continue;
+            }
+            $startS = max(0, (int) ($seg['startSeconds'] ?? $seg['start_seconds'] ?? 0));
+            $endS = max($startS, (int) ($seg['endSeconds'] ?? $seg['end_seconds'] ?? ($startS + 20)));
+            $maxSecs = max($maxSecs, $endS);
+
+            $segmentsPayload[] = [
+                'start_seconds' => $startS,
+                'end_seconds' => $endS,
+                'timestamp' => (string) ($seg['timestamp'] ?? $this->formatSeconds($startS)),
+                'speaker' => (string) ($seg['speaker'] ?? 'المحاضر'),
+                'text' => $txt,
+            ];
+        }
+
+        $remote = $this->aiClient->startAnalysisJob([
+            'title' => (string) $lecture->title_ar,
+            'subject' => (string) ($lecture->subject_ar ?: ''),
+            'grade' => (string) ($lecture->grade_ar ?: ''),
+            'language' => $lecture->latestSttJob?->detected_language ?: 'auto',
+            'duration_seconds' => $maxSecs,
+            'tasks' => array_values(array_unique($tasks)),
+            'quiz_count' => max(2, min(12, $quizCount)),
+            'segments' => $segmentsPayload,
+        ]);
+
+        return AiProcessingJob::create([
+            'user_id' => $student->id,
+            'converted_lecture_id' => $lecture->id,
+            'task_type' => count($tasks) === 1 && $tasks[0] === 'quiz'
+                ? AiProcessingJob::TASK_QUIZ
+                : AiProcessingJob::TASK_LESSON_ANALYSIS,
+            'status' => (string) ($remote['status'] ?? AiProcessingJob::STATUS_QUEUED),
+            'progress' => max(5, min(95, (int) ($remote['progress'] ?? 8))),
+            'stage' => (string) ($remote['stage'] ?? 'queued'),
+            'remote_job_id' => $remote['job_id'] ?? null,
+            'model_name' => (string) ($remote['model'] ?? config('ai.llm.default_model', 'Qwen/Qwen2.5-3B-Instruct')),
+            'meta' => [
+                'tasks' => array_values(array_unique($tasks)),
+            ],
+            'started_at' => now(),
+        ]);
+    }
+
+    protected function maybeChainPendingLectureAnalysis(
+        AiProcessingJob $sttJob,
+        StudentConvertedLecture $lecture,
+        User $student
+    ): void {
+        $meta = is_array($sttJob->meta) ? $sttJob->meta : [];
+        $pending = is_array($meta['pendingAnalysisTasks'] ?? null) ? array_values($meta['pendingAnalysisTasks']) : [];
+
+        if (empty($pending) || ! empty($meta['chainedAnalysisJobUuid'])) {
+            return;
+        }
+
+        $tasksToDispatch = $this->transaction(function () use ($sttJob): array {
+            /** @var AiProcessingJob $locked */
+            $locked = AiProcessingJob::where('id', $sttJob->id)->lockForUpdate()->firstOrFail();
+            $lockedMeta = is_array($locked->meta) ? $locked->meta : [];
+            $lockedPending = is_array($lockedMeta['pendingAnalysisTasks'] ?? null)
+                ? array_values($lockedMeta['pendingAnalysisTasks'])
+                : [];
+
+            if (empty($lockedPending) || ! empty($lockedMeta['chainedAnalysisJobUuid'])) {
+                return [];
+            }
+
+            $lockedMeta['chainedAnalysisJobUuid'] = 'dispatching';
+            $locked->update(['meta' => $lockedMeta]);
+
+            return $lockedPending;
+        });
+
+        if (empty($tasksToDispatch)) {
+            return;
+        }
+
+        try {
+            $lecture->refresh();
+            if (empty($lecture->transcript)) {
+                $updatedMeta = is_array($sttJob->fresh()->meta) ? $sttJob->fresh()->meta : [];
+                $updatedMeta['pendingAnalysisTasks'] = [];
+                $updatedMeta['chainedAnalysisJobUuid'] = 'skipped_empty_transcript';
+                $sttJob->update(['meta' => $updatedMeta]);
+
+                return;
+            }
+
+            $analysisJob = $this->dispatchLectureAnalysisJob(
+                $student,
+                $lecture,
+                $tasksToDispatch,
+                (int) config('ai.llm.default_quiz_count', 5)
+            );
+
+            $updatedMeta = is_array($sttJob->fresh()->meta) ? $sttJob->fresh()->meta : [];
+            $updatedMeta['pendingAnalysisTasks'] = [];
+            $updatedMeta['chainedAnalysisJobUuid'] = $analysisJob->uuid;
+            $sttJob->update(['meta' => $updatedMeta]);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to chain student smart lecture analysis after STT', [
+                'lecture_uuid' => $lecture->uuid,
+                'error' => $e->getMessage(),
+            ]);
+
+            AiProcessingJob::create([
+                'user_id' => $student->id,
+                'converted_lecture_id' => $lecture->id,
+                'task_type' => AiProcessingJob::TASK_LESSON_ANALYSIS,
+                'status' => AiProcessingJob::STATUS_FAILED,
+                'progress' => 0,
+                'stage' => 'failed',
+                'model_name' => (string) config('ai.llm.default_model', 'Qwen/Qwen2.5-3B-Instruct'),
+                'error_message' => mb_substr($e->getMessage(), 0, 500),
+                'meta' => ['tasks' => $tasksToDispatch],
+                'started_at' => now(),
+                'completed_at' => now(),
+            ]);
+
+            $updatedMeta = is_array($sttJob->fresh()->meta) ? $sttJob->fresh()->meta : [];
+            $updatedMeta['pendingAnalysisTasks'] = [];
+            $updatedMeta['chainedAnalysisJobUuid'] = 'failed';
+            $sttJob->update(['meta' => $updatedMeta]);
+        }
     }
 
     protected function syncLectureSttJob(AiProcessingJob $job, StudentConvertedLecture $lecture): AiProcessingJob
@@ -231,7 +533,7 @@ class StudentConvertedLectureService extends BaseService
                 }
 
                 $formattedSegments = [];
-                foreach ($rawSegments as $idx => $seg) {
+                foreach ($rawSegments as $seg) {
                     $text = trim(strip_tags((string) ($seg['text'] ?? '')));
                     if ($text === '') {
                         continue;
@@ -262,6 +564,7 @@ class StudentConvertedLectureService extends BaseService
                     'summary_ar' => $summaryText,
                 ]);
 
+                $existingMeta = is_array($locked->meta) ? $locked->meta : [];
                 $locked->update([
                     'status' => AiProcessingJob::STATUS_COMPLETED,
                     'progress' => 100,
@@ -272,13 +575,13 @@ class StudentConvertedLectureService extends BaseService
                     'duration_seconds' => $durationSecs > 0 ? $durationSecs : $locked->duration_seconds,
                     'segments_count' => count($formattedSegments),
                     'error_message' => null,
-                    'meta' => [
+                    'meta' => array_merge($existingMeta, [
                         'device' => $result['device'] ?? null,
                         'computeType' => $result['compute_type'] ?? null,
                         'processingSeconds' => $result['processing_seconds'] ?? null,
                         'detectedLanguageNameAr' => $result['detected_language_name_ar'] ?? null,
                         'detectedLanguageNameEn' => $result['detected_language_name_en'] ?? null,
-                    ],
+                    ]),
                     'completed_at' => now(),
                 ]);
 
@@ -326,6 +629,227 @@ class StudentConvertedLectureService extends BaseService
         return $job->fresh();
     }
 
+    protected function syncLectureAnalysisJob(AiProcessingJob $job, StudentConvertedLecture $lecture): AiProcessingJob
+    {
+        if (! $job->remote_job_id || $job->isTerminal()) {
+            return $job;
+        }
+
+        try {
+            $remote = $this->aiClient->getAnalysisJob($job->remote_job_id);
+        } catch (RuntimeException $e) {
+            Log::warning('Transient AI analysis polling failure for student lecture', [
+                'lecture_uuid' => $lecture->uuid,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $job;
+        }
+
+        $remoteStatus = (string) ($remote['status'] ?? $job->status);
+        $remoteStage = (string) ($remote['stage'] ?? $job->stage);
+        $remoteProgress = (int) ($remote['progress'] ?? $job->progress);
+
+        if ($remoteStatus === 'completed' && is_array($remote['result'] ?? null)) {
+            $result = $remote['result'];
+
+            $persisted = $this->transaction(function () use ($job, $lecture, $result) {
+                /** @var AiProcessingJob $locked */
+                $locked = AiProcessingJob::where('id', $job->id)->lockForUpdate()->firstOrFail();
+                if ($locked->status === AiProcessingJob::STATUS_COMPLETED) {
+                    return $locked;
+                }
+
+                $updates = [];
+
+                // If document analysis extracted segments, populate transcript
+                if (empty($lecture->transcript) && is_array($result['extracted_segments'] ?? null) && count($result['extracted_segments']) > 0) {
+                    $formattedSegments = [];
+                    foreach ($result['extracted_segments'] as $seg) {
+                        $txt = trim(strip_tags((string) ($seg['text'] ?? '')));
+                        if ($txt === '') {
+                            continue;
+                        }
+                        $startSecs = max(0, (int) ($seg['start_seconds'] ?? 0));
+                        $formattedSegments[] = [
+                            'id' => (string) Str::uuid(),
+                            'speaker' => trim(strip_tags((string) ($seg['speaker'] ?? 'المستند'))) ?: 'المستند',
+                            'startSeconds' => $startSecs,
+                            'endSeconds' => max($startSecs, (int) ($seg['end_seconds'] ?? $startSecs)),
+                            'timestamp' => (string) ($seg['timestamp'] ?? $this->formatSeconds($startSecs)),
+                            'text' => $txt,
+                            'textAr' => $txt,
+                            'textEn' => $txt,
+                            'order' => count($formattedSegments) + 1,
+                        ];
+                    }
+                    if (! empty($formattedSegments)) {
+                        $updates['transcript'] = $formattedSegments;
+                    }
+                }
+
+                // Chapters / Topics
+                if (is_array($result['chapters'] ?? null) && count($result['chapters']) > 0) {
+                    $formattedTopics = [];
+                    foreach ($result['chapters'] as $idx => $ch) {
+                        if (! is_array($ch)) {
+                            continue;
+                        }
+                        $titleAr = trim(strip_tags((string) ($ch['title_ar'] ?? $ch['titleAr'] ?? '')));
+                        $titleEn = trim(strip_tags((string) ($ch['title_en'] ?? $ch['titleEn'] ?? $titleAr)));
+                        if ($titleAr === '') {
+                            continue;
+                        }
+                        $startSecs = max(0, (int) ($ch['start_seconds'] ?? $ch['startSeconds'] ?? 0));
+                        $formattedTopics[] = [
+                            'id' => (string) ($ch['id'] ?? 'topic-'.($idx + 1)),
+                            'titleAr' => $titleAr,
+                            'titleEn' => $titleEn ?: $titleAr,
+                            'title' => $titleEn ?: $titleAr,
+                            'startSeconds' => $startSecs,
+                            'timestamp' => (string) ($ch['timestamp'] ?? $this->formatSeconds($startSecs)),
+                        ];
+                    }
+                    if (! empty($formattedTopics)) {
+                        $updates['topics'] = $formattedTopics;
+                    }
+                }
+
+                // NotebookLM Concept Graph
+                if (is_array($result['concept_graph'] ?? null)) {
+                    $updates['mindmap'] = $result['concept_graph'];
+                    $updates['concepts_count'] = max(1, (int) ($result['concepts_count'] ?? 1));
+                }
+
+                // Quiz Questions
+                if (is_array($result['quiz_questions'] ?? null) && count($result['quiz_questions']) > 0) {
+                    $updates['quiz_questions'] = $result['quiz_questions'];
+                    $updates['questions_count'] = count($result['quiz_questions']);
+                }
+
+                // Summary
+                if (! empty($result['summary_ar'])) {
+                    $updates['summary_ar'] = mb_substr(trim(strip_tags((string) $result['summary_ar'])), 0, 600);
+                }
+
+                if (! empty($updates)) {
+                    $lecture->update($updates);
+                }
+
+                $existingMeta = is_array($locked->meta) ? $locked->meta : [];
+                $locked->update([
+                    'status' => AiProcessingJob::STATUS_COMPLETED,
+                    'progress' => 100,
+                    'stage' => 'completed',
+                    'model_name' => (string) ($result['model'] ?? $locked->model_name),
+                    'error_message' => null,
+                    'meta' => array_merge($existingMeta, [
+                        'device' => $result['device'] ?? null,
+                        'processingSeconds' => $result['processing_seconds'] ?? null,
+                        'chaptersCount' => isset($updates['topics']) ? count($updates['topics']) : null,
+                        'conceptsCount' => $updates['concepts_count'] ?? null,
+                        'questionsCount' => $updates['questions_count'] ?? null,
+                    ]),
+                    'completed_at' => now(),
+                ]);
+
+                return $locked->fresh();
+            });
+
+            $this->aiClient->deleteAnalysisJob($job->remote_job_id);
+
+            return $persisted;
+        }
+
+        if ($remoteStatus === 'failed') {
+            $errText = mb_substr(
+                trim(strip_tags((string) ($remote['error'] ?? __('messages.ai.analysis_error')))),
+                0,
+                500
+            );
+            $job->update([
+                'status' => AiProcessingJob::STATUS_FAILED,
+                'stage' => 'failed',
+                'error_message' => $errText,
+                'completed_at' => now(),
+            ]);
+            $this->aiClient->deleteAnalysisJob($job->remote_job_id);
+
+            return $job->fresh();
+        }
+
+        $job->update([
+            'status' => in_array($remoteStatus, [AiProcessingJob::STATUS_QUEUED, AiProcessingJob::STATUS_PROCESSING], true)
+                ? $remoteStatus
+                : AiProcessingJob::STATUS_PROCESSING,
+            'progress' => max($job->progress, min(98, $remoteProgress)),
+            'stage' => mb_substr($remoteStage, 0, 50),
+        ]);
+
+        return $job->fresh();
+    }
+
+    /**
+     * @return array{status: string, progress: int, activePhase: string, stage: string, error: ?string}
+     */
+    protected function computeLecturePipelineState(?AiProcessingJob $sttJob, ?AiProcessingJob $analysisJob): array
+    {
+        $sttMeta = is_array($sttJob?->meta) ? $sttJob->meta : [];
+        $hasPendingChain = ! empty($sttMeta['pendingAnalysisTasks']) && empty($sttMeta['chainedAnalysisJobUuid']);
+        $isChained = $hasPendingChain
+            || ($sttJob && $analysisJob && $analysisJob->created_at?->gte($sttJob->created_at));
+
+        if ($sttJob && $sttJob->isActive()) {
+            $pct = $hasPendingChain
+                ? max(5, min(55, (int) round($sttJob->progress * 0.55)))
+                : max(5, min(99, (int) $sttJob->progress));
+
+            return [
+                'status' => $sttJob->status,
+                'progress' => $pct,
+                'activePhase' => 'stt',
+                'stage' => (string) ($sttJob->stage ?: 'transcribing'),
+                'error' => null,
+            ];
+        }
+
+        if ($analysisJob && $analysisJob->isActive()) {
+            $pct = $isChained
+                ? max(58, min(99, 55 + (int) round($analysisJob->progress * 0.44)))
+                : max(5, min(99, (int) $analysisJob->progress));
+
+            return [
+                'status' => $analysisJob->status,
+                'progress' => $pct,
+                'activePhase' => 'analysis',
+                'stage' => (string) ($analysisJob->stage ?: 'generating_concept_graph'),
+                'error' => null,
+            ];
+        }
+
+        $latest = ($sttJob && $analysisJob)
+            ? ($analysisJob->id >= $sttJob->id ? $analysisJob : $sttJob)
+            : ($analysisJob ?? $sttJob);
+
+        if ($latest && $latest->status === AiProcessingJob::STATUS_FAILED) {
+            return [
+                'status' => AiProcessingJob::STATUS_FAILED,
+                'progress' => (int) $latest->progress,
+                'activePhase' => 'failed',
+                'stage' => 'failed',
+                'error' => $latest->error_message,
+            ];
+        }
+
+        return [
+            'status' => $latest ? $latest->status : 'completed',
+            'progress' => 100,
+            'activePhase' => 'completed',
+            'stage' => 'completed',
+            'error' => null,
+        ];
+    }
+
     protected function formatSeconds(int $seconds): string
     {
         $safe = max(0, $seconds);
@@ -342,7 +866,7 @@ class StudentConvertedLectureService extends BaseService
     {
         /** @var StudentConvertedLecture|null $lecture */
         $lecture = StudentConvertedLecture::where('uuid', $uuid)
-            ->with(['lesson:id,uuid', 'latestSttJob'])
+            ->with(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob'])
             ->first();
         if (! $lecture) {
             throw (new ModelNotFoundException)->setModel(StudentConvertedLecture::class, [$uuid]);
@@ -355,6 +879,8 @@ class StudentConvertedLectureService extends BaseService
     protected function format(StudentConvertedLecture $l, bool $withContent): array
     {
         $sttJob = $l->relationLoaded('latestSttJob') ? $l->latestSttJob : null;
+        $analysisJob = $l->relationLoaded('latestAnalysisJob') ? $l->latestAnalysisJob : null;
+        $pipeline = $this->computeLecturePipelineState($sttJob, $analysisJob);
 
         $base = [
             'id' => $l->uuid,
@@ -371,6 +897,12 @@ class StudentConvertedLectureService extends BaseService
             'conceptsCount' => (int) $l->concepts_count,
             'keyTopics' => collect($l->topics ?? [])->pluck('titleAr')->filter()->take(5)->values()->all(),
             'sttJob' => LessonSpeechToTextService::formatJob($sttJob),
+            'analysisJob' => LessonSpeechToTextService::formatJob($analysisJob),
+            'overallStatus' => $pipeline['status'],
+            'overallProgress' => $pipeline['progress'],
+            'activePhase' => $pipeline['activePhase'],
+            'activeStage' => $pipeline['stage'],
+            'error' => $pipeline['error'],
             'createdAt' => $l->created_at?->toIso8601String(),
             'dateAr' => $l->created_at?->format('Y-m-d'),
         ];

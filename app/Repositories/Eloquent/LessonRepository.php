@@ -20,7 +20,7 @@ class LessonRepository extends BaseRepository implements LessonRepositoryInterfa
     {
         $query = $this->model
             ->forTeacher($teacherId)
-            ->with(['course', 'attachments', 'chapters', 'transcriptSegments', 'conceptGraph', 'latestSttJob']);
+            ->with(['course', 'attachments', 'chapters', 'transcriptSegments', 'conceptGraph', 'latestSttJob', 'latestAnalysisJob']);
 
         if (! empty($filters['course_id'])) {
             $query->where('course_id', (int) $filters['course_id']);
@@ -54,7 +54,7 @@ class LessonRepository extends BaseRepository implements LessonRepositoryInterfa
     {
         /** @var Lesson|null $lesson */
         $lesson = $this->model
-            ->with(['course', 'attachments', 'chapters', 'transcriptSegments', 'conceptGraph', 'latestSttJob'])
+            ->with(['course', 'attachments', 'chapters', 'transcriptSegments', 'conceptGraph', 'latestSttJob', 'latestAnalysisJob'])
             ->where('uuid', $uuid)
             ->first();
 

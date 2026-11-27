@@ -218,6 +218,7 @@ class LessonSpeechToTextService extends BaseService
                     ]);
                 }
 
+                $existingMeta = is_array($locked->meta) ? $locked->meta : [];
                 $locked->update([
                     'status' => AiProcessingJob::STATUS_COMPLETED,
                     'progress' => 100,
@@ -228,13 +229,13 @@ class LessonSpeechToTextService extends BaseService
                     'duration_seconds' => $audioDuration > 0 ? $audioDuration : $locked->duration_seconds,
                     'segments_count' => $savedCount,
                     'error_message' => null,
-                    'meta' => [
+                    'meta' => array_merge($existingMeta, [
                         'device' => $result['device'] ?? null,
                         'computeType' => $result['compute_type'] ?? null,
                         'processingSeconds' => $result['processing_seconds'] ?? null,
                         'detectedLanguageNameAr' => $result['detected_language_name_ar'] ?? null,
                         'detectedLanguageNameEn' => $result['detected_language_name_en'] ?? null,
-                    ],
+                    ]),
                     'completed_at' => now(),
                 ]);
 
@@ -408,6 +409,14 @@ class LessonSpeechToTextService extends BaseService
     }
 
     /**
+     * Public bridge allowing LessonAiPipelineService to synchronize an active STT job.
+     */
+    public function syncActiveJob(AiProcessingJob $job, Lesson $lesson, User $teacher): AiProcessingJob
+    {
+        return $this->syncJobState($job, $lesson, $teacher);
+    }
+
+    /**
      * Format an AiProcessingJob into a clean, uniform API payload for frontend components.
      *
      * @return array<string, mixed>|null
@@ -427,6 +436,8 @@ class LessonSpeechToTextService extends BaseService
         return [
             'id' => $job->uuid,
             'taskType' => $job->task_type,
+            'tasks' => is_array($meta['tasks'] ?? null) ? array_values($meta['tasks']) : [],
+            'pendingAnalysisTasks' => is_array($meta['pendingAnalysisTasks'] ?? null) ? array_values($meta['pendingAnalysisTasks']) : [],
             'status' => $job->status,
             'progress' => (int) $job->progress,
             'stage' => $job->stage,
@@ -438,6 +449,9 @@ class LessonSpeechToTextService extends BaseService
             'languageProbability' => $job->language_probability !== null ? round((float) $job->language_probability, 4) : null,
             'durationSeconds' => $job->duration_seconds,
             'segmentsCount' => (int) $job->segments_count,
+            'chaptersCount' => isset($meta['chaptersCount']) ? (int) $meta['chaptersCount'] : null,
+            'conceptsCount' => isset($meta['conceptsCount']) ? (int) $meta['conceptsCount'] : null,
+            'questionsCount' => isset($meta['questionsCount']) ? (int) $meta['questionsCount'] : null,
             'processingSeconds' => $meta['processingSeconds'] ?? null,
             'device' => $meta['device'] ?? null,
             'error' => $job->error_message,
