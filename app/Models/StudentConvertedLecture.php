@@ -30,6 +30,7 @@ class StudentConvertedLecture extends Model
         'duration_label',
         'summary_ar',
         'outputs',
+        'attachments',
         'transcript',
         'topics',
         'mindmap',
@@ -42,6 +43,7 @@ class StudentConvertedLecture extends Model
     {
         return [
             'outputs' => 'array',
+            'attachments' => 'array',
             'transcript' => 'array',
             'topics' => 'array',
             'mindmap' => 'array',

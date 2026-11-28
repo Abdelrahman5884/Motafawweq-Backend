@@ -50,15 +50,62 @@ class StudentConvertedLectureController extends BaseApiController
             'file_name' => ['nullable', 'string', 'max:255'],
             'file_size' => ['nullable', 'string', 'max:60'],
             'file' => ['nullable', 'file', 'max:204800'],
+            'files' => ['nullable', 'array', 'max:10'],
+            'files.*' => ['file', 'max:204800'],
         ]);
+
+        $extraFiles = $request->file('files', []);
+        if (! is_array($extraFiles)) {
+            $extraFiles = $extraFiles ? [$extraFiles] : [];
+        }
 
         $lecture = $this->service->create(
             $this->authenticatedUser(),
             $validated,
-            $request->file('file')
+            $request->file('file'),
+            $extraFiles
         );
 
         return $this->createdResponse($lecture, 'تم حفظ المحاضرة في أرشيفك بنجاح.');
+    }
+
+    /** POST /api/v1/student/converted-lectures/{uuid}/attachments */
+    public function addAttachments(Request $request, string $uuid): JsonResponse
+    {
+        $validated = $request->validate([
+            'files' => ['required', 'array', 'min:1', 'max:10'],
+            'files.*' => ['file', 'max:204800'],
+            'reanalyze' => ['nullable', 'boolean'],
+        ]);
+
+        $files = $request->file('files', []);
+        if (! is_array($files)) {
+            $files = $files ? [$files] : [];
+        }
+
+        try {
+            $lecture = $this->service->addAttachments(
+                $this->authenticatedUser(),
+                $uuid,
+                $files,
+                (bool) ($validated['reanalyze'] ?? false)
+            );
+        } catch (RuntimeException $e) {
+            return $this->errorResponse(
+                $e->getMessage() ?: __('messages.ai.service_unavailable'),
+                Response::HTTP_SERVICE_UNAVAILABLE
+            );
+        }
+
+        return $this->successResponse($lecture, 'تمت إضافة المرفقات والصور للمحاضرة بنجاح.');
+    }
+
+    /** DELETE /api/v1/student/converted-lectures/{uuid}/attachments/{attachmentId} */
+    public function destroyAttachment(string $uuid, string $attachmentId): JsonResponse
+    {
+        $lecture = $this->service->deleteAttachment($this->authenticatedUser(), $uuid, $attachmentId);
+
+        return $this->successResponse($lecture, 'تم حذف المرفق من المحاضرة.');
     }
 
     /** POST /api/v1/student/converted-lectures/{uuid}/retry */
@@ -131,23 +178,79 @@ class StudentConvertedLectureController extends BaseApiController
             return $this->notFoundResponse(__('messages.not_found'));
         }
 
-        $cleanName = str_replace(["\r", "\n", '"', '\\'], '', trim((string) ($lecture->file_name ?: 'lecture-media'))) ?: 'lecture-media';
-        $asciiFallback = preg_replace('/[^\x20-\x7E]/', '_', $cleanName) ?: 'lecture-media';
-        $disposition = sprintf('inline; filename="%s"; filename*=UTF-8\'\'%s', $asciiFallback, rawurlencode($cleanName));
+        return $this->streamStoredFile(
+            $disk,
+            $lecture->media_path,
+            $lecture->media_mime_type ?: 'audio/webm',
+            $lecture->file_name ?: 'lecture-media',
+            $request->boolean('download') ? 'attachment' : 'inline'
+        );
+    }
+
+    /**
+     * GET /api/v1/media/student-converted-lectures/{uuid}/attachments/{attachmentId}/stream (signed URL)
+     */
+    public function streamAttachment(Request $request, string $uuid, string $attachmentId): Response
+    {
+        if (! $request->hasValidSignature()) {
+            return $this->forbiddenResponse(__('messages.invalid_signed_url'));
+        }
+
+        $lecture = StudentConvertedLecture::where('uuid', $uuid)->firstOrFail();
+        $attachments = is_array($lecture->attachments) ? $lecture->attachments : [];
+        $target = null;
+
+        foreach ($attachments as $att) {
+            if (is_array($att) && ($att['id'] ?? null) === $attachmentId) {
+                $target = $att;
+                break;
+            }
+        }
+
+        if (! $target || empty($target['path'])) {
+            return $this->notFoundResponse(__('messages.not_found'));
+        }
+
+        $disk = (string) ($target['disk'] ?? 'local');
+        $path = (string) $target['path'];
+
+        if (! Storage::disk($disk)->exists($path)) {
+            return $this->notFoundResponse(__('messages.not_found'));
+        }
+
+        return $this->streamStoredFile(
+            $disk,
+            $path,
+            (string) ($target['mimeType'] ?? 'application/octet-stream'),
+            (string) ($target['name'] ?? 'attachment'),
+            $request->boolean('download') ? 'attachment' : 'inline'
+        );
+    }
+
+    private function streamStoredFile(
+        string $disk,
+        string $path,
+        string $mimeType,
+        string $fileName,
+        string $dispositionType
+    ): Response {
+        $cleanName = str_replace(["\r", "\n", '"', '\\'], '', trim($fileName)) ?: 'file';
+        $asciiFallback = preg_replace('/[^\x20-\x7E]/', '_', $cleanName) ?: 'file';
+        $disposition = sprintf('%s; filename="%s"; filename*=UTF-8\'\'%s', $dispositionType, $asciiFallback, rawurlencode($cleanName));
 
         $headers = [
-            'Content-Type' => $lecture->media_mime_type ?: 'audio/webm',
+            'Content-Type' => $mimeType,
             'Content-Disposition' => $disposition,
             'X-Content-Type-Options' => 'nosniff',
             'Cache-Control' => 'private, max-age=3600',
         ];
 
         if ($disk === 'local' || $disk === 'public') {
-            return response()->file(Storage::disk($disk)->path($lecture->media_path), $headers);
+            return response()->file(Storage::disk($disk)->path($path), $headers);
         }
 
         return response(
-            Storage::disk($disk)->get($lecture->media_path),
+            Storage::disk($disk)->get($path),
             200,
             array_merge($headers, ['Accept-Ranges' => 'bytes'])
         );

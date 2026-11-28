@@ -374,6 +374,12 @@ Route::prefix('v1')->group(function () {
                 Route::post('/converted-lectures/{uuid}/retry', [StudentConvertedLectureController::class, 'retry'])
                     ->whereUuid('uuid')
                     ->middleware(['throttle:ai-stt', 'student.plan:converted_lectures']);
+                Route::post('/converted-lectures/{uuid}/attachments', [StudentConvertedLectureController::class, 'addAttachments'])
+                    ->whereUuid('uuid')
+                    ->middleware(['throttle:student-uploads', 'student.plan:converted_lectures']);
+                Route::delete('/converted-lectures/{uuid}/attachments/{attachmentId}', [StudentConvertedLectureController::class, 'destroyAttachment'])
+                    ->whereUuid(['uuid', 'attachmentId'])
+                    ->middleware(['throttle:student-write', 'student.plan:converted_lectures']);
                 Route::post('/converted-lectures/{uuid}/quiz', [StudentConvertedLectureController::class, 'generateQuiz'])
                     ->whereUuid('uuid')
                     ->middleware(['throttle:ai-stt', 'student.plan:converted_lectures']);
@@ -1320,6 +1326,9 @@ Route::prefix('v1')->group(function () {
         Route::get('/{uuid}/media/stream', [StudentConvertedLectureController::class, 'streamMedia'])
             ->whereUuid('uuid')
             ->name('api.v1.student.converted-lectures.media.stream');
+        Route::get('/{uuid}/attachments/{attachmentId}/stream', [StudentConvertedLectureController::class, 'streamAttachment'])
+            ->whereUuid(['uuid', 'attachmentId'])
+            ->name('api.v1.student.converted-lectures.attachments.stream');
     });
 
     Route::prefix('media/student-homeworks')->group(function () {

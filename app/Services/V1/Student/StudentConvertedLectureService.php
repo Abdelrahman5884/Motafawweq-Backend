@@ -25,6 +25,7 @@ class StudentConvertedLectureService extends BaseService
     private const ALLOWED_MIME_PREFIXES = [
         'audio/',
         'video/',
+        'image/',
         'application/pdf',
         'text/plain',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -34,6 +35,10 @@ class StudentConvertedLectureService extends BaseService
     private const ALLOWED_DOC_EXTENSIONS = ['pdf', 'txt', 'md', 'docx', 'pptx'];
 
     private const ALLOWED_MEDIA_EXTENSIONS = ['mp3', 'wav', 'm4a', 'ogg', 'webm', 'aac', 'flac', 'mp4', 'mkv', 'mov', 'avi'];
+
+    private const ALLOWED_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'bmp'];
+
+    private const MAX_ATTACHMENTS_PER_LECTURE = 15;
 
     public function __construct(
         protected StudentAccessService $accessService,
@@ -114,9 +119,12 @@ class StudentConvertedLectureService extends BaseService
     }
 
     /**
-     * Register a lecture conversion request and trigger real AI STT + Concept Map + Topics + Quiz generation.
+     * Register a lecture conversion request supporting ONE or MULTIPLE combined sources
+     * (Video/Audio + Images/Whiteboard Photos + PDF/DOCX/PPTX/TXT + YouTube URL + Course Lesson).
+     *
+     * @param  list<UploadedFile>  $extraFiles
      */
-    public function create(User $student, array $data, ?UploadedFile $file = null): array
+    public function create(User $student, array $data, ?UploadedFile $file = null, array $extraFiles = []): array
     {
         $outputs = array_values(array_intersect(
             self::ALLOWED_OUTPUTS,
@@ -126,14 +134,30 @@ class StudentConvertedLectureService extends BaseService
             $outputs = ['transcript'];
         }
 
+        // Collect all uploaded files (primary `file` + multi-file `files[]`, capped at 10)
+        $allUploads = [];
+        if ($file instanceof UploadedFile) {
+            $allUploads[] = $file;
+        }
+        foreach ($extraFiles as $extra) {
+            if ($extra instanceof UploadedFile) {
+                $allUploads[] = $extra;
+            }
+        }
+        $allUploads = array_slice($allUploads, 0, 10);
+
         $fileName = null;
         $fileSize = null;
-        $isAudioOrVideo = false;
-        $isDocument = false;
         $storedMediaDisk = null;
         $storedMediaPath = null;
         $storedMediaMime = null;
+        $primaryMediaFile = null;
+        $primaryMediaName = null;
+        $singleDocumentOnlyFile = null;
+        $singleDocumentOnlyName = null;
         $sourceUrl = null;
+        $storedAttachments = [];
+        $supplementalSegments = [];
 
         if (! empty($data['embed_url'])) {
             $candidateUrl = trim((string) $data['embed_url']);
@@ -141,51 +165,98 @@ class StudentConvertedLectureService extends BaseService
             $sourceUrl = mb_substr($candidateUrl, 0, 500);
         }
 
-        if ($file) {
-            $mime = (string) $file->getMimeType();
-            $ext = strtolower((string) $file->getClientOriginalExtension());
-            $allowed = false;
-            foreach (self::ALLOWED_MIME_PREFIXES as $prefix) {
-                if (str_starts_with($mime, $prefix)) {
-                    $allowed = true;
-                    break;
-                }
-            }
-            if (! $allowed && in_array($ext, self::ALLOWED_DOC_EXTENSIONS, true)) {
-                $allowed = true;
-            }
-            if (! $allowed && in_array($ext, self::ALLOWED_MEDIA_EXTENSIONS, true)) {
-                $allowed = true;
-            }
-            if (! $allowed) {
-                throw ValidationException::withMessages([
-                    'file' => ['نوع الملف غير مدعوم. يرجى رفع ملف صوت أو فيديو أو PDF أو Word (DOCX) أو PowerPoint (PPTX) أو نصي.'],
-                ]);
-            }
-            $isAudioOrVideo = str_starts_with($mime, 'audio/')
-                || str_starts_with($mime, 'video/')
-                || in_array($ext, self::ALLOWED_MEDIA_EXTENSIONS, true);
-            $isDocument = ! $isAudioOrVideo && (
-                str_starts_with($mime, 'application/pdf')
-                || str_starts_with($mime, 'text/plain')
-                || str_contains($mime, 'wordprocessingml')
-                || str_contains($mime, 'presentationml')
-                || in_array($ext, self::ALLOWED_DOC_EXTENSIONS, true)
-            );
-            $fileName = mb_substr(preg_replace('/[^\pL\pN._\- ]/u', '', $file->getClientOriginalName()) ?: 'lecture', 0, 200);
-            $fileSize = round($file->getSize() / (1024 * 1024), 1).' MB';
+        // Validate & classify every uploaded file before writing to storage
+        $classified = [];
+        foreach ($allUploads as $upload) {
+            $classified[] = $this->classifyUploadedFile($upload);
+        }
 
-            if ($isAudioOrVideo) {
-                $safeExt = in_array($ext, self::ALLOWED_MEDIA_EXTENSIONS, true) ? $ext : 'webm';
+        // Check if this is a single standalone document (fast async document pipeline) vs multi-file/media/images
+        $hasMediaUpload = false;
+        $hasImageUpload = false;
+        foreach ($classified as $item) {
+            if ($item['kind'] === 'audio' || $item['kind'] === 'video') {
+                $hasMediaUpload = true;
+            } elseif ($item['kind'] === 'image') {
+                $hasImageUpload = true;
+            }
+        }
+
+        $isSingleStandaloneDocument = count($classified) === 1
+            && $classified[0]['kind'] === 'document'
+            && $sourceUrl === null
+            && empty($data['lesson_uuid']);
+
+        foreach ($classified as $item) {
+            /** @var UploadedFile $upload */
+            $upload = $item['file'];
+            $kind = $item['kind'];
+            $safeName = $item['name'];
+            $sizeLabel = $item['sizeLabel'];
+            $safeExt = $item['ext'];
+            $mime = $item['mime'];
+
+            // First audio/video becomes the playable primary media stream
+            if (($kind === 'audio' || $kind === 'video') && $primaryMediaFile === null) {
                 $storedMediaDisk = 'local';
-                $storedMediaPath = $file->storeAs(
+                $storedMediaPath = $upload->storeAs(
                     'student-converted-lectures/'.$student->id,
                     (string) Str::uuid().'.'.$safeExt,
                     $storedMediaDisk
                 );
-                $storedMediaMime = mb_substr($mime ?: ($safeExt === 'mp4' ? 'video/mp4' : 'audio/webm'), 0, 120);
+                $storedMediaMime = mb_substr($mime ?: ($kind === 'video' ? 'video/mp4' : 'audio/webm'), 0, 120);
+                $primaryMediaFile = $upload;
+                $primaryMediaName = $safeName;
+                $fileName = $safeName;
+                $fileSize = $sizeLabel;
+
+                continue;
             }
-        } elseif (! empty($data['file_name'])) {
+
+            // Store all Images, Documents, and secondary media as persistent Lecture Attachments
+            $attId = (string) Str::uuid();
+            $attDisk = 'local';
+            $attPath = $upload->storeAs(
+                'student-converted-lectures/'.$student->id.'/attachments',
+                $attId.'.'.$safeExt,
+                $attDisk
+            );
+
+            $extractedText = '';
+            if ($isSingleStandaloneDocument) {
+                $singleDocumentOnlyFile = $upload;
+                $singleDocumentOnlyName = $safeName;
+            } elseif ($kind === 'image' || $kind === 'document') {
+                $extracted = $this->extractAttachmentSegments(
+                    Storage::disk($attDisk)->path($attPath),
+                    $safeName,
+                    $kind,
+                    count($supplementalSegments)
+                );
+                $extractedText = $extracted['text'];
+                foreach ($extracted['segments'] as $seg) {
+                    $supplementalSegments[] = $seg;
+                }
+            }
+
+            $storedAttachments[] = [
+                'id' => $attId,
+                'name' => $safeName,
+                'size' => $sizeLabel,
+                'kind' => $kind,
+                'mimeType' => mb_substr($mime, 0, 120),
+                'disk' => $attDisk,
+                'path' => $attPath,
+                'extractedText' => $extractedText !== '' ? mb_substr($extractedText, 0, 4000) : null,
+            ];
+
+            if ($fileName === null) {
+                $fileName = $safeName;
+                $fileSize = $sizeLabel;
+            }
+        }
+
+        if (empty($allUploads) && ! empty($data['file_name'])) {
             $fileName = mb_substr(trim(strip_tags((string) $data['file_name'])), 0, 200);
             $fileSize = isset($data['file_size']) ? mb_substr(trim(strip_tags((string) $data['file_size'])), 0, 60) : null;
         }
@@ -209,7 +280,7 @@ class StudentConvertedLectureService extends BaseService
 
         $analysisTasks = $this->mapOutputsToAnalysisTasks($outputs);
         $initialTranscript = [];
-        if (! $file && ! $sourceUrl && $linkedLesson && $linkedLesson->transcriptSegments->isNotEmpty()) {
+        if ($primaryMediaFile === null && $sourceUrl === null && $linkedLesson && $linkedLesson->transcriptSegments->isNotEmpty()) {
             $initialTranscript = $linkedLesson->transcriptSegments->map(fn ($seg, $idx) => [
                 'id' => (string) Str::uuid(),
                 'speaker' => $seg->speaker ?: 'المعلم',
@@ -223,19 +294,26 @@ class StudentConvertedLectureService extends BaseService
             ])->values()->all();
         }
 
-        $lessonFallbackUrl = (! $file && ! $sourceUrl && empty($initialTranscript) && $linkedLesson && $linkedLesson->embed_url)
+        // Merge any extracted image OCR / supplemental document segments into initial transcript
+        $combinedInitialTranscript = $this->mergeTranscriptSegments($initialTranscript, $supplementalSegments);
+
+        $lessonFallbackUrl = ($primaryMediaFile === null && $sourceUrl === null && empty($initialTranscript) && $linkedLesson && $linkedLesson->embed_url)
             ? (string) $linkedLesson->embed_url
             : null;
-        $lessonFallbackMediaPath = (! $file && ! $sourceUrl && empty($initialTranscript) && $linkedLesson && $linkedLesson->media_path)
+        $lessonFallbackMediaPath = ($primaryMediaFile === null && $sourceUrl === null && empty($initialTranscript) && $linkedLesson && $linkedLesson->media_path)
             ? (string) $linkedLesson->media_path
             : null;
 
-        $willProcessAi = $isAudioOrVideo
-            || $isDocument
+        $willProcessAi = $primaryMediaFile !== null
+            || $singleDocumentOnlyFile !== null
             || $sourceUrl !== null
-            || ! empty($initialTranscript)
+            || ! empty($combinedInitialTranscript)
             || $lessonFallbackUrl !== null
             || $lessonFallbackMediaPath !== null;
+
+        $defaultReadySummary = $hasImageUpload && empty($combinedInitialTranscript)
+            ? sprintf('تم حفظ %d مرفق/صورة في المحاضرة بنجاح. يمكنك تصفحها في تبويب الصور والمرفقات أو إضافة تسجيل صوتي.', count($storedAttachments))
+            : 'تم استلام المحاضرة وتسجيل طلب التحويل بنجاح.';
 
         $lecture = StudentConvertedLecture::create([
             'student_id' => $student->id,
@@ -255,10 +333,11 @@ class StudentConvertedLectureService extends BaseService
             'source_url' => $sourceUrl ?: $lessonFallbackUrl,
             'duration_label' => $linkedLesson?->duration_label,
             'summary_ar' => $willProcessAi
-                ? 'جاري تحليل المحاضرة وتوليد المخرجات المطلوبة بالذكاء الاصطناعي...'
-                : 'تم استلام المحاضرة وتسجيل طلب التحويل بنجاح.',
+                ? 'جاري تحليل المحاضرة والمرفقات بالذكاء الاصطناعي...'
+                : $defaultReadySummary,
             'outputs' => $outputs,
-            'transcript' => $initialTranscript,
+            'attachments' => $storedAttachments,
+            'transcript' => $combinedInitialTranscript,
             'topics' => [],
             'mindmap' => null,
             'quiz_questions' => [],
@@ -271,25 +350,37 @@ class StudentConvertedLectureService extends BaseService
             $requestedLang = null;
         }
 
-        // Case 1: Audio/Video uploaded -> Run Hybrid STT from stored file, then auto-chain LLM Analysis
-        if ($file && $isAudioOrVideo) {
+        // Case 1: Primary Audio/Video uploaded (+ optional Images/PDFs) -> Hybrid STT then merge & chain LLM Analysis
+        if ($primaryMediaFile !== null) {
             $dispatchPath = ($storedMediaDisk && $storedMediaPath && Storage::disk($storedMediaDisk)->exists($storedMediaPath))
                 ? Storage::disk($storedMediaDisk)->path($storedMediaPath)
-                : $file->getRealPath();
+                : $primaryMediaFile->getRealPath();
 
-            $this->dispatchFileSttJob($student, $lecture, $dispatchPath, $fileName ?: 'lecture.webm', $requestedLang, $analysisTasks);
+            $this->dispatchFileSttJob(
+                $student,
+                $lecture,
+                $dispatchPath,
+                $primaryMediaName ?: 'lecture.webm',
+                $requestedLang,
+                $analysisTasks,
+                $supplementalSegments
+            );
         }
-        // Case 2: YouTube / external video URL -> Run URL STT, then auto-chain LLM Analysis
+        // Case 2: YouTube / external video URL (+ optional Images/PDFs) -> URL STT then merge & chain LLM Analysis
         elseif ($sourceUrl !== null) {
-            $this->dispatchUrlSttJob($student, $lecture, $sourceUrl, $requestedLang, $analysisTasks);
+            $this->dispatchUrlSttJob($student, $lecture, $sourceUrl, $requestedLang, $analysisTasks, $supplementalSegments);
         }
-        // Case 3: PDF / DOCX / PPTX / TXT uploaded -> Dispatch directly to AI document analysis endpoint
-        elseif ($file && $isDocument) {
+        // Case 3: Single standalone PDF / DOCX / PPTX / TXT -> Fast async document analysis endpoint
+        elseif ($singleDocumentOnlyFile !== null) {
             $docTasks = ! empty($analysisTasks) ? $analysisTasks : ['summary', 'chapters'];
+            $docPath = ! empty($storedAttachments[0]['path']) && Storage::disk('local')->exists($storedAttachments[0]['path'])
+                ? Storage::disk('local')->path($storedAttachments[0]['path'])
+                : $singleDocumentOnlyFile->getRealPath();
+
             try {
                 $remote = $this->aiClient->startDocumentAnalysisJob(
-                    $file->getRealPath(),
-                    $fileName ?: 'lecture.pdf',
+                    $docPath,
+                    $singleDocumentOnlyName ?: 'lecture.pdf',
                     [
                         'title' => $lecture->title_ar,
                         'subject' => (string) ($lecture->subject_ar ?: ''),
@@ -333,12 +424,13 @@ class StudentConvertedLectureService extends BaseService
                 ]);
             }
         }
-        // Case 4: Linked course lesson already has transcript -> Directly dispatch LLM analysis
-        elseif (! empty($initialTranscript) && ! empty($analysisTasks)) {
+        // Case 4: Combined transcript from Images (OCR) / Multi-Docs / Course Lesson -> Direct LLM Analysis
+        elseif (! empty($combinedInitialTranscript)) {
+            $tasks = ! empty($analysisTasks) ? $analysisTasks : ['summary', 'chapters', 'concept_graph'];
             try {
-                $this->dispatchLectureAnalysisJob($student, $lecture, $analysisTasks, (int) config('ai.llm.default_quiz_count', 5));
+                $this->dispatchLectureAnalysisJob($student, $lecture, $tasks, (int) config('ai.llm.default_quiz_count', 5));
             } catch (RuntimeException $e) {
-                Log::warning('Student linked lesson AI analysis dispatch failed', [
+                Log::warning('Student combined sources AI analysis dispatch failed', [
                     'lecture_uuid' => $lecture->uuid,
                     'error' => $e->getMessage(),
                 ]);
@@ -354,18 +446,319 @@ class StudentConvertedLectureService extends BaseService
                     Storage::disk($lDisk)->path($lessonFallbackMediaPath),
                     $linkedLesson->media_original_name ?: 'lesson.mp4',
                     $requestedLang,
-                    $analysisTasks
+                    $analysisTasks,
+                    $supplementalSegments
                 );
             }
         }
         // Case 6: Linked course lesson has YouTube / video embed URL -> Run URL STT -> LLM chain
         elseif ($lessonFallbackUrl !== null) {
-            $this->dispatchUrlSttJob($student, $lecture, $lessonFallbackUrl, $requestedLang, $analysisTasks);
+            $this->dispatchUrlSttJob($student, $lecture, $lessonFallbackUrl, $requestedLang, $analysisTasks, $supplementalSegments);
         }
 
-        $this->logSecurityEvent('student.lecture.converted', ['lecture_uuid' => $lecture->uuid], 'info', $lecture);
+        $this->logSecurityEvent('student.lecture.converted', [
+            'lecture_uuid' => $lecture->uuid,
+            'attachments_count' => count($storedAttachments),
+        ], 'info', $lecture);
 
         return $this->format($lecture->fresh(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob']), true);
+    }
+
+    /**
+     * Attach additional images, PDFs, Word/PPTX documents, or media files to an existing converted lecture.
+     *
+     * @param  list<UploadedFile>  $files
+     * @return array<string, mixed>
+     */
+    public function addAttachments(User $student, string $uuid, array $files, bool $reanalyze = false): array
+    {
+        $lecture = $this->findOwned($student, $uuid);
+        $existing = is_array($lecture->attachments) ? $lecture->attachments : [];
+
+        if (count($existing) + count($files) > self::MAX_ATTACHMENTS_PER_LECTURE) {
+            throw ValidationException::withMessages([
+                'files' => ['الحد الأقصى لعدد المرفقات والصور لكل محاضرة هو '.self::MAX_ATTACHMENTS_PER_LECTURE.' ملفاً.'],
+            ]);
+        }
+
+        $classified = [];
+        foreach ($files as $upload) {
+            if ($upload instanceof UploadedFile) {
+                $classified[] = $this->classifyUploadedFile($upload);
+            }
+        }
+
+        if (empty($classified)) {
+            throw ValidationException::withMessages([
+                'files' => ['يرجى اختيار ملف أو صورة واحدة على الأقل للإضافة.'],
+            ]);
+        }
+
+        $newSegments = [];
+        $updates = [];
+        $promotedMediaPath = null;
+        $promotedMediaName = null;
+
+        foreach ($classified as $item) {
+            /** @var UploadedFile $upload */
+            $upload = $item['file'];
+            $kind = $item['kind'];
+            $safeName = $item['name'];
+            $sizeLabel = $item['sizeLabel'];
+            $safeExt = $item['ext'];
+            $mime = $item['mime'];
+
+            // If lecture had no primary audio/video yet and user adds one now, make it playable!
+            if (($kind === 'audio' || $kind === 'video') && empty($lecture->media_path) && $promotedMediaPath === null) {
+                $mediaPath = $upload->storeAs(
+                    'student-converted-lectures/'.$student->id,
+                    (string) Str::uuid().'.'.$safeExt,
+                    'local'
+                );
+                $updates['media_disk'] = 'local';
+                $updates['media_path'] = $mediaPath;
+                $updates['media_mime_type'] = mb_substr($mime ?: ($kind === 'video' ? 'video/mp4' : 'audio/webm'), 0, 120);
+                if (empty($lecture->file_name)) {
+                    $updates['file_name'] = $safeName;
+                    $updates['file_size'] = $sizeLabel;
+                }
+                $promotedMediaPath = Storage::disk('local')->path($mediaPath);
+                $promotedMediaName = $safeName;
+
+                continue;
+            }
+
+            $attId = (string) Str::uuid();
+            $attDisk = 'local';
+            $attPath = $upload->storeAs(
+                'student-converted-lectures/'.$student->id.'/attachments',
+                $attId.'.'.$safeExt,
+                $attDisk
+            );
+
+            $extractedText = '';
+            if ($kind === 'image' || $kind === 'document') {
+                $extracted = $this->extractAttachmentSegments(
+                    Storage::disk($attDisk)->path($attPath),
+                    $safeName,
+                    $kind,
+                    count(is_array($lecture->transcript) ? $lecture->transcript : []) + count($newSegments)
+                );
+                $extractedText = $extracted['text'];
+                foreach ($extracted['segments'] as $seg) {
+                    $newSegments[] = $seg;
+                }
+            }
+
+            $existing[] = [
+                'id' => $attId,
+                'name' => $safeName,
+                'size' => $sizeLabel,
+                'kind' => $kind,
+                'mimeType' => mb_substr($mime, 0, 120),
+                'disk' => $attDisk,
+                'path' => $attPath,
+                'extractedText' => $extractedText !== '' ? mb_substr($extractedText, 0, 4000) : null,
+            ];
+        }
+
+        $updates['attachments'] = array_values($existing);
+        if (! empty($newSegments)) {
+            $currentTranscript = is_array($lecture->transcript) ? $lecture->transcript : [];
+            $updates['transcript'] = $this->mergeTranscriptSegments($currentTranscript, $newSegments);
+        }
+
+        $lecture->update($updates);
+        $lecture->refresh();
+
+        $outputs = is_array($lecture->outputs) && ! empty($lecture->outputs)
+            ? $lecture->outputs
+            : ['graph', 'transcript', 'topics', 'quiz'];
+        $analysisTasks = $this->mapOutputsToAnalysisTasks($outputs);
+
+        if ($reanalyze) {
+            if ($promotedMediaPath !== null) {
+                $this->dispatchFileSttJob(
+                    $student,
+                    $lecture,
+                    $promotedMediaPath,
+                    $promotedMediaName ?: 'lecture.webm',
+                    null,
+                    $analysisTasks,
+                    is_array($lecture->transcript) ? $lecture->transcript : []
+                );
+            } elseif (! empty($lecture->transcript)) {
+                $tasks = ! empty($analysisTasks) ? $analysisTasks : ['concept_graph', 'chapters', 'summary'];
+                $this->dispatchLectureAnalysisJob($student, $lecture, $tasks, (int) config('ai.llm.default_quiz_count', 5));
+            }
+        }
+
+        return $this->format($lecture->fresh(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob']), true);
+    }
+
+    /**
+     * Remove a single attachment/image from an owned converted lecture and delete its stored file.
+     *
+     * @return array<string, mixed>
+     */
+    public function deleteAttachment(User $student, string $uuid, string $attachmentId): array
+    {
+        $lecture = $this->findOwned($student, $uuid);
+        $attachments = is_array($lecture->attachments) ? $lecture->attachments : [];
+        $remaining = [];
+        $found = false;
+
+        foreach ($attachments as $att) {
+            if (is_array($att) && ($att['id'] ?? null) === $attachmentId) {
+                $found = true;
+                if (! empty($att['path'])) {
+                    $disk = (string) ($att['disk'] ?? 'local');
+                    if (Storage::disk($disk)->exists($att['path'])) {
+                        Storage::disk($disk)->delete($att['path']);
+                    }
+                }
+
+                continue;
+            }
+            $remaining[] = $att;
+        }
+
+        if (! $found) {
+            throw (new ModelNotFoundException)->setModel(StudentConvertedLecture::class, [$attachmentId]);
+        }
+
+        $lecture->update(['attachments' => array_values($remaining)]);
+
+        return $this->format($lecture->fresh(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob']), true);
+    }
+
+    /**
+     * @return array{file: UploadedFile, kind: string, name: string, sizeLabel: string, ext: string, mime: string}
+     */
+    protected function classifyUploadedFile(UploadedFile $file): array
+    {
+        $mime = strtolower((string) $file->getMimeType());
+        $ext = strtolower((string) $file->getClientOriginalExtension());
+
+        $allowed = false;
+        foreach (self::ALLOWED_MIME_PREFIXES as $prefix) {
+            if (str_starts_with($mime, $prefix)) {
+                $allowed = true;
+                break;
+            }
+        }
+        if (
+            ! $allowed
+            && ! in_array($ext, self::ALLOWED_DOC_EXTENSIONS, true)
+            && ! in_array($ext, self::ALLOWED_MEDIA_EXTENSIONS, true)
+            && ! in_array($ext, self::ALLOWED_IMAGE_EXTENSIONS, true)
+        ) {
+            throw ValidationException::withMessages([
+                'files' => ['نوع الملف غير مدعوم. يُسمح بالصور (JPG/PNG/WEBP)، الصوت، الفيديو، وملفات PDF/Word/PowerPoint/TXT.'],
+            ]);
+        }
+
+        if (str_starts_with($mime, 'image/') || in_array($ext, self::ALLOWED_IMAGE_EXTENSIONS, true)) {
+            $kind = 'image';
+            $safeExt = in_array($ext, self::ALLOWED_IMAGE_EXTENSIONS, true) ? $ext : 'jpg';
+        } elseif (str_starts_with($mime, 'video/') || in_array($ext, ['mp4', 'mkv', 'mov', 'avi'], true)) {
+            $kind = 'video';
+            $safeExt = in_array($ext, self::ALLOWED_MEDIA_EXTENSIONS, true) ? $ext : 'mp4';
+        } elseif (str_starts_with($mime, 'audio/') || in_array($ext, self::ALLOWED_MEDIA_EXTENSIONS, true)) {
+            $kind = 'audio';
+            $safeExt = in_array($ext, self::ALLOWED_MEDIA_EXTENSIONS, true) ? $ext : 'webm';
+        } else {
+            $kind = 'document';
+            $safeExt = in_array($ext, self::ALLOWED_DOC_EXTENSIONS, true) ? $ext : 'pdf';
+        }
+
+        $safeName = mb_substr(preg_replace('/[^\pL\pN._\- ]/u', '', $file->getClientOriginalName()) ?: 'attachment.'.$safeExt, 0, 200);
+        $bytes = max(0, (int) $file->getSize());
+        $sizeLabel = $bytes < 1024 * 1024
+            ? round($bytes / 1024, 1).' KB'
+            : round($bytes / (1024 * 1024), 1).' MB';
+
+        return [
+            'file' => $file,
+            'kind' => $kind,
+            'name' => $safeName,
+            'sizeLabel' => $sizeLabel,
+            'ext' => $safeExt,
+            'mime' => $mime ?: 'application/octet-stream',
+        ];
+    }
+
+    /**
+     * Extract text segments from an uploaded Image (OCR) or Document without failing the lecture if empty.
+     *
+     * @return array{text: string, segments: list<array<string, mixed>>}
+     */
+    protected function extractAttachmentSegments(
+        string $localPath,
+        string $originalName,
+        string $kind,
+        int $orderOffset = 0
+    ): array {
+        $label = $kind === 'image' ? 'صورة: '.$originalName : 'مرفق: '.$originalName;
+        try {
+            $res = $this->aiClient->extractFileText($localPath, $originalName, $label);
+            $rawSegments = is_array($res['segments'] ?? null) ? $res['segments'] : [];
+            $formatted = [];
+            foreach ($rawSegments as $seg) {
+                if (! is_array($seg)) {
+                    continue;
+                }
+                $txt = trim(strip_tags((string) ($seg['text'] ?? '')));
+                if ($txt === '') {
+                    continue;
+                }
+                $startS = max(0, (int) ($seg['start_seconds'] ?? 0));
+                $formatted[] = [
+                    'id' => (string) Str::uuid(),
+                    'speaker' => mb_substr($label, 0, 120),
+                    'startSeconds' => $startS,
+                    'endSeconds' => max($startS, (int) ($seg['end_seconds'] ?? ($startS + 45))),
+                    'timestamp' => (string) ($seg['timestamp'] ?? $this->formatSeconds($startS)),
+                    'text' => $txt,
+                    'textAr' => $txt,
+                    'textEn' => $txt,
+                    'sourceKind' => $kind,
+                    'order' => $orderOffset + count($formatted) + 1,
+                ];
+            }
+
+            return [
+                'text' => trim((string) ($res['text'] ?? '')),
+                'segments' => $formatted,
+            ];
+        } catch (RuntimeException $e) {
+            Log::info('Non-fatal attachment text/OCR extraction skipped', [
+                'file' => $originalName,
+                'kind' => $kind,
+                'error' => $e->getMessage(),
+            ]);
+
+            return ['text' => '', 'segments' => []];
+        }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $primary
+     * @param  list<array<string, mixed>>  $supplemental
+     * @return list<array<string, mixed>>
+     */
+    protected function mergeTranscriptSegments(array $primary, array $supplemental): array
+    {
+        $merged = [];
+        foreach (array_merge($primary, $supplemental) as $seg) {
+            if (! is_array($seg)) {
+                continue;
+            }
+            $seg['order'] = count($merged) + 1;
+            $merged[] = $seg;
+        }
+
+        return $merged;
     }
 
     /**
@@ -419,6 +812,16 @@ class StudentConvertedLectureService extends BaseService
                 Storage::disk($disk)->delete($lecture->media_path);
             }
         }
+        if (is_array($lecture->attachments)) {
+            foreach ($lecture->attachments as $att) {
+                if (is_array($att) && ! empty($att['path'])) {
+                    $attDisk = (string) ($att['disk'] ?? 'local');
+                    if (Storage::disk($attDisk)->exists($att['path'])) {
+                        Storage::disk($attDisk)->delete($att['path']);
+                    }
+                }
+            }
+        }
         $lecture->delete();
 
         return true;
@@ -426,6 +829,7 @@ class StudentConvertedLectureService extends BaseService
 
     /**
      * @param  list<string>  $analysisTasks
+     * @param  list<array<string, mixed>>  $supplementalSegments
      */
     protected function dispatchFileSttJob(
         User $student,
@@ -433,7 +837,8 @@ class StudentConvertedLectureService extends BaseService
         string $localFilePath,
         string $originalFilename,
         ?string $requestedLang,
-        array $analysisTasks
+        array $analysisTasks,
+        array $supplementalSegments = []
     ): void {
         try {
             $remote = $this->aiClient->startFileTranscriptionJob(
@@ -455,6 +860,7 @@ class StudentConvertedLectureService extends BaseService
                 'requested_language' => $requestedLang,
                 'meta' => [
                     'pendingAnalysisTasks' => $analysisTasks,
+                    'supplementalSegments' => $supplementalSegments,
                 ],
                 'started_at' => now(),
             ]);
@@ -482,13 +888,15 @@ class StudentConvertedLectureService extends BaseService
 
     /**
      * @param  list<string>  $analysisTasks
+     * @param  list<array<string, mixed>>  $supplementalSegments
      */
     protected function dispatchUrlSttJob(
         User $student,
         StudentConvertedLecture $lecture,
         string $url,
         ?string $requestedLang,
-        array $analysisTasks
+        array $analysisTasks,
+        array $supplementalSegments = []
     ): void {
         try {
             $remote = $this->aiClient->startUrlTranscriptionJob($url, $requestedLang, 'المحاضر');
@@ -506,6 +914,7 @@ class StudentConvertedLectureService extends BaseService
                 'meta' => [
                     'pendingAnalysisTasks' => $analysisTasks,
                     'sourceUrl' => $url,
+                    'supplementalSegments' => $supplementalSegments,
                 ],
                 'started_at' => now(),
             ]);
@@ -779,19 +1188,24 @@ class StudentConvertedLectureService extends BaseService
                     ];
                 }
 
+                $existingMeta = is_array($locked->meta) ? $locked->meta : [];
+                $supplementalSegments = is_array($existingMeta['supplementalSegments'] ?? null)
+                    ? $existingMeta['supplementalSegments']
+                    : [];
+                $mergedTranscript = $this->mergeTranscriptSegments($formattedSegments, $supplementalSegments);
+
                 $durationSecs = max(0, (int) ($result['duration_seconds'] ?? 0));
                 $langNameAr = (string) ($result['detected_language_name_ar'] ?? $result['detected_language'] ?? '');
-                $summaryText = count($formattedSegments) > 0
-                    ? sprintf('تم التفريغ النصي الذكي بنجاح (%d فقرة • اللغة: %s).', count($formattedSegments), $langNameAr ?: 'تلقائي')
+                $summaryText = count($mergedTranscript) > 0
+                    ? sprintf('تم التفريغ النصي الذكي بنجاح (%d فقرة • اللغة: %s).', count($mergedTranscript), $langNameAr ?: 'تلقائي')
                     : 'اكتمل تحليل الصوت ولكن لم يتم اكتشاف كلام واضح في التسجيل.';
 
                 $lecture->update([
-                    'transcript' => $formattedSegments,
+                    'transcript' => $mergedTranscript,
                     'duration_label' => $durationSecs > 0 ? $this->formatSeconds($durationSecs) : $lecture->duration_label,
                     'summary_ar' => $summaryText,
                 ]);
 
-                $existingMeta = is_array($locked->meta) ? $locked->meta : [];
                 $locked->update([
                     'status' => AiProcessingJob::STATUS_COMPLETED,
                     'progress' => 100,
@@ -800,7 +1214,7 @@ class StudentConvertedLectureService extends BaseService
                     'detected_language' => isset($result['detected_language']) ? mb_substr((string) $result['detected_language'], 0, 16) : null,
                     'language_probability' => isset($result['language_probability']) ? (float) $result['language_probability'] : null,
                     'duration_seconds' => $durationSecs > 0 ? $durationSecs : $locked->duration_seconds,
-                    'segments_count' => count($formattedSegments),
+                    'segments_count' => count($mergedTranscript),
                     'error_message' => null,
                     'meta' => array_merge($existingMeta, [
                         'device' => $result['device'] ?? null,
@@ -1125,6 +1539,40 @@ class StudentConvertedLectureService extends BaseService
             $mediaType = 'lesson';
         }
 
+        $rawAttachments = is_array($l->attachments) ? $l->attachments : [];
+        $formattedAttachments = [];
+        foreach ($rawAttachments as $att) {
+            if (! is_array($att) || empty($att['id'])) {
+                continue;
+            }
+            $attId = (string) $att['id'];
+            $formattedAttachments[] = [
+                'id' => $attId,
+                'name' => (string) ($att['name'] ?? 'attachment'),
+                'size' => (string) ($att['size'] ?? ''),
+                'kind' => (string) ($att['kind'] ?? 'document'),
+                'mimeType' => (string) ($att['mimeType'] ?? 'application/octet-stream'),
+                'extractedText' => $att['extractedText'] ?? null,
+                'url' => URL::temporarySignedRoute(
+                    'api.v1.student.converted-lectures.attachments.stream',
+                    now()->addHours(2),
+                    ['uuid' => $l->uuid, 'attachmentId' => $attId]
+                ),
+                'downloadUrl' => URL::temporarySignedRoute(
+                    'api.v1.student.converted-lectures.attachments.stream',
+                    now()->addHours(2),
+                    ['uuid' => $l->uuid, 'attachmentId' => $attId, 'download' => 1]
+                ),
+            ];
+        }
+
+        if ($mediaType === 'document' && count($formattedAttachments) > 0) {
+            $allImages = collect($formattedAttachments)->every(fn (array $a) => $a['kind'] === 'image');
+            if ($allImages) {
+                $mediaType = 'image';
+            }
+        }
+
         $base = [
             'id' => $l->uuid,
             'lessonId' => $l->lesson?->uuid,
@@ -1140,6 +1588,7 @@ class StudentConvertedLectureService extends BaseService
             'duration' => $l->duration_label,
             'summaryAr' => $l->summary_ar,
             'outputs' => $l->outputs ?? [],
+            'attachmentsCount' => count($formattedAttachments),
             'questionsCount' => (int) $l->questions_count,
             'conceptsCount' => (int) $l->concepts_count,
             'keyTopics' => collect($l->topics ?? [])->pluck('titleAr')->filter()->take(5)->values()->all(),
@@ -1155,6 +1604,7 @@ class StudentConvertedLectureService extends BaseService
         ];
 
         if ($withContent) {
+            $base['attachments'] = $formattedAttachments;
             $base['transcript'] = $l->transcript ?? [];
             $base['topics'] = $l->topics ?? [];
             $base['mindmap'] = $l->mindmap;

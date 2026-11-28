@@ -440,4 +440,98 @@ class StudentAiFeaturesTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.coachReport.overviewAr', 'يوجد خلط في العلاقة العكسية بين المقاومة وشدة التيار.');
     }
+
+    public function test_smart_lecture_combines_video_with_multiple_images_ocr_and_post_creation_attachments(): void
+    {
+        Storage::fake('local');
+
+        Http::fake([
+            '*/api/v1/stt/jobs' => Http::response([
+                'job_id' => 'stt-multi-1',
+                'status' => 'queued',
+                'progress' => 10,
+                'stage' => 'queued',
+                'model' => 'mohammedaly22/QwenCleo-ASR',
+            ], 202),
+            '*/api/v1/stt/jobs/stt-multi-1' => Http::response([
+                'job_id' => 'stt-multi-1',
+                'status' => 'completed',
+                'progress' => 100,
+                'stage' => 'completed',
+                'result' => [
+                    'model' => 'mohammedaly22/QwenCleo-ASR',
+                    'detected_language' => 'ar',
+                    'detected_language_name_ar' => 'العربية',
+                    'duration_seconds' => 45,
+                    'segments' => [
+                        ['start_seconds' => 0, 'end_seconds' => 20, 'timestamp' => '00:00', 'speaker' => 'المحاضر', 'text' => 'شرح فيديو عن قانون أوم'],
+                    ],
+                ],
+            ], 200),
+            '*/api/v1/stt/jobs/stt-multi-1*' => Http::response(null, 204),
+            '*/api/v1/analysis/extract-text' => Http::response([
+                'kind' => 'image',
+                'filename' => 'board.png',
+                'char_count' => 38,
+                'text' => 'السبورة: V = I * R ومثال محلول',
+                'segments' => [
+                    ['start_seconds' => 0, 'end_seconds' => 45, 'timestamp' => '00:00', 'speaker' => 'صورة: board.png', 'text' => 'السبورة: V = I * R ومثال محلول'],
+                ],
+            ], 200),
+            '*/api/v1/analysis/jobs' => Http::response([
+                'job_id' => 'ana-multi-1',
+                'status' => 'queued',
+                'progress' => 10,
+                'stage' => 'queued',
+                'model' => 'unsloth/Qwen2.5-3B-Instruct-bnb-4bit',
+            ], 202),
+        ]);
+
+        $student = $this->createStudentWithPlan(StudentPlanTier::PRO);
+        Sanctum::actingAs($student, [TokenType::ACCESS->value]);
+
+        // 1. Upload Video + 2 Whiteboard Images + PDF in ONE combined request!
+        $video = UploadedFile::fake()->create('lecture.mp4', 500, 'video/mp4');
+        $img1 = UploadedFile::fake()->create('whiteboard-1.png', 100, 'image/png');
+        $img2 = UploadedFile::fake()->create('notes-2.jpg', 120, 'image/jpeg');
+        $pdf = UploadedFile::fake()->create('summary.pdf', 80, 'application/pdf');
+
+        $res = $this->post('/api/v1/student/converted-lectures', [
+            'title_ar' => 'حصة الفيزياء كاملة بالصور والملخص',
+            'files' => [$video, $img1, $img2, $pdf],
+            'outputs' => ['graph', 'transcript', 'topics', 'quiz'],
+        ], ['Idempotency-Key' => 'conv-multi-1'])->assertCreated();
+
+        $lectureId = $res->json('data.id');
+        $res->assertJsonPath('data.mediaType', 'video')
+            ->assertJsonPath('data.attachmentsCount', 3)
+            ->assertJsonCount(3, 'data.attachments');
+
+        // Signed URL streams attached whiteboard image cleanly; unsigned URL is forbidden
+        $imgUrl = $res->json('data.attachments.0.url');
+        $imgAttId = $res->json('data.attachments.0.id');
+        $this->assertNotEmpty($imgUrl);
+        $this->get($imgUrl)->assertOk();
+        $this->get("/api/v1/media/student-converted-lectures/{$lectureId}/attachments/{$imgAttId}/stream")->assertForbidden();
+
+        // Poll status: STT completes and MERGES spoken video transcript + OCR image notes without losing either!
+        $statusRes = $this->getJson("/api/v1/student/converted-lectures/{$lectureId}/status")->assertOk();
+        $transcriptTexts = collect($statusRes->json('data.transcript'))->pluck('text')->implode(' ');
+        $this->assertStringContainsString('شرح فيديو عن قانون أوم', $transcriptTexts);
+        $this->assertStringContainsString('V = I * R', $transcriptTexts);
+
+        // 2. Add another whiteboard image AFTER creation + trigger AI re-analysis
+        $extraImg = UploadedFile::fake()->create('whiteboard-extra.webp', 90, 'image/webp');
+        $addRes = $this->post("/api/v1/student/converted-lectures/{$lectureId}/attachments", [
+            'files' => [$extraImg],
+            'reanalyze' => true,
+        ])->assertOk();
+        $addRes->assertJsonPath('data.attachmentsCount', 4);
+
+        // 3. Delete one individual attachment cleanly
+        $delAttId = $addRes->json('data.attachments.3.id');
+        $this->deleteJson("/api/v1/student/converted-lectures/{$lectureId}/attachments/{$delAttId}")
+            ->assertOk()
+            ->assertJsonPath('data.attachmentsCount', 3);
+    }
 }

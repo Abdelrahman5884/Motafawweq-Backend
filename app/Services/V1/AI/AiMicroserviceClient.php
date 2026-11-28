@@ -284,6 +284,60 @@ class AiMicroserviceClient
     }
 
     /**
+     * Extract text segments from an uploaded Image (Arabic/English OCR) or Document (PDF/DOCX/PPTX/TXT).
+     *
+     * @return array<string, mixed>
+     */
+    public function extractFileText(
+        string $localFilePath,
+        string $originalFilename,
+        ?string $label = null
+    ): array {
+        if (! is_file($localFilePath) || ! is_readable($localFilePath)) {
+            throw new RuntimeException(__('messages.ai.media_file_unreadable'));
+        }
+
+        $stream = fopen($localFilePath, 'rb');
+        if ($stream === false) {
+            throw new RuntimeException(__('messages.ai.media_file_unreadable'));
+        }
+
+        try {
+            $fields = [];
+            if ($label !== null && trim($label) !== '') {
+                $fields['label'] = mb_substr(trim($label), 0, 120);
+            }
+
+            $response = $this->client(max(90, $this->requestTimeout))
+                ->attach('file', $stream, $originalFilename ?: basename($localFilePath))
+                ->post('/api/v1/analysis/extract-text', $fields);
+
+            if (! $response->successful()) {
+                $detail = (string) ($response->json('detail') ?? $response->body());
+                Log::warning('AI text/OCR extraction failed', [
+                    'status' => $response->status(),
+                    'detail' => mb_substr($detail, 0, 300),
+                ]);
+
+                throw new RuntimeException($detail !== '' ? $detail : __('messages.ai.analysis_error'));
+            }
+
+            return (array) $response->json();
+        } catch (ConnectionException $e) {
+            Log::error('AI microservice unreachable during text/OCR extraction', [
+                'url' => $this->baseUrl,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new RuntimeException(__('messages.ai.service_unavailable'), 0, $e);
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
+    }
+
+    /**
      * Poll an existing remote LLM analysis job for live progress and structured outputs.
      *
      * @return array<string, mixed>
