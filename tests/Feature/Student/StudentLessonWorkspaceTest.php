@@ -258,12 +258,14 @@ class StudentLessonWorkspaceTest extends TestCase
             ->assertJsonPath('data.transcript.0.endSeconds', 180)
             ->assertJsonPath('data.transcript.1.endSeconds', 1200);
 
-        // Concept graph flattened from tree_data into SVG nodes + edges
+        // Concept graph flattened from tree_data into SVG nodes + edges AND full hierarchical notebookMindMap
         $res->assertJsonCount(2, 'data.conceptGraph.nodes')
             ->assertJsonCount(1, 'data.conceptGraph.edges')
             ->assertJsonPath('data.conceptGraph.nodes.0.label', 'الجهاز الهيكلي')
             ->assertJsonPath('data.conceptGraph.edges.0.from', 'root')
-            ->assertJsonPath('data.conceptGraph.edges.0.to', 'axial');
+            ->assertJsonPath('data.conceptGraph.edges.0.to', 'axial')
+            ->assertJsonPath('data.notebookMindMap.labelAr', 'الجهاز الهيكلي')
+            ->assertJsonPath('data.notebookMindMap.children.0.labelAr', 'الهيكل المحوري');
 
         // Related exams include both, while practiceQuestions ONLY include the already-graded exam (never leaks unsubmitted!)
         $res->assertJsonCount(2, 'data.relatedExams')

@@ -488,6 +488,7 @@ class StudentCourseLessonService extends BaseService
             'chapters' => $chapters,
             'transcript' => $transcript,
             'conceptGraph' => $conceptGraph,
+            'notebookMindMap' => $lesson->conceptGraph?->tree_data,
             'relatedExams' => $relatedExams,
             'practiceQuestions' => $practiceQuestions,
             'progress' => [
