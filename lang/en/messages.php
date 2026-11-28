@@ -480,5 +480,9 @@ return [
         'invalid_analysis_tasks' => 'Please select at least one valid AI analysis task.',
         'transcript_required_for_analysis' => 'Please generate or add a lesson transcript before running AI analysis.',
         'transcript_or_media_required' => 'This lesson needs a transcript or uploaded audio/video media to run AI.',
+        'student_coach_started' => 'AI weak-area diagnosis and targeted remediation quiz generation started.',
+        'no_mistakes_for_coach' => 'There are no graded exam mistakes recorded yet for AI diagnosis.',
+        'converted_lecture_retry_started' => 'Lecture AI processing retry started successfully.',
+        'converted_lecture_nothing_to_retry' => 'No audio file, video URL, or transcript is available to retry.',
     ],
 ];

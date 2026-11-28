@@ -516,7 +516,7 @@ class StudentExamTakingService extends BaseService
                     ->where('status', ExamSubmissionStatus::GRADED)
                     ->whereHas('exam', fn ($eq) => $eq->where('show_results', true));
             })
-            ->with(['question', 'submission.exam'])
+            ->with(['question', 'submission.exam.course:id,uuid,title_ar,subject_ar'])
             ->latest()
             ->limit(100)
             ->get();
@@ -524,19 +524,48 @@ class StudentExamTakingService extends BaseService
         return $answers->map(function (ExamSubmissionAnswer $ans) {
             $q = $ans->question;
             $exam = $ans->submission?->exam;
+            $type = $q?->type instanceof ExamQuestionType ? $q->type->value : (string) $q?->type;
+            $options = is_array($q?->options_ar) ? $q->options_ar : [];
+
+            $wrongAnswerText = null;
+            $correctAnswerText = null;
+            if ($type === ExamQuestionType::TRUE_FALSE->value) {
+                $wrongAnswerText = $ans->selected_bool === null ? null : ($ans->selected_bool ? 'صح' : 'خطأ');
+                $correctAnswerText = $q?->correct_bool === null ? null : ($q->correct_bool ? 'صح' : 'خطأ');
+                if (empty($options)) {
+                    $options = ['صح', 'خطأ'];
+                }
+            } else {
+                if ($ans->selected_index !== null && array_key_exists((int) $ans->selected_index, $options)) {
+                    $wrongAnswerText = (string) $options[(int) $ans->selected_index];
+                }
+                if ($q?->correct_index !== null && array_key_exists((int) $q->correct_index, $options)) {
+                    $correctAnswerText = (string) $options[(int) $q->correct_index];
+                }
+            }
+
+            $subjectAr = $exam?->course?->subject_ar ?: ($exam?->course?->title_ar ?: ($exam?->course_title_ar ?: 'مراجعة عامة'));
 
             return [
                 'id' => $ans->uuid,
                 'examId' => $exam?->uuid,
+                'courseId' => $exam?->course?->uuid,
+                'subjectAr' => $subjectAr,
                 'examTitleAr' => $exam?->title_ar,
                 'questionId' => $q?->uuid,
                 'questionAr' => $q?->question_ar,
-                'type' => $q?->type instanceof ExamQuestionType ? $q->type->value : (string) $q?->type,
-                'optionsAr' => $q?->options_ar ?? [],
-                'selectedIndex' => $ans->selected_index,
+                'type' => $type,
+                'optionsAr' => $options,
+                'selectedIndex' => $type === ExamQuestionType::TRUE_FALSE->value
+                    ? ($ans->selected_bool === null ? null : ($ans->selected_bool ? 0 : 1))
+                    : $ans->selected_index,
                 'selectedBool' => $ans->selected_bool,
-                'correctIndex' => $q?->correct_index,
+                'correctIndex' => $type === ExamQuestionType::TRUE_FALSE->value
+                    ? ($q?->correct_bool === null ? null : ($q->correct_bool ? 0 : 1))
+                    : $q?->correct_index,
                 'correctBool' => $q?->correct_bool,
+                'wrongAnswerGivenAr' => $wrongAnswerText ?: 'لم يتم اختيار إجابة',
+                'correctAnswerAr' => $correctAnswerText ?: '',
                 'explanationAr' => $q?->explanation_ar,
             ];
         })->values()->all();

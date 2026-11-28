@@ -21,11 +21,14 @@ class AiProcessingJob extends Model
 
     public const TASK_QUIZ = 'quiz';
 
+    public const TASK_STUDENT_COACH = 'student_coach';
+
     public const ANALYSIS_TASK_TYPES = [
         self::TASK_LESSON_ANALYSIS,
         self::TASK_CHAPTERS,
         self::TASK_CONCEPT_GRAPH,
         self::TASK_QUIZ,
+        self::TASK_STUDENT_COACH,
     ];
 
     public const STATUS_QUEUED = 'queued';

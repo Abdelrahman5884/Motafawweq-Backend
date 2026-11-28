@@ -12,6 +12,8 @@ use App\Services\V1\AI\LessonSpeechToTextService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
@@ -20,7 +22,18 @@ class StudentConvertedLectureService extends BaseService
 {
     private const ALLOWED_OUTPUTS = ['graph', 'transcript', 'topics', 'quiz'];
 
-    private const ALLOWED_MIME_PREFIXES = ['audio/', 'video/', 'application/pdf', 'text/plain'];
+    private const ALLOWED_MIME_PREFIXES = [
+        'audio/',
+        'video/',
+        'application/pdf',
+        'text/plain',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ];
+
+    private const ALLOWED_DOC_EXTENSIONS = ['pdf', 'txt', 'md', 'docx', 'pptx'];
+
+    private const ALLOWED_MEDIA_EXTENSIONS = ['mp3', 'wav', 'm4a', 'ogg', 'webm', 'aac', 'flac', 'mp4', 'mkv', 'mov', 'avi'];
 
     public function __construct(
         protected StudentAccessService $accessService,
@@ -117,6 +130,16 @@ class StudentConvertedLectureService extends BaseService
         $fileSize = null;
         $isAudioOrVideo = false;
         $isDocument = false;
+        $storedMediaDisk = null;
+        $storedMediaPath = null;
+        $storedMediaMime = null;
+        $sourceUrl = null;
+
+        if (! empty($data['embed_url'])) {
+            $candidateUrl = trim((string) $data['embed_url']);
+            $this->assertSafeExternalUrl($candidateUrl);
+            $sourceUrl = mb_substr($candidateUrl, 0, 500);
+        }
 
         if ($file) {
             $mime = (string) $file->getMimeType();
@@ -128,18 +151,40 @@ class StudentConvertedLectureService extends BaseService
                     break;
                 }
             }
-            if (! $allowed && in_array($ext, ['pdf', 'txt', 'md'], true)) {
+            if (! $allowed && in_array($ext, self::ALLOWED_DOC_EXTENSIONS, true)) {
+                $allowed = true;
+            }
+            if (! $allowed && in_array($ext, self::ALLOWED_MEDIA_EXTENSIONS, true)) {
                 $allowed = true;
             }
             if (! $allowed) {
                 throw ValidationException::withMessages([
-                    'file' => ['نوع الملف غير مدعوم. يرجى رفع ملف صوت أو فيديو أو PDF أو نصي.'],
+                    'file' => ['نوع الملف غير مدعوم. يرجى رفع ملف صوت أو فيديو أو PDF أو Word (DOCX) أو PowerPoint (PPTX) أو نصي.'],
                 ]);
             }
-            $isAudioOrVideo = str_starts_with($mime, 'audio/') || str_starts_with($mime, 'video/');
-            $isDocument = ! $isAudioOrVideo && (str_starts_with($mime, 'application/pdf') || str_starts_with($mime, 'text/plain') || in_array($ext, ['pdf', 'txt', 'md'], true));
+            $isAudioOrVideo = str_starts_with($mime, 'audio/')
+                || str_starts_with($mime, 'video/')
+                || in_array($ext, self::ALLOWED_MEDIA_EXTENSIONS, true);
+            $isDocument = ! $isAudioOrVideo && (
+                str_starts_with($mime, 'application/pdf')
+                || str_starts_with($mime, 'text/plain')
+                || str_contains($mime, 'wordprocessingml')
+                || str_contains($mime, 'presentationml')
+                || in_array($ext, self::ALLOWED_DOC_EXTENSIONS, true)
+            );
             $fileName = mb_substr(preg_replace('/[^\pL\pN._\- ]/u', '', $file->getClientOriginalName()) ?: 'lecture', 0, 200);
             $fileSize = round($file->getSize() / (1024 * 1024), 1).' MB';
+
+            if ($isAudioOrVideo) {
+                $safeExt = in_array($ext, self::ALLOWED_MEDIA_EXTENSIONS, true) ? $ext : 'webm';
+                $storedMediaDisk = 'local';
+                $storedMediaPath = $file->storeAs(
+                    'student-converted-lectures/'.$student->id,
+                    (string) Str::uuid().'.'.$safeExt,
+                    $storedMediaDisk
+                );
+                $storedMediaMime = mb_substr($mime ?: ($safeExt === 'mp4' ? 'video/mp4' : 'audio/webm'), 0, 120);
+            }
         } elseif (! empty($data['file_name'])) {
             $fileName = mb_substr(trim(strip_tags((string) $data['file_name'])), 0, 200);
             $fileSize = isset($data['file_size']) ? mb_substr(trim(strip_tags((string) $data['file_size'])), 0, 60) : null;
@@ -159,12 +204,12 @@ class StudentConvertedLectureService extends BaseService
         $title = trim(strip_tags((string) ($data['title_ar'] ?? '')));
         if ($title === '') {
             $title = $linkedLesson?->title_ar
-                ?: ($fileName ? preg_replace('/\.[^.]+$/', '', $fileName) : 'محاضرة محولة');
+                ?: ($fileName ? preg_replace('/\.[^.]+$/', '', $fileName) : ($sourceUrl ? 'محاضرة من رابط فيديو' : 'محاضرة محولة'));
         }
 
         $analysisTasks = $this->mapOutputsToAnalysisTasks($outputs);
         $initialTranscript = [];
-        if (! $file && $linkedLesson && $linkedLesson->transcriptSegments->isNotEmpty()) {
+        if (! $file && ! $sourceUrl && $linkedLesson && $linkedLesson->transcriptSegments->isNotEmpty()) {
             $initialTranscript = $linkedLesson->transcriptSegments->map(fn ($seg, $idx) => [
                 'id' => (string) Str::uuid(),
                 'speaker' => $seg->speaker ?: 'المعلم',
@@ -178,6 +223,20 @@ class StudentConvertedLectureService extends BaseService
             ])->values()->all();
         }
 
+        $lessonFallbackUrl = (! $file && ! $sourceUrl && empty($initialTranscript) && $linkedLesson && $linkedLesson->embed_url)
+            ? (string) $linkedLesson->embed_url
+            : null;
+        $lessonFallbackMediaPath = (! $file && ! $sourceUrl && empty($initialTranscript) && $linkedLesson && $linkedLesson->media_path)
+            ? (string) $linkedLesson->media_path
+            : null;
+
+        $willProcessAi = $isAudioOrVideo
+            || $isDocument
+            || $sourceUrl !== null
+            || ! empty($initialTranscript)
+            || $lessonFallbackUrl !== null
+            || $lessonFallbackMediaPath !== null;
+
         $lecture = StudentConvertedLecture::create([
             'student_id' => $student->id,
             'lesson_id' => $lessonId,
@@ -188,10 +247,14 @@ class StudentConvertedLectureService extends BaseService
             'grade_ar' => isset($data['grade_ar'])
                 ? mb_substr(trim(strip_tags((string) $data['grade_ar'])), 0, 120)
                 : $linkedLesson?->grade_ar,
-            'file_name' => $fileName,
+            'file_name' => $fileName ?: ($sourceUrl ? parse_url($sourceUrl, PHP_URL_HOST) : null),
             'file_size' => $fileSize,
+            'media_disk' => $storedMediaDisk,
+            'media_path' => $storedMediaPath,
+            'media_mime_type' => $storedMediaMime,
+            'source_url' => $sourceUrl ?: $lessonFallbackUrl,
             'duration_label' => $linkedLesson?->duration_label,
-            'summary_ar' => ($isAudioOrVideo || $isDocument || ! empty($initialTranscript))
+            'summary_ar' => $willProcessAi
                 ? 'جاري تحليل المحاضرة وتوليد المخرجات المطلوبة بالذكاء الاصطناعي...'
                 : 'تم استلام المحاضرة وتسجيل طلب التحويل بنجاح.',
             'outputs' => $outputs,
@@ -208,53 +271,19 @@ class StudentConvertedLectureService extends BaseService
             $requestedLang = null;
         }
 
-        // Case 1: Audio/Video uploaded -> Run Hybrid STT first, then auto-chain LLM Analysis for graph/topics/quiz
+        // Case 1: Audio/Video uploaded -> Run Hybrid STT from stored file, then auto-chain LLM Analysis
         if ($file && $isAudioOrVideo) {
-            try {
-                $remote = $this->aiClient->startFileTranscriptionJob(
-                    $file->getRealPath(),
-                    $fileName ?: 'lecture.mp3',
-                    $requestedLang,
-                    'المحاضر'
-                );
+            $dispatchPath = ($storedMediaDisk && $storedMediaPath && Storage::disk($storedMediaDisk)->exists($storedMediaPath))
+                ? Storage::disk($storedMediaDisk)->path($storedMediaPath)
+                : $file->getRealPath();
 
-                AiProcessingJob::create([
-                    'user_id' => $student->id,
-                    'converted_lecture_id' => $lecture->id,
-                    'task_type' => AiProcessingJob::TASK_SPEECH_TO_TEXT,
-                    'status' => (string) ($remote['status'] ?? AiProcessingJob::STATUS_QUEUED),
-                    'progress' => max(5, min(95, (int) ($remote['progress'] ?? 8))),
-                    'stage' => (string) ($remote['stage'] ?? 'queued'),
-                    'remote_job_id' => $remote['job_id'] ?? null,
-                    'model_name' => (string) ($remote['model'] ?? config('ai.stt.default_model', 'mohammedaly22/QwenCleo-ASR')),
-                    'requested_language' => $requestedLang,
-                    'meta' => [
-                        'pendingAnalysisTasks' => $analysisTasks,
-                    ],
-                    'started_at' => now(),
-                ]);
-            } catch (RuntimeException $e) {
-                Log::warning('Student smart lecture STT dispatch failed', [
-                    'lecture_uuid' => $lecture->uuid,
-                    'error' => $e->getMessage(),
-                ]);
-
-                AiProcessingJob::create([
-                    'user_id' => $student->id,
-                    'converted_lecture_id' => $lecture->id,
-                    'task_type' => AiProcessingJob::TASK_SPEECH_TO_TEXT,
-                    'status' => AiProcessingJob::STATUS_FAILED,
-                    'progress' => 0,
-                    'stage' => 'failed',
-                    'model_name' => (string) config('ai.stt.default_model', 'mohammedaly22/QwenCleo-ASR'),
-                    'requested_language' => $requestedLang,
-                    'error_message' => mb_substr($e->getMessage(), 0, 500),
-                    'started_at' => now(),
-                    'completed_at' => now(),
-                ]);
-            }
+            $this->dispatchFileSttJob($student, $lecture, $dispatchPath, $fileName ?: 'lecture.webm', $requestedLang, $analysisTasks);
         }
-        // Case 2: PDF / TXT uploaded -> Dispatch directly to AI document analysis endpoint
+        // Case 2: YouTube / external video URL -> Run URL STT, then auto-chain LLM Analysis
+        elseif ($sourceUrl !== null) {
+            $this->dispatchUrlSttJob($student, $lecture, $sourceUrl, $requestedLang, $analysisTasks);
+        }
+        // Case 3: PDF / DOCX / PPTX / TXT uploaded -> Dispatch directly to AI document analysis endpoint
         elseif ($file && $isDocument) {
             $docTasks = ! empty($analysisTasks) ? $analysisTasks : ['summary', 'chapters'];
             try {
@@ -304,7 +333,7 @@ class StudentConvertedLectureService extends BaseService
                 ]);
             }
         }
-        // Case 3: Linked course lesson already has transcript -> Directly dispatch LLM analysis
+        // Case 4: Linked course lesson already has transcript -> Directly dispatch LLM analysis
         elseif (! empty($initialTranscript) && ! empty($analysisTasks)) {
             try {
                 $this->dispatchLectureAnalysisJob($student, $lecture, $analysisTasks, (int) config('ai.llm.default_quiz_count', 5));
@@ -315,8 +344,68 @@ class StudentConvertedLectureService extends BaseService
                 ]);
             }
         }
+        // Case 5: Linked course lesson has uploaded media (no transcript yet) -> Run STT -> LLM chain
+        elseif ($lessonFallbackMediaPath !== null && $linkedLesson) {
+            $lDisk = $linkedLesson->media_disk ?: 'local';
+            if (Storage::disk($lDisk)->exists($lessonFallbackMediaPath)) {
+                $this->dispatchFileSttJob(
+                    $student,
+                    $lecture,
+                    Storage::disk($lDisk)->path($lessonFallbackMediaPath),
+                    $linkedLesson->media_original_name ?: 'lesson.mp4',
+                    $requestedLang,
+                    $analysisTasks
+                );
+            }
+        }
+        // Case 6: Linked course lesson has YouTube / video embed URL -> Run URL STT -> LLM chain
+        elseif ($lessonFallbackUrl !== null) {
+            $this->dispatchUrlSttJob($student, $lecture, $lessonFallbackUrl, $requestedLang, $analysisTasks);
+        }
 
         $this->logSecurityEvent('student.lecture.converted', ['lecture_uuid' => $lecture->uuid], 'info', $lecture);
+
+        return $this->format($lecture->fresh(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob']), true);
+    }
+
+    /**
+     * Retry AI processing on an owned converted lecture (if previous STT or analysis failed).
+     *
+     * @return array<string, mixed>
+     */
+    public function retry(User $student, string $uuid): array
+    {
+        $lecture = $this->findOwned($student, $uuid);
+        $outputs = is_array($lecture->outputs) && ! empty($lecture->outputs)
+            ? $lecture->outputs
+            : ['graph', 'transcript', 'topics', 'quiz'];
+        $analysisTasks = $this->mapOutputsToAnalysisTasks($outputs);
+
+        if (! empty($lecture->transcript)) {
+            $tasks = ! empty($analysisTasks) ? $analysisTasks : ['concept_graph', 'chapters', 'summary'];
+            $this->dispatchLectureAnalysisJob($student, $lecture, $tasks, (int) config('ai.llm.default_quiz_count', 5));
+        } elseif ($lecture->media_path && Storage::disk($lecture->media_disk ?: 'local')->exists($lecture->media_path)) {
+            $this->dispatchFileSttJob(
+                $student,
+                $lecture,
+                Storage::disk($lecture->media_disk ?: 'local')->path($lecture->media_path),
+                $lecture->file_name ?: 'lecture.webm',
+                $lecture->latestSttJob?->requested_language,
+                $analysisTasks
+            );
+        } elseif ($lecture->source_url) {
+            $this->dispatchUrlSttJob(
+                $student,
+                $lecture,
+                $lecture->source_url,
+                $lecture->latestSttJob?->requested_language,
+                $analysisTasks
+            );
+        } else {
+            throw ValidationException::withMessages([
+                'lecture' => [__('messages.ai.converted_lecture_nothing_to_retry')],
+            ]);
+        }
 
         return $this->format($lecture->fresh(['lesson:id,uuid', 'latestSttJob', 'latestAnalysisJob']), true);
     }
@@ -324,9 +413,147 @@ class StudentConvertedLectureService extends BaseService
     public function delete(User $student, string $uuid): bool
     {
         $lecture = $this->findOwned($student, $uuid);
+        if ($lecture->media_path) {
+            $disk = $lecture->media_disk ?: 'local';
+            if (Storage::disk($disk)->exists($lecture->media_path)) {
+                Storage::disk($disk)->delete($lecture->media_path);
+            }
+        }
         $lecture->delete();
 
         return true;
+    }
+
+    /**
+     * @param  list<string>  $analysisTasks
+     */
+    protected function dispatchFileSttJob(
+        User $student,
+        StudentConvertedLecture $lecture,
+        string $localFilePath,
+        string $originalFilename,
+        ?string $requestedLang,
+        array $analysisTasks
+    ): void {
+        try {
+            $remote = $this->aiClient->startFileTranscriptionJob(
+                $localFilePath,
+                $originalFilename,
+                $requestedLang,
+                'المحاضر'
+            );
+
+            AiProcessingJob::create([
+                'user_id' => $student->id,
+                'converted_lecture_id' => $lecture->id,
+                'task_type' => AiProcessingJob::TASK_SPEECH_TO_TEXT,
+                'status' => (string) ($remote['status'] ?? AiProcessingJob::STATUS_QUEUED),
+                'progress' => max(5, min(95, (int) ($remote['progress'] ?? 8))),
+                'stage' => (string) ($remote['stage'] ?? 'queued'),
+                'remote_job_id' => $remote['job_id'] ?? null,
+                'model_name' => (string) ($remote['model'] ?? config('ai.stt.default_model', 'mohammedaly22/QwenCleo-ASR')),
+                'requested_language' => $requestedLang,
+                'meta' => [
+                    'pendingAnalysisTasks' => $analysisTasks,
+                ],
+                'started_at' => now(),
+            ]);
+        } catch (RuntimeException $e) {
+            Log::warning('Student smart lecture STT dispatch failed', [
+                'lecture_uuid' => $lecture->uuid,
+                'error' => $e->getMessage(),
+            ]);
+
+            AiProcessingJob::create([
+                'user_id' => $student->id,
+                'converted_lecture_id' => $lecture->id,
+                'task_type' => AiProcessingJob::TASK_SPEECH_TO_TEXT,
+                'status' => AiProcessingJob::STATUS_FAILED,
+                'progress' => 0,
+                'stage' => 'failed',
+                'model_name' => (string) config('ai.stt.default_model', 'mohammedaly22/QwenCleo-ASR'),
+                'requested_language' => $requestedLang,
+                'error_message' => mb_substr($e->getMessage(), 0, 500),
+                'started_at' => now(),
+                'completed_at' => now(),
+            ]);
+        }
+    }
+
+    /**
+     * @param  list<string>  $analysisTasks
+     */
+    protected function dispatchUrlSttJob(
+        User $student,
+        StudentConvertedLecture $lecture,
+        string $url,
+        ?string $requestedLang,
+        array $analysisTasks
+    ): void {
+        try {
+            $remote = $this->aiClient->startUrlTranscriptionJob($url, $requestedLang, 'المحاضر');
+
+            AiProcessingJob::create([
+                'user_id' => $student->id,
+                'converted_lecture_id' => $lecture->id,
+                'task_type' => AiProcessingJob::TASK_SPEECH_TO_TEXT,
+                'status' => (string) ($remote['status'] ?? AiProcessingJob::STATUS_QUEUED),
+                'progress' => max(5, min(95, (int) ($remote['progress'] ?? 8))),
+                'stage' => (string) ($remote['stage'] ?? 'downloading_media'),
+                'remote_job_id' => $remote['job_id'] ?? null,
+                'model_name' => (string) ($remote['model'] ?? config('ai.stt.default_model', 'mohammedaly22/QwenCleo-ASR')),
+                'requested_language' => $requestedLang,
+                'meta' => [
+                    'pendingAnalysisTasks' => $analysisTasks,
+                    'sourceUrl' => $url,
+                ],
+                'started_at' => now(),
+            ]);
+        } catch (RuntimeException $e) {
+            Log::warning('Student smart lecture URL STT dispatch failed', [
+                'lecture_uuid' => $lecture->uuid,
+                'error' => $e->getMessage(),
+            ]);
+
+            AiProcessingJob::create([
+                'user_id' => $student->id,
+                'converted_lecture_id' => $lecture->id,
+                'task_type' => AiProcessingJob::TASK_SPEECH_TO_TEXT,
+                'status' => AiProcessingJob::STATUS_FAILED,
+                'progress' => 0,
+                'stage' => 'failed',
+                'model_name' => (string) config('ai.stt.default_model', 'mohammedaly22/QwenCleo-ASR'),
+                'requested_language' => $requestedLang,
+                'error_message' => mb_substr($e->getMessage(), 0, 500),
+                'started_at' => now(),
+                'completed_at' => now(),
+            ]);
+        }
+    }
+
+    protected function assertSafeExternalUrl(string $url): void
+    {
+        $parsed = parse_url($url);
+        $scheme = strtolower((string) ($parsed['scheme'] ?? ''));
+        $host = strtolower((string) ($parsed['host'] ?? ''));
+
+        if ($scheme !== 'https' || $host === '') {
+            throw ValidationException::withMessages([
+                'embed_url' => ['يرجى إدخال رابط HTTPS صحيح (مثل رابط يوتيوب أو فيميو).'],
+            ]);
+        }
+
+        if (
+            in_array($host, ['localhost', '127.0.0.1', '::1', '0.0.0.0'], true)
+            || str_ends_with($host, '.local')
+            || str_ends_with($host, '.internal')
+            || (filter_var($host, FILTER_VALIDATE_IP) !== false
+                && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false)
+        ) {
+            throw ValidationException::withMessages([
+                'embed_url' => ['الرابط المدخل غير مسموح به أمنياً.'],
+            ]);
+        }
     }
 
     /**
@@ -882,6 +1109,22 @@ class StudentConvertedLectureService extends BaseService
         $analysisJob = $l->relationLoaded('latestAnalysisJob') ? $l->latestAnalysisJob : null;
         $pipeline = $this->computeLecturePipelineState($sttJob, $analysisJob);
 
+        $mediaUrl = null;
+        $mediaType = 'document';
+        if ($l->media_path && Storage::disk($l->media_disk ?: 'local')->exists($l->media_path)) {
+            $mediaUrl = URL::temporarySignedRoute(
+                'api.v1.student.converted-lectures.media.stream',
+                now()->addHours(2),
+                ['uuid' => $l->uuid]
+            );
+            $mime = strtolower((string) ($l->media_mime_type ?: ''));
+            $mediaType = str_starts_with($mime, 'video/') ? 'video' : 'audio';
+        } elseif ($l->source_url) {
+            $mediaType = 'url';
+        } elseif ($l->lesson_id) {
+            $mediaType = 'lesson';
+        }
+
         $base = [
             'id' => $l->uuid,
             'lessonId' => $l->lesson?->uuid,
@@ -890,6 +1133,10 @@ class StudentConvertedLectureService extends BaseService
             'gradeAr' => $l->grade_ar,
             'fileName' => $l->file_name,
             'fileSize' => $l->file_size,
+            'mediaUrl' => $mediaUrl,
+            'mediaType' => $mediaType,
+            'mediaMimeType' => $l->media_mime_type,
+            'sourceUrl' => $l->source_url,
             'duration' => $l->duration_label,
             'summaryAr' => $l->summary_ar,
             'outputs' => $l->outputs ?? [],

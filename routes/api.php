@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\V1\Parent\ParentPortalController;
 use App\Http\Controllers\Api\V1\Public\CertificateVerificationController;
 use App\Http\Controllers\Api\V1\Public\PlatformPublicController;
 use App\Http\Controllers\Api\V1\Storage\StorageController;
+use App\Http\Controllers\Api\V1\Student\StudentAiController;
 use App\Http\Controllers\Api\V1\Student\StudentBillingController;
 use App\Http\Controllers\Api\V1\Student\StudentConvertedLectureController;
 use App\Http\Controllers\Api\V1\Student\StudentCourseLessonController;
@@ -370,12 +371,31 @@ Route::prefix('v1')->group(function () {
                 Route::get('/converted-lectures/{uuid}/status', [StudentConvertedLectureController::class, 'status'])
                     ->whereUuid('uuid')
                     ->middleware(['throttle:student-read', 'student.plan:converted_lectures']);
+                Route::post('/converted-lectures/{uuid}/retry', [StudentConvertedLectureController::class, 'retry'])
+                    ->whereUuid('uuid')
+                    ->middleware(['throttle:ai-stt', 'student.plan:converted_lectures']);
                 Route::post('/converted-lectures/{uuid}/quiz', [StudentConvertedLectureController::class, 'generateQuiz'])
                     ->whereUuid('uuid')
                     ->middleware(['throttle:ai-stt', 'student.plan:converted_lectures']);
                 Route::delete('/converted-lectures/{uuid}', [StudentConvertedLectureController::class, 'destroy'])
                     ->whereUuid('uuid')
                     ->middleware(['throttle:student-write', 'student.plan:converted_lectures']);
+
+                // Student AI Suite: Accessible Lessons Picker, Direct Lesson AI Quiz, Weak-Area AI Coach & Job Status
+                Route::prefix('ai')->group(function () {
+                    Route::get('/lessons', [StudentAiController::class, 'accessibleLessons'])
+                        ->middleware(['throttle:student-read', 'student.plan:quizzes']);
+                    Route::post('/lessons/{uuid}/quiz', [StudentAiController::class, 'generateLessonQuiz'])
+                        ->whereUuid('uuid')
+                        ->middleware(['throttle:ai-stt', 'student.plan:quizzes']);
+                    Route::get('/weak-areas/latest', [StudentAiController::class, 'latestWeakAreaDiagnosis'])
+                        ->middleware(['throttle:student-read', 'student.plan:weak_areas']);
+                    Route::post('/weak-areas/diagnose', [StudentAiController::class, 'diagnoseWeakAreas'])
+                        ->middleware(['throttle:ai-stt', 'student.plan:weak_areas']);
+                    Route::get('/jobs/{uuid}', [StudentAiController::class, 'jobStatus'])
+                        ->whereUuid('uuid')
+                        ->middleware(['throttle:student-read', 'student.plan:quizzes']);
+                });
 
                 Route::get('/gamification/heatmap', [StudentGamificationController::class, 'activityHeatmap'])
                     ->middleware(['throttle:student-read', 'student.plan:gamification']);
@@ -1294,6 +1314,12 @@ Route::prefix('v1')->group(function () {
         Route::get('/{uuid}/attachments/{attachmentUuid}/stream', [StudentCourseLessonController::class, 'streamAttachment'])
             ->whereUuid(['uuid', 'attachmentUuid'])
             ->name('api.v1.student.lessons.attachments.stream');
+    });
+
+    Route::prefix('media/student-converted-lectures')->group(function () {
+        Route::get('/{uuid}/media/stream', [StudentConvertedLectureController::class, 'streamMedia'])
+            ->whereUuid('uuid')
+            ->name('api.v1.student.converted-lectures.media.stream');
     });
 
     Route::prefix('media/student-homeworks')->group(function () {

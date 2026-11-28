@@ -553,20 +553,121 @@ class StudentDashboardService extends BaseService
     {
         $examSubmissions = ExamSubmission::forStudent($student->id)
             ->where('status', ExamSubmissionStatus::GRADED)
-            ->with('exam:id,uuid,title_ar,course_title_ar')
+            ->with('exam:id,uuid,course_id,title_ar,course_title_ar')
             ->latest('submitted_at')
-            ->limit(20)
+            ->limit(30)
             ->get();
 
         $homeworkCount = HomeworkSubmission::forStudent($student->id)->count();
-        $completedLessons = StudentLessonProgress::forStudent($student->id)->where('is_completed', true)->count();
+        $allProgress = StudentLessonProgress::forStudent($student->id)->get(['lesson_id', 'is_completed', 'watched_seconds']);
+        $completedLessons = $allProgress->where('is_completed', true)->count();
+        $totalWatchedSeconds = (int) $allProgress->sum('watched_seconds');
+
+        $entitlements = $this->accessService->getEntitlements($student);
+        $courseIds = $entitlements['course_ids'] ?? [];
+        $enrolledCourses = ! empty($courseIds)
+            ? Course::whereIn('id', $courseIds)
+                ->where('status', CourseStatus::PUBLISHED)
+                ->with(['lessons' => fn ($q) => $q->where('status', LessonStatus::PUBLISHED)->select('id', 'course_id')])
+                ->get(['id', 'uuid', 'title_ar', 'title_en', 'subject_ar'])
+            : collect();
+
+        $progressByLesson = $allProgress->keyBy('lesson_id');
+        $totalEnrolledLessons = 0;
+
+        $examPctByCourse = [];
+        foreach ($examSubmissions as $sub) {
+            $cid = $sub->exam?->course_id;
+            if (! $cid) {
+                continue;
+            }
+            $examPctByCourse[$cid][] = (float) $sub->percentage;
+        }
+
+        $subjectAverages = [];
+        foreach ($enrolledCourses as $course) {
+            $lessonIds = $course->lessons->pluck('id');
+            $totalL = $lessonIds->count();
+            $totalEnrolledLessons += $totalL;
+            $doneL = $lessonIds->filter(fn ($lid) => (bool) ($progressByLesson->get($lid)?->is_completed))->count();
+            $examScores = $examPctByCourse[$course->id] ?? [];
+            $avgPct = ! empty($examScores)
+                ? round(array_sum($examScores) / count($examScores), 1)
+                : ($totalL > 0 ? round(($doneL / $totalL) * 100, 1) : 0.0);
+
+            $subjectAverages[] = [
+                'courseId' => $course->uuid,
+                'subject' => $course->subject_ar ?: $course->title_ar,
+                'subjectAr' => $course->subject_ar ?: $course->title_ar,
+                'subjectEn' => $course->title_en ?: ($course->subject_ar ?: $course->title_ar),
+                'avg' => (int) round($avgPct),
+                'avgPercent' => $avgPct,
+                'examsCount' => count($examScores),
+                'testsCount' => count($examScores),
+                'completedLessons' => $doneL,
+                'lessonsDone' => $doneL,
+                'totalLessons' => $totalL,
+                'lessonsTotal' => $totalL,
+            ];
+        }
+
+        // If student took exams outside enrolled courses, still include those subjects cleanly
+        if (empty($subjectAverages) && $examSubmissions->isNotEmpty()) {
+            $grouped = $examSubmissions->groupBy(fn (ExamSubmission $s) => $s->exam?->course_title_ar ?: 'مادة عامة');
+            foreach ($grouped as $subjName => $subs) {
+                $avgPct = round((float) $subs->avg('percentage'), 1);
+                $subjectAverages[] = [
+                    'courseId' => null,
+                    'subject' => (string) $subjName,
+                    'subjectAr' => (string) $subjName,
+                    'subjectEn' => (string) $subjName,
+                    'avg' => (int) round($avgPct),
+                    'avgPercent' => $avgPct,
+                    'examsCount' => $subs->count(),
+                    'testsCount' => $subs->count(),
+                    'completedLessons' => 0,
+                    'lessonsDone' => 0,
+                    'totalLessons' => 0,
+                    'lessonsTotal' => 0,
+                ];
+            }
+        }
+
+        // Derive actionable weak areas from real graded mistakes
+        $mistakes = $this->examService->getMistakeBank($student);
+        $weakAreas = collect($mistakes)
+            ->groupBy(fn (array $m) => ($m['subjectAr'] ?: 'مراجعة عامة').'::'.($m['examTitleAr'] ?: 'امتحان'))
+            ->take(6)
+            ->map(function ($group) {
+                $first = $group->first();
+                $count = $group->count();
+                $estMastery = max(25, 85 - ($count * 12));
+
+                return [
+                    'topicAr' => $first['examTitleAr'] ?: $first['questionAr'],
+                    'subjectAr' => $first['subjectAr'] ?: 'مراجعة عامة',
+                    'mistakesCount' => $count,
+                    'mastery' => $estMastery,
+                    'adviceAr' => $first['explanationAr']
+                        ?: "لديك {$count} خطأ في هذا الموضوع — استخدم الذكاء الاصطناعي في مركز نقاط الضعف للحصول على تشخيص وخطة علاجية.",
+                ];
+            })
+            ->values()
+            ->all();
+
+        $activity = $this->activityService->recordHeartbeat($student, 0, null, false);
+        $studyHours = round(max($totalWatchedSeconds / 3600, ((int) ($activity['activeMinutesToday'] ?? 0)) / 60), 1);
 
         return [
             'completedLessonsCount' => $completedLessons,
+            'totalEnrolledLessons' => max($completedLessons, $totalEnrolledLessons),
             'submittedHomeworksCount' => $homeworkCount,
             'gradedExamsCount' => $examSubmissions->count(),
+            'studyHours' => $studyHours,
             'avgExamScorePercent' => $examSubmissions->count() > 0 ? round((float) $examSubmissions->avg('percentage'), 1) : 0.0,
-            'recentExamPerformances' => $examSubmissions->map(fn (ExamSubmission $s) => [
+            'subjectAverages' => $subjectAverages,
+            'weakAreas' => $weakAreas,
+            'recentExamPerformances' => $examSubmissions->take(12)->map(fn (ExamSubmission $s) => [
                 'id' => $s->uuid,
                 'examTitleAr' => $s->exam?->title_ar,
                 'courseTitleAr' => $s->exam?->course_title_ar,
